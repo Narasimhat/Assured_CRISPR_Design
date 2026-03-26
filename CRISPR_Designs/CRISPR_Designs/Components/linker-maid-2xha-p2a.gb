@@ -1,0 +1,49 @@
+LOCUS       linker-mAID-2xHA-P2a     363 bp ds-DNA     linear       29-MAY-2024
+DEFINITION  .
+COMMENT     Imported using the Genbank importer. File name:
+            linker-mAID-2xHA-P2a.ape ApEinfo:methylated:1
+FEATURES             Location/Qualifiers
+     misc_feature    1..30
+                     /label="Linker"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /locus_tag="Linker"
+                     /label="Linker"
+                     /ApEinfo_graphicformat="arrow_data {{0 0.5 0 1 2 0 0 -1 0-0.5} {} 0} width 5 offset 0"
+     misc_feature    31..234
+                     /label="mAID"
+                     /ApEinfo_revcolor="#85dae9"
+                     /ApEinfo_fwdcolor="#85dae9"
+                     /locus_tag="mAID"
+                     /label="mAID"
+                     /ApEinfo_graphicformat="arrow_data {{0 0.5 0 1 2 0 0 -1 0-0.5} {} 0} width 5 offset 0"
+     misc_feature    241..267
+                     /label="HA-tag 1"
+                     /ApEinfo_revcolor="#faac61"
+                     /ApEinfo_fwdcolor="#faac61"
+                     /locus_tag="HA-tag 1"
+                     /label="HA-tag 1"
+                     /ApEinfo_graphicformat="arrow_data {{0 0.5 0 1 2 0 0 -1 0-0.5} {} 0} width 5 offset 0"
+     misc_feature    271..297
+                     /label="HA-tag2"
+                     /ApEinfo_revcolor="#4e8f00"
+                     /ApEinfo_fwdcolor="#4e8f00"
+                     /locus_tag="HA-tag2"
+                     /label="HA-tag2"
+                     /ApEinfo_graphicformat="arrow_data {{0 0.5 0 1 2 0 0 -1 0-0.5} {} 0} width 5 offset 0"
+     misc_feature    307..363
+                     /label="P2A"
+                     /ApEinfo_revcolor="#ffef86"
+                     /ApEinfo_fwdcolor="#ffef86"
+                     /locus_tag="P2A"
+                     /label="P2A"
+                     /ApEinfo_graphicformat="arrow_data {{0 0.5 0 1 2 0 0 -1 0-0.5} {} 0} width 5 offset 0"
+ORIGIN
+        1 GCTAAAGCCA AAAACAACCA GGGATCCGGA AAGGAGAAGA GTGCTTGTCC TAAAGATCCA
+       61 GCCAAACCTC CGGCCAAGGC ACAAGTTGTG GGATGGCCAC CGGTGAGATC ATACCGGAAG
+      121 AACGTGATGG TTTCCTGCCA AAAATCAAGC GGTGGCCCGG AGGCGGCGGC GTTCGTGAAG
+      181 GTATCAATGG ACGGAGCACC GTACTTGAGG AAAATCGATT TGAGGATGTA TAAAGGCGGC
+      241 TACCCCTACG ACGTGCCCGA CTACGCCGGC TATCCGTATG ATGTCCCGGA CTATGCAGGC
+      301 TCCGGAGCAA CAAACTTCTC TCTGCTGAAA CAAGCCGGAG ATGTCGAAGA GAATCCTGGA
+      361 CCG
+//

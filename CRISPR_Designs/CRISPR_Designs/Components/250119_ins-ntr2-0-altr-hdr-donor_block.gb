@@ -1,0 +1,261 @@
+LOCUS       250119_INS-NTR2-0-AltR- 3881 bp ds-DNA     linear       16-JUL-2025
+DEFINITION  .
+KEYWORDS    "accession:NG_007114" "organism:Homo sapiens"
+COMMENT     Homo sapiens insulin (INS), RefSeqGene on chromosome 11. . Imported
+            using the Genbank importer. File name:
+            CRTD1-hINS-P2A-NLS-mRuby-T2A-NTR2.0-FRT-PGK-neo #27 - targeted
+            allele.gb
+FEATURES             Location/Qualifiers
+     misc_feature    1..1120
+                     /label="5pHomology 1120bp"
+                     /ApEinfo_revcolor="#f58a5e"
+                     /ApEinfo_fwdcolor="#f58a5e"
+                     /note="label: 5pHomology 1120bp label: nonstandard type: region note: /modified_by=User"
+     misc_feature    201..201
+                     /label="T"
+                     /ApEinfo_revcolor="#d6b295"
+                     /ApEinfo_fwdcolor="#d6b295"
+                     /note="label: T note: Geneious type: Editing History Replacement note: /Original_Bases=T"
+     modified_base   201..201
+                     /label="T>C in CRTD1-INS-mRuby-NTR2.0 #27 targeted allele"
+                     /ApEinfo_revcolor="#f58a5e"
+                     /ApEinfo_fwdcolor="#f58a5e"
+                     /note="label: T>C in CRTD1-INS-mRuby-NTR2.0 #27 targeted allele note: /created_by=katrinneumann note: /modified_by=katrinneumann"
+     misc_feature    712..730
+                     /label=1058
+                     /ApEinfo_revcolor="#9eafd2"
+                     /ApEinfo_fwdcolor="#9eafd2"
+     misc_feature    712..1281
+                     /label="5-Integration"
+                     /ApEinfo_revcolor="#85dae9"
+                     /ApEinfo_fwdcolor="#85dae9"
+     misc_feature    727..727
+                     /label="T"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="label: T note: Geneious type: Editing History Replacement note: /Original_Bases=T"
+     modified_base   727..727
+                     /label="T>C in A2-5H, #27, #66 and #76 targeted allele"
+                     /ApEinfo_revcolor="#faac61"
+                     /ApEinfo_fwdcolor="#faac61"
+                     /note="label: T>C in A2-5H, #27, #66 and #76 targeted allele note: /created_by=katrinneumann note: /modified_by=katrinneumann"
+     misc_feature    761..778
+                     /label="Fw"
+                     /ApEinfo_revcolor="#f8d3a9"
+                     /ApEinfo_fwdcolor="#f8d3a9"
+     misc_feature    821..2995
+                     /label="AltR-DonorBlock"
+                     /ApEinfo_revcolor="#b1ff67"
+                     /ApEinfo_fwdcolor="#b1ff67"
+     exon            978..1120
+                     /label="INS exon 3"
+                     /ApEinfo_revcolor="#d6b295"
+                     /ApEinfo_fwdcolor="#d6b295"
+                     /note="gene: INS gene_synonym: IDDM; IDDM1; IDDM2; ILPR; IRDN; MODY10 inference: alignment: 1, 1.39.8 label: INS exon 3 note: /modified_by=katrinneumann number: 3"
+     misc_feature    complement(1080..1082)
+                     /label="PAM1"
+                     /ApEinfo_revcolor="#b1ff67"
+                     /ApEinfo_fwdcolor="#b1ff67"
+                     /note="label: PAM1 note: /modified_by=User"
+     modified_base   1081..1081
+                     /label="C>A in targeting vector to mutate PAM"
+                     /ApEinfo_revcolor="#ff9ccd"
+                     /ApEinfo_fwdcolor="#ff9ccd"
+                     /note="label: C>A in targeting vector to mutate PAM note: /created_by=katrinneumann note: /modified_by=katrinneumann"
+     misc_feature    1081..1081
+                     /label="C"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="label: C note: Geneious type: Editing History Replacement note: /Original_Bases=C"
+     misc_feature    complement(1083..1102)
+                     /label="Ins-sgRNA1"
+                     /ApEinfo_revcolor="#75c6a9"
+                     /ApEinfo_fwdcolor="#75c6a9"
+                     /note="label: Ins-sgRNA1 label: nonstandard type: CRISPR note: /created_by=User note: /modified_by=User"
+     misc_feature    1130..1186
+                     /label="P2A"
+                     /ApEinfo_revcolor="#ffef86"
+                     /ApEinfo_fwdcolor="#ffef86"
+                     /note="label: P2A label: nonstandard type: ORF note: /created_by=katrinneumann note: /modified_by=katrinneumann"
+     misc_feature    1187..1252
+                     /label="3x FLAG"
+                     /ApEinfo_revcolor="#c7b0e3"
+                     /ApEinfo_fwdcolor="#c7b0e3"
+                     /note="label: 3x FLAG"
+     misc_feature    1259..1281
+                     /label=1059
+                     /ApEinfo_revcolor="#faac61"
+                     /ApEinfo_fwdcolor="#faac61"
+     CDS             1262..1912
+                     /label="NTR2.0"
+                     /ApEinfo_revcolor="#c7b0e3"
+                     /ApEinfo_fwdcolor="#c7b0e3"
+                     /note="codon_start: 1 label: NTR2.0 note: codon_start: 1 transl_table: 1 translation:MTIVQAAQSRYSTKAFDASRKLPEEKVAAVKELIRMSASSVNSQPWHFIVASSEEGKARIAKATQGGFAANERKILDASHVVVFCAKTAIDEAYLLDLLESEDKDGRYADVEAKNGMHAGRSFFVNMHRFDLKDAHHWMEKQVYLNVGTLLLGASAMEIDAVPIEGFDAKVLDEEFGLREKGFTSVVIVPLGYHSEDDFNAKLPKSRWSAETVFTEI* note: /modified_by=katrinneumann transl_table: 1 translation: MTIVQAAQSRYSTKAFDASRKLPEEKVAAVKELIRMSASSVNSQPWHFIVASSEEGKARIAKATQGGFAANERKILDASHVVVFCAKTAIDEAYLLDLLESEDKDGRYADVEAKNGMHAGRSFFVNMHRFDLKDAHHWMEKQVYLNVGTLLLGASAMEIDAVPIEGFDAKVLDEEFGLREKGFTSVVIVPLGYHSEDDFNAKLPKSRWSAETVFTEI"
+     misc_feature    1337..1354
+                     /label=1073
+                     /ApEinfo_revcolor="#85dae9"
+                     /ApEinfo_fwdcolor="#85dae9"
+     misc_feature    1354..1376
+                     /label="fw"
+                     /ApEinfo_revcolor="#ff9ccd"
+                     /ApEinfo_fwdcolor="#ff9ccd"
+     misc_feature    1776..1796
+                     /label=1074
+                     /ApEinfo_revcolor="#c6c9d1"
+                     /ApEinfo_fwdcolor="#c6c9d1"
+     CDS             1922..1975
+                     /label="T2A"
+                     /ApEinfo_revcolor="#ff9ccd"
+                     /ApEinfo_fwdcolor="#ff9ccd"
+                     /note="codon_start: 1 label: T2A note: codon_start: 1 note: Eukaryotic ribosomes fail toinsert a peptide bond between the Gly and Pro residues,yielding separate polypeptides. product: 2A peptide fromThosea asigna virus capsid protein protein_id:transl_table: 1 translation: EGRGSLLTCGDVEENPGP transl_table: 1 translation: EGRGSLLTCGDVEENPGP"
+     CDS             1985..2692
+                     /label="mRuby3"
+                     /ApEinfo_revcolor="#85dae9"
+                     /ApEinfo_fwdcolor="#85dae9"
+                     /note="codon_start: 1 label: mRuby3 note: codon_start: 1 transl_table: 1 translation:VSKGEELIKENMRMKVVMEGSVNGHQFKCTGEGEGRPYEGVQTMRIKVIEGGPLPFAFDILATSFMYGSRTFIKYPADIPDFFKQSFPEGFTWERVTRYEDGGVVTVTQDTSLEDGELVYNVKVRGVNFPSNGPVMQKKTKGWEPNTEMMYPADGGLRGYTDIALKVDGGGHLHCNFVTTYRSKKTVGNIKMPGVHAVDHRLERIEESDNETYVVQREVAVAKYSNLGGGMDELYK transl_table: 1 translation: VSKGEELIKENMRMKVVMEGSVNGHQFKCTGEGEGRPYEGVQTMRIKVIEGGPLPFAFDILATSFMYGSRTFIKYPADIPDFFKQSFPEGFTWERVTRYEDGGVVTVTQDTSLEDGELVYNVKVRGVNFPSNGLVMQKKTKGWEPNTEMMYPADGGLRGYTDIALKVDGGGHLHCNFVTTYRSKKTVGNIKMPGVHAVDHRLERIEESDNETYVVQREVAVAKYSNLGGGMDELYK"
+     modified_base   2083..2083
+                     /label="A>G from original NTR2.0 plasmid (silent mut)"
+                     /ApEinfo_revcolor="#faac61"
+                     /ApEinfo_fwdcolor="#faac61"
+                     /note="label: A>G from original NTR2.0 plasmid (silent mut) note: /created_by=katrinneumann note: /modified_by=katrinneumann"
+     misc_feature    2146..2166
+                     /label=1075
+                     /ApEinfo_revcolor="#d59687"
+                     /ApEinfo_fwdcolor="#d59687"
+     misc_feature    2384..2386
+                     /label="P148L mutation"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="label: P148L mutation label: nonstandard type: ORF note: /created_by=katrinneumann"
+     modified_base   2385..2385
+                     /label="C>T from original NTR2.0 plasmid (P148L)"
+                     /ApEinfo_revcolor="#faac61"
+                     /ApEinfo_fwdcolor="#faac61"
+                     /note="label: C>T from original NTR2.0 plasmid (P148L) note: /created_by=katrinneumann note: /modified_by=katrinneumann"
+     misc_feature    2536..2554
+                     /label=1056
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+     misc_feature    2536..3092
+                     /label="3-integration"
+                     /ApEinfo_revcolor="#c6c9d1"
+                     /ApEinfo_fwdcolor="#c6c9d1"
+     misc_feature    2596..2620
+                     /label=1076
+                     /ApEinfo_revcolor="#75c6a9"
+                     /ApEinfo_fwdcolor="#75c6a9"
+     CDS             2693..2695
+                     /label="NTR2.0"
+                     /ApEinfo_revcolor="#c7b0e3"
+                     /ApEinfo_fwdcolor="#c7b0e3"
+                     /note="codon_start: 1 label: NTR2.0 note: codon_start: 1 transl_table: 1 translation:MTIVQAAQSRYSTKAFDASRKLPEEKVAAVKELIRMSASSVNSQPWHFIVASSEEGKARIAKATQGGFAANERKILDASHVVVFCAKTAIDEAYLLDLLESEDKDGRYADVEAKNGMHAGRSFFVNMHRFDLKDAHHWMEKQVYLNVGTLLLGASAMEIDAVPIEGFDAKVLDEEFGLREKGFTSVVIVPLGYHSEDDFNAKLPKSRWSAETVFTEI* note: /modified_by=katrinneumann transl_table: 1 translation: *"
+     misc_feature    2696..3881
+                     /label="3pHomology1186bp"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="label: 3pHomology1186bp label: nonstandard type: region note: /modified_by=User"
+     gene            2696..2768
+                     /label="INS gene"
+                     /ApEinfo_revcolor="#c6c9d1"
+                     /ApEinfo_fwdcolor="#c6c9d1"
+                     /note="label: INS gene note: /created_by=katrinneumann"
+     misc_feature    2696..2768
+                     /label="INS exon 3 (non-protein coding)"
+                     /ApEinfo_revcolor="#b1ff67"
+                     /ApEinfo_fwdcolor="#b1ff67"
+                     /note="label: INS exon 3 (non-protein coding)"
+     variation       2704..2704
+                     /label="heterozygous C>T mutation in H1 wt hESC"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="label: heterozygous C>T mutation in H1 wt hESC note: /created_by=User note: /modified_by=katrinneumann"
+     misc_feature    2707..2709
+                     /label="PAM 2"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="label: PAM 2 note: /Color=#33bbff note: /modified_by=katrinneumann"
+     modified_base   2709..2709
+                     /label="G>A to mutate PAM"
+                     /ApEinfo_revcolor="#d6b295"
+                     /ApEinfo_fwdcolor="#d6b295"
+                     /note="label: G>A to mutate PAM note: /created_by=katrinneumann"
+     misc_feature    2709..2709
+                     /label="G"
+                     /ApEinfo_revcolor="#84b0dc"
+                     /ApEinfo_fwdcolor="#84b0dc"
+                     /note="label: G note: Geneious type: Editing History Replacement note: /Original_Bases=G"
+     misc_feature    3063..3084
+                     /label="Rev"
+                     /ApEinfo_revcolor="#ff9ccd"
+                     /ApEinfo_fwdcolor="#ff9ccd"
+     misc_feature    3071..3092
+                     /label=1057
+                     /ApEinfo_revcolor="#d6b295"
+                     /ApEinfo_fwdcolor="#d6b295"
+ORIGIN
+        1 gccatggccc tgtggatgcg cctcctgccc ctgctggcgc tgctggccct ctggggacct
+       61 gacccagccg cagcctttgt gaaccaacac ctgtgcggct cacacctggt ggaagctctc
+      121 tacctagtgt gcggggaacg aggcttcttc tacacaccca agacccgccg ggaggcagag
+      181 gacctgcagg gtgagccaac cgcccattgc tgcccctggc cgcccccagc caccccctgc
+      241 tcctggcgct cccacccagc atgggcagaa gggggcagga ggctgccacc cagcaggggg
+      301 tcaggtgcac ttttttaaaa agaagttctc ttggtcacgt cctaaaagtg accagctccc
+      361 tgtggcccag tcagaatctc agcctgagga cggtgttggc ttcggcagcc ccgagataca
+      421 tcagagggtg ggcacgctcc tccctccact cgcccctcaa acaaatgccc cgcagcccat
+      481 ttctccaccc tcatttgatg accgcagatt caagtgtttt gttaagtaaa gtcctgggtg
+      541 acctggggtc acagggtgcc ccacgctgcc tgcctctggg cgaacacccc atcacgcccg
+      601 gaggagggcg tggctgcctg cctgagtggg ccagacccct gtcgccaggc ctcacggcag
+      661 ctccatagtc aggagatggg gaagatgctg gggacaggcc ctggggagaa gtactgggat
+      721 cacctgctca ggctcccact gtgacgctgc cccggggcgg gggaaggagg tgggacatgt
+      781 gggcgttggg gcctgtaggt ccacacccag tgtgggtgac cctccctcta acctgggtcc
+      841 agcccggctg gagatgggtg ggagtgcgac ctagggctgg cgggcaggcg ggcactgtgt
+      901 ctccctgact gtgtcctcct gtgtccctct gcctcgccgc tgttccggaa cctgctctgc
+      961 gcggcacgtc ctggcagtgg ggcaggtgga gctgggcggg ggccctggtg caggcagcct
+     1021 gcagcccttg gccctggagg ggtccctgca gaagcgtggc attgtggaac aatgctgtac
+     1081 aagcatctgc tccctctacc agctggagaa ctactgcaac ggctctggtg ccacgaactt
+     1141 ctctctgtta aagcaagcag gagacgtgga agaaaacccc ggtcctGACT ACAAGGACCA
+     1201 CGACGGTGAC TACAAGGACC ACGACATCGA CTACAAGGAC GACGACGACA AGggctctgg
+     1261 tatgactatt gttcaagctg cccaatcccg ctactccacc aaagcctttg atgcttcgcg
+     1321 caaattgcct gaagagaaag tcgcggcagt gaaagagtta atccgcatga gtgcgtccag
+     1381 tgtcaactcg caaccttggc attttattgt cgcgagcagt gaagagggaa aagcgcgcat
+     1441 cgccaaagca acacaaggtg gttttgctgc taatgagcgc aagattttgg atgcttctca
+     1501 cgttgtggtg ttctgcgcca aaacggcgat tgatgaagcg tacctactcg accttttgga
+     1561 aagcgaagac aaagatggcc gctacgccga tgtcgaagca aaaaatggca tgcacgctgg
+     1621 tcgttcattt ttcgtcaaca tgcaccgctt tgacttgaaa gacgcgcatc actggatgga
+     1681 aaagcaagtt tacctcaatg tggggacgct gctattgggt gcttctgcga tggagatcga
+     1741 cgcggtgcca attgaaggct tcgatgccaa ggtgcttgat gaggagtttg gtctgcgtga
+     1801 gaagggcttt accagcgtgg tgattgtgcc gctgggttac catagcgaag acgattttaa
+     1861 tgctaagctg ccaaaatcac gttggtcagc agagactgtt tttaccgaaa tcgctagcgg
+     1921 agagggcaga ggaagtctgc taacatgcgg tgacgtcgag gagaatcctg gcccaggaac
+     1981 tagtgtgtct aagggcgaag agctgatcaa ggaaaatatg cgtatgaagg tggtcatgga
+     2041 aggttcggtc aacggccacc aattcaaatg cacaggtgaa ggggaaggca ggccgtacga
+     2101 gggagtgcaa accatgagga tcaaagtcat cgagggagga cccctgccat ttgcctttga
+     2161 cattcttgcc acgtcgttca tgtatggcag ccgtactttt atcaagtacc cggcagacat
+     2221 tcctgatttc tttaaacagt cctttcctga gggttttact tgggaaagag ttacgagata
+     2281 cgaagatggt ggagtcgtca ccgtcacgca ggacaccagc cttgaggatg gcgaactcgt
+     2341 ttacaacgtc aaagtcagag gggtaaactt tccctccaat ggtctcgtga tgcagaagaa
+     2401 gaccaagggt tgggagccta atacagagat gatgtatcca gcagatggtg gtctgagggg
+     2461 atacactgat attgcactga aagttgatgg tggtggccat ctgcattgca atttcgtaac
+     2521 aacttacagg tcaaaaaaga ccgtcgggaa catcaagatg cccggtgtcc atgccgttga
+     2581 tcaccgcctg gaaaggatag aggaaagtga caatgaaacg tacgtagtac aacgcgaagt
+     2641 cgcagttgcc aagtactcca atcttggtgg tggtatggat gaactttata agtaaacgca
+     2701 gcccgcagac agccccacac ccgccgcctc ctgcaccgag agagatggaa taaagccctt
+     2761 gaaccagccc tgctgtgccg tctgtgtgtc ttgggggccc tgggccaagc cccacttccc
+     2821 ggcactgttg tgagcccctc ccagctctct ccacgctctc tgggtgccca caggtgccaa
+     2881 cgccggccag gcccagcatg cagtggctct ccccaaagcg gccatgcctg tcggctgcct
+     2941 gctgccccca ccctgtggct cagggtccag tatgggagct gcgggggtct ctgaggggcc
+     3001 aggggtggtg gggccactga gaagtgactt cttgttcagt agctctggac tcttggagtc
+     3061 cccagagacc ttgttcagga aagggaatga gaacattcca gcaattttcc ccccacctag
+     3121 ccctcccagg ttctattttt agagttattt ctgatggagt ccctgtggag ggaggaggct
+     3181 gggctgaggg agggggtcct gcagggcggg gggctgggaa ggtggggaga ggctgccgag
+     3241 agccacccgc tatccccagc tctgggcagc cccgggacag tcacacaccc tggcctcgcg
+     3301 gcccaagctg gcagccgtct gcagccacag cttatgccag cccaggtcca gccagacacc
+     3361 tgagggaccc actggtgcct tggaggaagc aggagaggtc agatggcacc atgagctggg
+     3421 gcaggtgcag ggaccgtggc agcacctggc agggcctcag aacccatgcc ttgggcaccc
+     3481 cggccatgag gccctgagga ttgcagccca ggagaagcag ggaaccgcca gggccacagg
+     3541 ggcagagacc agggccaggg tccccctgca gccccttagc ccaccccctc ccagtaagca
+     3601 gggctgcttg gctggcttcc tttgctacag acctgctgct cacccagaag ggcccacggg
+     3661 ccctggtgac aaggtcgttg tggctccagg tccttggggg tcctgacaca gagcctcttc
+     3721 tgcagcaccc ctgaggacag ggtggctccg ctgggcaccc agcctagtgg gcagacgaga
+     3781 acctaggggc tgcctgggcc tactgtggcc tgggaggtca gcgggtgacc ctagctaccc
+     3841 tgtggctggg ccagtctgcc tgccacccag gccaaaccaa t
+//

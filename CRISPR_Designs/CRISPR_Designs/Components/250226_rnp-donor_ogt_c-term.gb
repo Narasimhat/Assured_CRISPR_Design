@@ -1,0 +1,98 @@
+LOCUS       250226_RNP-Donor_OGT_C-t 890 bp ds-DNA     linear       26-FEB-2025
+DEFINITION  .
+FEATURES             Location/Qualifiers
+     gene            1..890
+                     /label="OGT"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 8473 db_xref: HGNC: HGNC:8127 db_xref: MIM: 300255 gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: O-linked N-acetylglucosamine (GlcNAc) transferase; Derived by automated computational analysis using gene prediction method: BestRefSeq."
+     source          1..890
+                     /label="source"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="chromosome: X db_xref: taxon: 9606 mol_type: genomic DNA: organism: Homo sapiens"
+     misc_feature    1..250
+                     /label="Left homology arm"
+                     /ApEinfo_revcolor="#99cc00"
+                     /ApEinfo_fwdcolor="#99cc00"
+     mRNA            79..890
+                     /label="OGT mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: Ensembl: ENST00000373719.8 db_xref: GeneID: 8473 db_xref: HGNC: HGNC:8127 db_xref: MIM: 300255 gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: Derived by automated computational analysis usinggene prediction method: BestRefSeq. product: O-linked N-acetylglucosamine (GlcNAc)transferase, transcript variant 1 transcript_id: NM_181672.3"
+     mRNA            79..890
+                     /label="OGT mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 8473 db_xref: HGNC: HGNC:8127 db_xref: MIM: 300255 gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: Derived by automated computational analysis usinggene prediction method: BestRefSeq. product: O-linked N-acetylglucosamine (GlcNAc)transferase, transcript variant 2 transcript_id: NM_181673.3"
+     misc_feature    79..79
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: Phosphotyrosine./evidence=ECO:0000250|UniProtKB:P56558; propagated from UniProtKB/Swiss-Prot (O15294.3); phosphorylation site"
+     misc_feature    79..79
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: Phosphotyrosine./evidence=ECO:0000250|UniProtKB:P56558; propagated from UniProtKB/Swiss-Prot (O15294.3); phosphorylation site"
+     CDS             79..643
+                     /label="OGT"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: CCDS: CCDS14414.1 db_xref: Ensembl: ENSP00000362824.3 db_xref: GeneID: 8473 db_xref: HGNC: HGNC:8127 db_xref: MIM: 300255 gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: isoform 1 is encoded by transcript variant 1;Derived by automated computational analysis using gene prediction method: BestRefSeq. product: UDP-N-acetylglucosamine--peptide N-acetylglucosaminyltransferase 110 kDa subunit isoform 1 protein_id: NP_858058.1 transl_table: 1 translation: LKKVRGKVWKQRISSPLFNTKQYTMELERLYLQMWEHYAAGNKPDHMIKPVEVTESAAKAKNNQGSGSGVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKVDSSRDRNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGHPGIIPPHATLVFDVELLKLEGSGYPYDVPDYA*"
+     CDS             79..643
+                     /label="OGT"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: CCDS: CCDS35502.1 db_xref: GeneID: 8473 db_xref: HGNC: HGNC:8127 db_xref: MIM: 300255 gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: isoform 2 is encoded by transcript variant 2;Derived by automated computational analysis using gene prediction method: BestRefSeq. product: UDP-N-acetylglucosamine--peptide N-acetylglucosaminyltransferase 110 kDa subunit isoform 2 protein_id: NP_858059.1 transl_table: 1 translation: LKKVRGKVWKQRISSPLFNTKQYTMELERLYLQMWEHYAAGNKPDHMIKPVEVTESAAKAKNNQGSGSGVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKVDSSRDRNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGHPGIIPPHATLVFDVELLKLEGSGYPYDVPDYA*"
+     misc_feature    83..142
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: propagated from UniProtKB/Swiss-Prot (O15294.3);Region: Required for phosphatidylinositol 3,4,5-triphosphate binding. /evidence=ECO:0000250|UniProtKB:P56558"
+     misc_feature    83..142
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="gene: OGT gene_synonym: HINCUT-1; HRNT1; MRX106; O-GLCNAC; OGT1;XLID106 note: propagated from UniProtKB/Swiss-Prot (O15294.3);Region: Required for phosphatidylinositol 3,4,5-triphosphate binding. /evidence=ECO:0000250|UniProtKB:P56558"
+     misc_feature    251..280
+                     /label="Linker"
+                     /ApEinfo_revcolor="#b1ff67"
+                     /ApEinfo_fwdcolor="#b1ff67"
+                     /note="label: Linker label: Linker locus_tag: Linker"
+     CDS             284..604
+                     /label="FKBP-V"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+                     /note="EC_number: codon_start: 1 gene: gene_synonym: note: binds synthetic ligands that do not bind wild-type FKBP product: F36V mutant of FK506-binding protein FKBP12 protein_id: transl_table: 1 translation: GVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKVDSSRDRNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGHPGIIPPHATLVFDVELLKLE"
+     CDS             614..640
+                     /label="HA"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+                     /note="codon_start: 1 product: HA (human influenza hemagglutinin) epitope tag transl_table: 1 translation: YPYDVPDYA"
+     CDS             614..640
+                     /label="HA"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+                     /note="codon_start: 1 note: This is a variant of the standard HA tag, which has sequence YPYDVPDYA. Some anti-HA antibodies may not recognize this variant. product: HA (human influenza hemagglutinin) epitope tag transl_table: 1 translation: YPYDVPDYA"
+     misc_feature    641..890
+                     /label="Right homology arm"
+                     /ApEinfo_revcolor="#99cc00"
+                     /ApEinfo_fwdcolor="#99cc00"
+ORIGIN
+        1 GCGACTAGGT ATTTATAGGG TGTGTTTCTG AGTTTCTGCT CTGATTTGTA AACTGGGTTC
+       61 TTGTTTTTTA TTACCCAGCC TGAAGAAAGT TCGTGGCAAA GTCTGGAAGC AAAGAATATC
+      121 TAGCCCTCTG TTCAACACCA AACAATACAC AATGGAACTA GAGCGGCTCT ATCTACAGAT
+      181 GTGGGAGCAT TATGCAGCTG GCAACAAACC TGACCACATG ATTAAGCCTG TTGAAGTCAC
+      241 TGAGTCAGCA gctaaagcca aaaacaacca gggatccgga TCTGGAGTGC AGGTGGAAAC
+      301 CATCTCCCCA GGAGACGGGC GCACCTTCCC CAAGCGCGGC CAGACCTGCG TGGTGCACTA
+      361 CACCGGGATG CTTGAAGATG GAAAGAAAGT TGATTCCTCC CGGGACAGAA ACAAGCCCTT
+      421 TAAGTTTATG CTAGGCAAGC AGGAGGTGAT CCGAGGCTGG GAAGAAGGGG TTGCCCAGAT
+      481 GAGTGTGGGT CAGAGAGCCA AACTGACTAT ATCTCCAGAT TATGCCTATG GTGCCACTGG
+      541 GCACCCAGGC ATCATCCCAC CACATGCCAC TCTCGTCTTC GATGTGGAGC TTCTAAAACT
+      601 GGAAGGCTCT GGCTACCCCT ACGACGTGCC CGACTACGCC TAAATAAAGA CTGCACAGGA
+      661 GAATTACCCC TATACCTGAG CCTCAACCTT CTGGGGGAAA GGGAACTAGA TAACATACTT
+      721 CTTACTTGTC TGTACAGTAC CTTGTTGCAG ATGGGTGATA TATAATGGTA ATAGAATAGC
+      781 ACAGCCAGAC TTGCTTCCTG CATGGTAGGG AGAGACACAA AAGATGGGAA ACTGCTTTTC
+      841 CACAAGGAAT CTCCGTAGAA TTTTGCGGCG ACCAGATGGT GCATAGGTCT
+//

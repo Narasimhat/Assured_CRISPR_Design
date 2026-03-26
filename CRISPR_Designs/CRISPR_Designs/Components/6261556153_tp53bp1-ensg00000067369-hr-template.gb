@@ -1,0 +1,65 @@
+LOCUS       62615(56153)_TP53BP1_(E 1020 bp ds-DNA     linear       16-FEB-2026
+DEFINITION  .
+COMMENT     Imported from genome: GRCh38 (hg38, Homo sapiens) Gene: TP53BP1
+            (ENSG00000067369) Location: chr15 43403061-43510728 Transcript:
+            TP53BP1-001 (ENST00000382044, CCDS45250)
+FEATURES             Location/Qualifiers
+     gene            1..1020
+                     /label="TP53BP1"
+                     /ApEinfo_revcolor="#9eafd2"
+                     /ApEinfo_fwdcolor="#9eafd2"
+     misc_feature    176..425
+                     /label="RHA"
+                     /ApEinfo_revcolor="#f58a5e"
+                     /ApEinfo_fwdcolor="#f58a5e"
+     exon            241..1020
+                     /label="TP53BP1-001 Exon 28"
+                     /ApEinfo_revcolor="#b1ff67"
+                     /ApEinfo_fwdcolor="#b1ff67"
+     CDS             243..428
+                     /ApEinfo_revcolor="#84b0dc"
+                     /ApEinfo_fwdcolor="#84b0dc"
+                     /translation="IALGVFDVVVTDPSCPASVLKCAEALQLPVVSQEWVIQCLIVGERIGFKQHPKYKHDYVSHA"
+     misc_feature    429..458
+                     /label="Linker"
+                     /ApEinfo_revcolor="#faac61"
+                     /ApEinfo_fwdcolor="#faac61"
+     misc_feature    459..566
+                     /label="SD40"
+                     /ApEinfo_revcolor="#75c6a9"
+                     /ApEinfo_fwdcolor="#75c6a9"
+     misc_feature    573..599
+                     /label="HAtag1"
+                     /ApEinfo_revcolor="#ff9ccd"
+                     /ApEinfo_fwdcolor="#ff9ccd"
+     misc_feature    603..629
+                     /label="HAtag2"
+                     /ApEinfo_revcolor="#c7b0e3"
+                     /ApEinfo_fwdcolor="#c7b0e3"
+     misc_feature    630..632
+                     /label="STOP codon"
+                     /ApEinfo_revcolor="#b1ff67"
+                     /ApEinfo_fwdcolor="#b1ff67"
+     misc_feature    633..882
+                     /label="LHA"
+                     /ApEinfo_revcolor="#85dae9"
+                     /ApEinfo_fwdcolor="#85dae9"
+ORIGIN
+        1 CCTTCAAGAG GTGAGTCAAC ATAAGTGAAG CACTGGACGT ATATTTGTTA AATATTTCTA
+       61 CAAGGTCAGC ACATAGTGAT TATAACTCTG CCTTTGGTCA TGATCAGTAG CAGTGTGTTT
+      121 GACATAATAG GGCTTTGGTT TGTGCAGAGT GGGATGTATT GGTTAGAATC AAATCTCTCT
+      181 TTCTAATGGA GGGCTAAGTT GAGTGTCCTT TCCTTCTTCA CTTTCCCTTG CTCCTTGCAG
+      241 ATATTGCTTT AGGGGTATTT GATGTGGTGG TGACGGACCC CTCATGCCCA GCCTCGGTGC
+      301 TGAAGTGTGC TGAAGCATTG CAGCTGCCTG TGGTGTCACA AGAGTGGGTG ATCCAGTGCC
+      361 TCATTGTTGG GGAGAGAATT GGATTCAAGC AGCATCCAAA ATATAAACAC GATTATGTTT
+      421 CTCACGCAGC TAAAGCCAAA AACAACCAGG GATCCGGACT GTTGCTGTTC TGCCCTATTT
+      481 GCGGGTTTAC ATGTCGCCAG AAGGGCAACT TACTTCGCCA TATTAACCTG CACACAGGGG
+      541 AAAAGTTATT TAAGTACCAC CTGTATggcg gctaccccta cgacgtgccc gactacgccg
+      601 gctatccgta tgatgtcccg gactatgcaT AAAGATACTT GGTCTTACTG GTTTTATTCt
+      661 CTGCTATCGT GGAGATTGTG TTTTAACCAG GTTTTAAATG TGTCTTGTGT GTAACTGGAT
+      721 TCCTTGCATG GATCTTGTAT ATAGTTTTAT TTGCTGAACT TTTATGATAA AATAAATGTT
+      781 GAATCTCTTT GGTTGTAGTA ACTGGGATTT CTTCATCTGT TTTTTTGAGC TTAATCTCAG
+      841 AACAAATGAC AAGACATAGT ACTTTCTCTG AGTCTTTCAA CAGGCTTATT CACTTACGGA
+      901 GGACAGCTGG CCAAGGAAAT TGAAAAGTTA AGAGTGAACT TTATTCTGTG GCATCATTCC
+      961 CAAAAGGTTA TTCCAGGGTG TCTAAAATGC TATGCTTGCA GAAACTCAGT TTAAGGTAGG
+//

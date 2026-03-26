@@ -1,0 +1,48 @@
+LOCUS       SMYD1_(ENSG00000115593)_ 902 bp ds-DNA     linear       26-NOV-2025
+DEFINITION  .
+COMMENT     Imported from genome: GRCh38 (hg38, Homo sapiens) Gene: SMYD1
+            (ENSG00000115593) Location: chr2 88067780-88113387 Transcript:
+            SMYD1-001 (ENST00000419482, CCDS33240)
+FEATURES             Location/Qualifiers
+     gene            1..902
+                     /label="SMYD1"
+                     /ApEinfo_revcolor="#d6b295"
+                     /ApEinfo_fwdcolor="#d6b295"
+     exon            94..902
+                     /label="SMYD1-001 Exon 10"
+                     /ApEinfo_revcolor="#9eafd2"
+                     /ApEinfo_fwdcolor="#9eafd2"
+     CDS             94..651
+                     /ApEinfo_revcolor="#84b0dc"
+                     /ApEinfo_fwdcolor="#84b0dc"
+                     /translation="AMRVQTEMELRMFRQNEFMYYKMREAALNNQPMQVMAEPSNEPSPALFHKKQAAKAKNNQGSGSRGVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKVDSSRDRNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGHPGIIPPHATLVFDVELLKLESRGGYPYDVPDYA*"
+     misc_feature    250..282
+                     /label="Linker"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+     misc_feature    289..609
+                     /label="dTAG"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+     misc_feature    616..648
+                     /label="HA tag"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+ORIGIN
+        1 CGTGGCTGGA AATAATTTAC CCCAAGGTAT ATCAGAGACC AGCATGTCCT AGGGGCTTGC
+       61 TATCACTGTT TACGGTGTAT CTGTGTCCCA CAGGCCATGC GGGTGCAGAC GGAGATGGAG
+      121 CTACGCATGT TCCGCCAGAA CGAATTCATG TACTACAAGA TGCGCGAGGC TGCCCTGAAC
+      181 AACCAGCCCA TGCAGGTCAT GGCCGAGCCC AGCAATGAGC CATCCCCAGC TCTGTTCCAC
+      241 AAGAAGCAAg cagctaaagc caaaaacaac cagggatccg gaTCTAGAgg agtgcaggtg
+      301 gaaaccatct ccccaggaga cgggcgcacc ttccccaagc gcggccagac ctgcgtggtg
+      361 cactacaccg ggatgcttga agatggaaag aaagttgatt cctcccggga cagaaacaag
+      421 ccctttaagt ttatgctagg caagcaggag gtgatccgag gctgggaaga aggggttgcc
+      481 cagatgagtg tgggtcagag agccaaactg actatatctc cagattatgc ctatggtgcc
+      541 actgggcacc caggcatcat cccaccacat gccactctcg tcttcgatgt ggagcttcta
+      601 aaactggaaT CTAGAggcgg ctacccctac gacgtgcccg actacgccTG AGGACTGCCC
+      661 AGTGGAGGAG GGGCGATGTG GCTGGGGAGC TAGGGAGAGA CTCTGGAGGT GGTGGGTCTC
+      721 TCGGGAGACC CCTAATGAGG AAGTTGAGGT AATGCTTAAC ATTGTTGCTG TGAGAATTTA
+      781 CTGCCCTATG TTTCCCAGAG CCATTTTGGC TCAATTCAAG TCTATTCAAT TCAAGTTAAC
+      841 TCTAGCCCAG CCCAGATCAA CTCCTCCTAC AAATATTATT GGATGATAGG CCCTAGAACC
+      901 CA
+//

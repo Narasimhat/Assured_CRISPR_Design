@@ -1,0 +1,156 @@
+LOCUS       RNP-Donor_OGA_N-term     893 bp ds-DNA     linear       03-JUN-2025
+DEFINITION  .
+FEATURES             Location/Qualifiers
+     gene            1..893
+                     /label="OGA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: O-GlcNAcase; Derived by automated computationalanalysis using gene prediction method: BestRefSeq,Gnomon."
+     source          1..893
+                     /label="source"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="chromosome: 10 db_xref: taxon: 9606 mol_type: genomic DNA: organism: Homo sapiens"
+     misc_feature    1..250
+                     /label="Left homology arm"
+                     /ApEinfo_revcolor="#99cc00"
+                     /ApEinfo_fwdcolor="#99cc00"
+     regulatory      1..689
+                     /label="regulatory region"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="db_xref: GeneID: 127819016 experiment: EXISTENCE:reporter gene assay evidence [ECO:0000049][PMID:30033119] function: activates a minimal SCP1, AML or CMV promoterby ChIP-STARR-seq in primed H9 embryonic stem cells {active_cell/tissue: H9 hESC(primed)} note: NANOG-H3K27ac-H3K4me1 hESC enhancer chr10:103577734-103578309 (GRCh37/hg19 assembly coordinates) regulatory_class: enhancer: "
+     misc_feature    1..689
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 127819016 note: Region: biological region; Derived by automated computational analysis using gene prediction method: RefSeqFE. standard_name: NANOG-H3K27ac-H3K4me1 hESC enhancer GRCh37_chr10:103577734-103578309"
+     mRNA            1..842
+                     /label="OGA mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: BestRefSeq. product: O-GlcNAcase, transcript variant 2 transcript_id: NM_001142434.2"
+     misc_RNA        1..842
+                     /label="RNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. Supporting evidence includes similarity to: 2 mRNAs, 61 ESTs, 2691 long SRA reads, 1 Protein, and 100% coverage of the annotated genomic feature by RNAseq alignments, including 164 samples with support for all annotated introns product: O-GlcNAcase, transcript variant X6 transcript_id: XR_007061939.1"
+     mRNA            1..842
+                     /label="OGA mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. Supporting evidence includes similarity to: 2 mRNAs, 63 ESTs, 2723 long SRA reads, 1 Protein, and 100% coverage of the annotated genomic feature by RNAseq alignments, including 91 samples with support for all annotated introns product: O-GlcNAcase, transcript variant X4 transcript_id: XM_047424517.1"
+     mRNA            1..842
+                     /label="OGA mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: Ensembl: ENST00000361464.8 db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: BestRefSeq. product: O-GlcNAcase, transcript variant 1 transcript_id: NM_012215.5"
+     mRNA            1..842
+                     /label="OGA mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. Supporting evidence includes similarity to: 2 mRNAs, 63 ESTs, 2718 long SRA reads, 1 Protein, and 100% coverage of the annotated genomic feature by RNAseq alignments, including 86 samples with support for all annotated introns product: O-GlcNAcase, transcript variant X5 transcript_id: XM_047424518.1"
+     mRNA            1..842
+                     /label="OGA mRNA"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. Supporting evidence includes similarity to: 2 mRNAs, 136 ESTs, 4334 long SRA reads, 1 Protein, and 100% coverage of the annotated genomic feature by RNAseq alignments, including 114 samples with support for all annotated introns product: O-GlcNAcase, transcript variant X2 transcript_id: XM_047424515.1"
+     regulatory      70..129
+                     /label="silent region_2728"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="db_xref: GeneID: 127819016 experiment: EXISTENCE:reporter gene assay evidence [ECO:0000049][PMID:35858748] function: represses an Ori minimal core promoter byATAC-STARR-seq in GM12878 lymphoblastoid cells {active_cell/tissue: GM12878} note: silent region_2728 regulatory_class: silencer: "
+     regulatory      210..662
+                     /label="silent region_2727"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="db_xref: GeneID: 127819016 experiment: EXISTENCE:reporter gene assay evidence [ECO:0000049][PMID:35858748] function: represses an Ori minimal core promoter byATAC-STARR-seq in GM12878 lymphoblastoid cells {active_cell/tissue: GM12878} note: silent region_2727 regulatory_class: silencer: "
+     misc_feature    251..253
+                     /label="Inserted a start codon"
+                     /ApEinfo_revcolor="#ff0000"
+                     /ApEinfo_fwdcolor="#ff0000"
+     misc_feature    251..643
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="db_xref: GeneID: 126863277 note: Region: biological region; Derived by automated computational analysis using gene prediction method: RefSeqFE. standard_name: MED14-independent group 3 enhancer GRCh37_chrX:70752005-70753204"
+     source          251..643
+                     /label="source"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="chromosome: X db_xref: taxon: 9606 mol_type: genomic DNA: organism: Homo sapiens"
+     CDS             254..280
+                     /label="HA"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+                     /note="codon_start: 1 note: This is a variant of the standard HA tag, which has sequence YPYDVPDYA. Some anti-HA antibodies may not recognize this variant. product: HA (human influenza hemagglutinin) epitope tag transl_table: 1 translation: YPYDVPDYA"
+     CDS             254..280
+                     /label="HA"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+                     /note="codon_start: 1 product: HA (human influenza hemagglutinin) epitope tag transl_table: 1 translation: YPYDVPDYA"
+     CDS             290..610
+                     /label="FKBP-V"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+                     /note="EC_number: codon_start: 1 gene: gene_synonym: note: binds synthetic ligands that do not bind wild-type FKBP product: F36V mutant of FK506-binding protein FKBP12 protein_id: transl_table: 1 translation: GVQVETISPGDGRTFPKRGQTCVVHYTGMLEDGKKVDSSRDRNKPFKFMLGKQEVIRGWEEGVAQMSVGQRAKLTISPDYAYGATGHPGIIPPHATLVFDVELLKLE"
+     source          611..613
+                     /label="source"
+                     /ApEinfo_revcolor="#b7e6d7"
+                     /ApEinfo_fwdcolor="#b7e6d7"
+                     /note="chromosome: X db_xref: taxon: 9606 mol_type: genomic DNA: organism: Homo sapiens"
+     misc_feature    614..643
+                     /label="Linker"
+                     /ApEinfo_revcolor="#00ccff"
+                     /ApEinfo_fwdcolor="#00ccff"
+     misc_feature    644..893
+                     /label="Right homology arm"
+                     /ApEinfo_revcolor="#99cc00"
+                     /ApEinfo_fwdcolor="#99cc00"
+     misc_feature    644..787
+                     /label="miscellaneous"
+                     /ApEinfo_revcolor="#b4abac"
+                     /ApEinfo_fwdcolor="#b4abac"
+                     /note="gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: propagated from UniProtKB/Swiss-Prot (O60502.2);Region: Disordered. /evidence=ECO:0000256|SAM:MobiDB-lite"
+     CDS             644..842
+                     /label="OGA"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. product: protein O-GlcNAcase isoform X5 protein_id: XP_047280474.1 transl_table: 1 translation: MVQKESQATLEERESELSSNPAASAGASLEPPAAPAPGEDNPAGAGGAAVAGAAGGARRFLCGVVE"
+     CDS             644..842
+                     /label="OGA"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. product: protein O-GlcNAcase isoform X4 protein_id: XP_047280473.1 transl_table: 1 translation: MVQKESQATLEERESELSSNPAASAGASLEPPAAPAPGEDNPAGAGGAAVAGAAGGARRFLCGVVE"
+     CDS             644..842
+                     /label="OGA"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: CCDS: CCDS44471.1 db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: isoform b is encoded by transcript variant 2;Derived by automated computational analysis using gene prediction method: BestRefSeq. product: protein O-GlcNAcase isoform b protein_id: NP_001135906.1 transl_table: 1 translation: MVQKESQATLEERESELSSNPAASAGASLEPPAAPAPGEDNPAGAGGAAVAGAAGGARRFLCGVVE"
+     CDS             644..842
+                     /label="OGA"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: Derived by automated computational analysis usinggene prediction method: Gnomon. product: protein O-GlcNAcase isoform X2 protein_id: XP_047280471.1 transl_table: 1 translation: MVQKESQATLEERESELSSNPAASAGASLEPPAAPAPGEDNPAGAGGAAVAGAAGGARRFLCGVVE"
+     CDS             644..842
+                     /label="OGA"
+                     /ApEinfo_revcolor="#993366"
+                     /ApEinfo_fwdcolor="#993366"
+                     /note="codon_start: 1 db_xref: CCDS: CCDS7520.1 db_xref: Ensembl: ENSP00000354850.3 db_xref: GeneID: 10724 db_xref: HGNC: HGNC:7056 db_xref: MIM: 604039 gene: OGA gene_synonym: MEA5; MGEA5; NCOAT note: isoform a is encoded by transcript variant 1;Derived by automated computational analysis using gene prediction method: BestRefSeq. product: protein O-GlcNAcase isoform a protein_id: NP_036347.1 transl_table: 1 translation: MVQKESQATLEERESELSSNPAASAGASLEPPAAPAPGEDNPAGAGGAAVAGAAGGARRFLCGVVE"
+ORIGIN
+        1 CTTAGGCTTC TGGCGCCCCA GCTTAAAGCC GAGGCTGCGG CTGACAAAGG GCTCGCGCCG
+       61 GTGCCGCCGC CCTTCTCATC CGGGCATTCG GGTCCCTGCG GAGAGGGAGG GGGAAGGGCA
+      121 GAGGGGGAGG GGAAGGAGCC GGAGGGGCGC ACACTTGGAG CTGAAGCCCT CTCCAGGGCT
+      181 CCGGGCCGGT GCCCCAACGG ACAGAGGTCG AGGAGGACCC GCAGAGGTGG CAGCGGCCGG
+      241 GGGCAGGAGG ATGTACCCCT ACGACGTGCC CGACTACGCC GGAAGCGGAG GAGTGCAGGT
+      301 GGAAACCATC TCCCCAGGAG ACGGGCGCAC CTTCCCCAAG CGCGGCCAGA CCTGCGTGGT
+      361 GCACTACACC GGGATGCTTG AAGATGGAAA GAAAGTTGAT TCCTCCCGGG ACAGAAACAA
+      421 GCCCTTTAAG TTTATGCTAG GCAAGCAGGA GGTGATCCGA GGCTGGGAAG AAGGGGTTGC
+      481 CCAGATGAGT GTGGGTCAGA GAGCCAAACT GACTATATCT CCAGATTATG CCTATGGTGC
+      541 CACTGGGCAC CCAGGCATCA TCCCACCACA TGCCACTCTC GTCTTCGATG TGGAGCTTCT
+      601 AAAACTGGAA AGAggatccg gacagaacaa caaagccaaa gctATGGTGC AGAAGGAGAG
+      661 TCAAGCGACG TTGGAGGAGC GGGAGAGCGA GCTCAGCTCC AACCCTGCCG CCTCTGCGGG
+      721 GGCATCGCTG GAGCCGCCGG CAGCTCCGGC ACCCGGAGAA GACAACCCCG CCGGGGCTGG
+      781 GGGAGCGGCG GTGGCCGGGG CTGCAGGAGG GGCTCGGCGG TTCCTCTGCG GTGTGGTGGA
+      841 AGGTGAGCGC CCTCCTTCCC TCCCCGTTTT GGCACTAACA CGTTCTGTCC TCG
+//
