@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { CASSETTES, runDesign } from "./designEngine";
+import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
 const COLORS = {
   bg: "#07111c",
@@ -152,6 +153,156 @@ function buildSsOdnNotes(result) {
   const desired = result.ch.map((change, index) => `Desired edit ${index + 1}: genomic position ${change.p + 1}, ${change.w}->${change.m}`);
   const silent = (result.ss || []).map((entry) => `${getGuideName(entry.gi)}: ${entry.lb} (${entry.oc} -> ${entry.nc}) | ${entry.pur}`);
   return desired.concat(silent);
+}
+
+function normalizeGeneToken(value) {
+  const upper = String(value || "").toUpperCase().trim();
+  const withoutIds = upper.replace(/[-_\s]*(ENSG|NM_|NCBI)\S*/g, " ");
+  const compact = withoutIds.replace(/[^A-Z0-9]+/g, " ").trim();
+  return compact.split(/\s+/)[0] || "";
+}
+
+function normalizeCellLine(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
+}
+
+function mapHistoricalClass(projectType) {
+  if (projectType === "ct" || projectType === "nt") return "ki";
+  return projectType || "other";
+}
+
+function inferCurrentDonorType(result) {
+  if (!result) return "none";
+  if (result.type === "pm") return "ssODN";
+  if (result.type === "ko") return "none";
+  return "donor";
+}
+
+function buildHistoricalContext(meta, result, projectType) {
+  const targetGene = normalizeGeneToken(meta.gene || result?.gene);
+  const targetCellLine = normalizeCellLine(meta.cellLine);
+  const targetClass = mapHistoricalClass(result?.type || projectType);
+  const currentGuides = new Set((result?.gs || []).map((guide) => guide.sp));
+  const donorType = inferCurrentDonorType(result);
+
+  const scored = HISTORICAL_PROJECTS.map((record) => {
+    const recordGene = normalizeGeneToken(record.targetGene);
+    const recordCellLine = normalizeCellLine(record.parentalLine);
+    const sameGene = Boolean(targetGene && recordGene === targetGene);
+    const sameCellLine = Boolean(targetCellLine && recordCellLine === targetCellLine);
+    const sameClass = record.modificationClass === targetClass;
+    const guideOverlap = (record.guides || []).filter((guide) => currentGuides.has(guide.sequence)).length;
+    let score = 0;
+    if (sameGene) score += 6;
+    if (sameClass) score += 4;
+    if (sameCellLine) score += 3;
+    if (record.donorType === donorType) score += 1;
+    score += guideOverlap * 5;
+    return { ...record, sameGene, sameCellLine, sameClass, guideOverlap, score };
+  }).filter((record) => record.score > 0);
+
+  const matches = scored.sort((left, right) => {
+    if (right.score !== left.score) return right.score - left.score;
+    if (right.guideOverlap !== left.guideOverlap) return right.guideOverlap - left.guideOverlap;
+    return (left.projectId || "").localeCompare(right.projectId || "");
+  });
+
+  const sameGeneMatches = matches.filter((record) => record.sameGene);
+  const sameGeneAndClass = matches.filter((record) => record.sameGene && record.sameClass);
+  const sameGeneAndCell = matches.filter((record) => record.sameGene && record.sameCellLine);
+  const sameClassAndCell = matches.filter((record) => record.sameClass && record.sameCellLine);
+  const exactGuideReuse = matches.filter((record) => record.guideOverlap > 0);
+  const recommendations = [];
+  const recommendedGuides = [];
+  const recommendedDonors = [];
+  const seenGuideSequences = new Set();
+  const seenDonorSequences = new Set();
+
+  if (sameGeneAndCell.length) recommendations.push(`Found ${sameGeneAndCell.length} established project${sameGeneAndCell.length === 1 ? "" : "s"} for this gene in the same parental line.`);
+  if (!sameGeneAndCell.length && sameGeneAndClass.length) recommendations.push(`Found ${sameGeneAndClass.length} established project${sameGeneAndClass.length === 1 ? "" : "s"} for this gene with the same edit class.`);
+  if (!sameGeneAndClass.length && sameClassAndCell.length) recommendations.push(`No same-gene precedent was found, but ${sameClassAndCell.length} established project${sameClassAndCell.length === 1 ? "" : "s"} exist in the same parental line for this edit class.`);
+  if (exactGuideReuse.length) recommendations.push(`Exact guide reuse appears in ${exactGuideReuse.length} established record${exactGuideReuse.length === 1 ? "" : "s"}; review those projects before ordering.`);
+  if (result?.type === "pm" && sameGeneMatches.some((record) => record.donorType === "ssODN")) recommendations.push("Historical matches for this gene used ssODN donors, which supports the current SNP design strategy.");
+  if ((result?.type === "ct" || result?.type === "nt") && !sameGeneAndClass.length) recommendations.push("No close KI precedent was found in the imported history; verify donor frame, junction PCR, and protein expression plan manually.");
+
+  matches.forEach((record) => {
+    if ((record.sameGene || record.sameCellLine || record.guideOverlap > 0) && recommendedGuides.length < 6) {
+      (record.guides || []).forEach((guide) => {
+        if (recommendedGuides.length >= 6) return;
+        if (!guide.sequence || seenGuideSequences.has(guide.sequence)) return;
+        seenGuideSequences.add(guide.sequence);
+        recommendedGuides.push({
+          name: guide.name || "Historical guide",
+          sequence: guide.sequence,
+          sourceProject: record.projectId,
+          sourceLine: record.parentalLine || "n/a",
+          matchLabel: record.guideOverlap > 0 ? "exact guide reuse" : record.sameGene && record.sameCellLine ? "same gene + same line" : record.sameGene ? "same gene" : "same line",
+        });
+      });
+    }
+
+    if ((record.sameGene || record.sameCellLine) && record.donorSequence && recommendedDonors.length < 3 && !seenDonorSequences.has(record.donorSequence)) {
+      seenDonorSequences.add(record.donorSequence);
+      recommendedDonors.push({
+        name: record.donorName || "Historical donor",
+        sequence: record.donorSequence,
+        donorType: record.donorType || "donor",
+        sourceProject: record.projectId,
+        sourceLine: record.parentalLine || "n/a",
+        matchLabel: record.sameGene && record.sameCellLine ? "same gene + same line" : record.sameGene ? "same gene" : "same line",
+      });
+    }
+  });
+
+  return {
+    targetGene,
+    targetClass,
+    totalMatches: matches.length,
+    topMatches: matches.slice(0, 6),
+    recommendations: recommendations.slice(0, 4),
+    recommendedGuides,
+    recommendedDonors,
+    stats: {
+      sameGene: sameGeneMatches.length,
+      sameGeneAndClass: sameGeneAndClass.length,
+      sameGeneAndCell: sameGeneAndCell.length,
+      sameClassAndCell: sameClassAndCell.length,
+      exactGuideReuse: exactGuideReuse.length,
+    },
+  };
+}
+
+function buildReviewItems(meta, result, fileName) {
+  if (!result) return [];
+  const items = [];
+
+  if (!fileName) items.push({ level: "warning", text: "Reference sequence filename is missing from the report. Keep the exact GenBank record with the final design package." });
+  if (!meta.notes.trim()) items.push({ level: "check", text: "Record transcript assumptions, exon numbering assumptions, and delivery method before final sign-off." });
+
+  const outOfRangeGuides = (result.gs || []).filter((guide) => typeof guide.gc === "number" && (guide.gc < 30 || guide.gc > 80));
+  if (outOfRangeGuides.length) items.push({ level: "warning", text: `Guide GC content is atypical for ${outOfRangeGuides.length} guide${outOfRangeGuides.length === 1 ? "" : "s"}; review activity and synthesis risk manually.` });
+
+  if (result.type === "pm") {
+    if (!(result.ss || []).length) items.push({ level: "warning", text: "No silent guide-blocking mutation was introduced. Re-cut after HDR may remain possible." });
+    items.push({ level: "check", text: "Confirm the desired amino-acid change against the intended transcript and verify that the donor does not create unwanted amino-acid substitutions." });
+  }
+
+  if (result.type === "ko") {
+    const guideCount = (result.gs || []).length;
+    if (guideCount < 2) items.push({ level: "warning", text: "Knockout design has fewer than two guides. Deletion-based screening will be weaker than expected." });
+    items.push({ level: "check", text: "Validate the expected deletion by junction PCR and confirm frameshift or protein loss in established clones." });
+  }
+
+  if (result.type === "ct" || result.type === "nt") {
+    const labels = new Set((result.donorAnnotations || []).map((annotation) => annotation.label));
+    if (!(result.ss || []).length) items.push({ level: "warning", text: "No silent guide-disrupting mutation was captured in the HDR donor arms. Re-cut of the edited allele is still possible." });
+    if (result.type === "nt" && !labels.has("Start")) items.push({ level: "warning", text: "N-terminal donor annotation does not include a start codon block. Verify start codon replacement before ordering." });
+    if (result.type === "ct" && !labels.has("Stop")) items.push({ level: "warning", text: "C-terminal donor annotation does not include a terminal stop codon block. Verify stop codon placement before ordering." });
+    if ((result.donor || "").length > 2200) items.push({ level: "warning", text: "HDR donor is long for routine synthesis and cloning. Confirm assembly plan and QC strategy." });
+    items.push({ level: "check", text: "Review donor frame across both homology junctions and confirm the expected translated product at the protein level." });
+  }
+
+  return items;
 }
 
 function translateCodon(codon) {
@@ -349,7 +500,69 @@ function buildPmDonorHtml(donor) {
   `;
 }
 
-function buildReportHtml(meta, result, fileName) {
+function buildAnnotatedDonorHtml(sequence, annotations = []) {
+  const findAnnotation = (index) => annotations.find((item) => index >= item.start && index < item.end);
+  const legend = annotations.map((item) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.label} (${item.end - item.start} bp)</span>`).join("");
+  const sequenceHtml = (sequence || "").split("").map((base, index) => {
+    const annotation = findAnnotation(index);
+    return `<span style="color:${annotation?.color || "#111827"};font-weight:${annotation ? 800 : 400};">${base}</span>`;
+  }).join("");
+  return `
+    <div style="margin:0 0 14px 0;">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">${legend}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;">${sequenceHtml}</div>
+    </div>
+  `;
+}
+
+function buildHistoricalRowsHtml(matches) {
+  if (!matches.length) {
+    return `<p style="font-size:13px;line-height:1.45;">No comparable established projects were found in the imported internal history for the current gene, parental line, or edit class.</p>`;
+  }
+  const rows = matches.map((record) => [
+    record.projectId,
+    record.targetGene || "n/a",
+    record.parentalLine || "n/a",
+    record.establishedLine || "n/a",
+    record.modificationType || "n/a",
+    record.donorType || "n/a",
+    record.guideOverlap ? `${record.guideOverlap} exact` : "none",
+  ]);
+  return `<table>${tableHtml([["Project", "Gene", "Parental line", "Established line", "Type", "Donor", "Guide overlap"]], true)}${tableHtml(rows)}</table>`;
+}
+
+function buildRecommendedSequencesHtml(historicalContext) {
+  const guideRows = (historicalContext?.recommendedGuides || []).map((guide) => `
+    <div style="margin:0 0 10px 0;padding:10px;border:1px solid #d7dee7;border-radius:10px;background:#f8fafc;">
+      <div style="font-weight:700;color:#1f2937;margin-bottom:4px;">${guide.name}</div>
+      <div style="font-size:12px;color:#667085;margin-bottom:6px;">${guide.matchLabel} | ${guide.sourceProject} | ${guide.sourceLine}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;word-break:break-all;">${guide.sequence}</div>
+    </div>
+  `).join("");
+  const donorRows = (historicalContext?.recommendedDonors || []).map((donor) => `
+    <div style="margin:0 0 10px 0;padding:10px;border:1px solid #d7dee7;border-radius:10px;background:#f8fafc;">
+      <div style="font-weight:700;color:#1f2937;margin-bottom:4px;">${donor.name} (${donor.donorType})</div>
+      <div style="font-size:12px;color:#667085;margin-bottom:6px;">${donor.matchLabel} | ${donor.sourceProject} | ${donor.sourceLine}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;word-break:break-all;">${donor.sequence}</div>
+    </div>
+  `).join("");
+
+  if (!guideRows && !donorRows) {
+    return `<p style="font-size:13px;line-height:1.45;">No historical sequences met the recommendation threshold for this design.</p>`;
+  }
+
+  return `
+    ${guideRows ? `<h3 style="color:#2E75B6;margin:14px 0 8px 0;">Recommended historical gRNAs</h3>${guideRows}` : ""}
+    ${donorRows ? `<h3 style="color:#2E75B6;margin:14px 0 8px 0;">Recommended historical donors</h3>${donorRows}` : ""}
+  `;
+}
+
+function buildReviewListHtml(items) {
+  if (!items.length) return "<p style=\"font-size:13px;line-height:1.45;\">No automated warnings were triggered. Manual review is still required before synthesis or ordering.</p>";
+  return `<ul style="padding-left:18px;">${items.map((item) => `<li style="margin:0 0 8px 0;color:${item.level === "warning" ? "#B42318" : "#344054"};"><strong>${item.level === "warning" ? "Warning" : "Check"}:</strong> ${item.text}</li>`).join("")}</ul>`;
+}
+
+function buildReportHtml(meta, result, fileName, historicalContext, reviewItems) {
   if (!result) return "";
   const headerRows = [
     ["Group", meta.clientName || "n/a"],
@@ -366,7 +579,10 @@ function buildReportHtml(meta, result, fileName) {
     ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
     : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption.</p>`
-      : `<p style="font-family:Consolas,monospace;font-size:13px;word-break:break-all;">${result.donor || ""}</p>`;
+      : buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || []);
+  const historicalSummary = historicalContext?.recommendations?.length
+    ? `<ul style="padding-left:18px;">${historicalContext.recommendations.map((line) => `<li style="margin:0 0 8px 0;">${line}</li>`).join("")}</ul>`
+    : `<p style="font-size:13px;line-height:1.45;">Historical context is limited for this design. Treat the output as a fresh design and plan additional validation accordingly.</p>`;
 
   return `<!doctype html>
 <html>
@@ -399,7 +615,16 @@ p{font-size:13px;line-height:1.45}
   <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
-  <h2>5. Additional Info</h2>
+  <h2>5. Historical References</h2>
+  <p class="sub">Imported established-project dataset: ${HISTORICAL_PROJECTS_SUMMARY.recordCount} records from ${HISTORICAL_PROJECTS_SUMMARY.sheet}.</p>
+  ${historicalSummary}
+  ${buildHistoricalRowsHtml(historicalContext?.topMatches || [])}
+  <h2>6. Recommended Historical Sequences</h2>
+  <p class="sub">These sequences are suggested from matched established projects and should be treated as references, not automatic replacements for the current design.</p>
+  ${buildRecommendedSequencesHtml(historicalContext)}
+  <h2>7. Review Checkpoints</h2>
+  ${buildReviewListHtml(reviewItems)}
+  <h2>8. Additional Info</h2>
   <p>${buildDesignSummary(result).replace(/\n/g, "<br/>")}</p>
 </body>
 </html>`;
@@ -582,7 +807,9 @@ export default function App() {
 
   const cassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
   const folderName = useMemo(() => buildProjectFolderName(meta), [meta]);
-  const reportHtml = useMemo(() => buildReportHtml(meta, result, fileName), [meta, result, fileName]);
+  const historicalContext = useMemo(() => buildHistoricalContext(meta, result, projectType), [meta, result, projectType]);
+  const reviewItems = useMemo(() => buildReviewItems(meta, result, fileName), [meta, result, fileName]);
+  const reportHtml = useMemo(() => buildReportHtml(meta, result, fileName, historicalContext, reviewItems), [meta, result, fileName, historicalContext, reviewItems]);
 
   const updateMeta = (key, value) => setMeta((current) => ({ ...current, [key]: value }));
 
@@ -660,6 +887,7 @@ export default function App() {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <Badge>{Object.keys(CASSETTES).length} cassette options</Badge>
+                <Badge color={COLORS.success}>{HISTORICAL_PROJECTS_SUMMARY.recordCount} established references</Badge>
                 <Badge color={COLORS.accentAlt}>Report-style preview</Badge>
                 <Badge color={COLORS.success}>HTML export for Word</Badge>
               </div>
@@ -721,7 +949,108 @@ export default function App() {
         </Grid>
 
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
-          <SectionTitle>3. Final Report</SectionTitle>
+          <SectionTitle>3. Historical References</SectionTitle>
+          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+            Imported from your established-project workbook. This panel is advisory only and is meant to show precedent, guide reuse, and how much same-gene or same-cell-line support exists before the design is finalized.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+            <Badge color={COLORS.success}>{HISTORICAL_PROJECTS_SUMMARY.recordCount} imported projects</Badge>
+            <Badge color={COLORS.accentAlt}>{historicalContext.stats.sameGene} same-gene matches</Badge>
+            <Badge color={COLORS.accent}>{historicalContext.stats.sameGeneAndCell} same-gene same-line</Badge>
+            <Badge color={COLORS.success}>{historicalContext.stats.exactGuideReuse} exact guide reuses</Badge>
+          </div>
+          {!result && <div style={{ color: COLORS.muted, fontSize: 13 }}>Run a design to compare it against the imported established projects.</div>}
+          {result && (
+            <Grid>
+              <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14 }}>
+                <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Recommendations</div>
+                {historicalContext.recommendations.length ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {historicalContext.recommendations.map((line) => (
+                      <div key={line} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>No close precedent was found for this exact combination. Treat the design as novel and review all ordering assumptions manually.</div>
+                )}
+              </div>
+              <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14 }}>
+                <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Top established matches</div>
+                {!historicalContext.topMatches.length && <div style={{ color: COLORS.muted, fontSize: 13 }}>No comparable records found.</div>}
+                {historicalContext.topMatches.length > 0 && (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {historicalContext.topMatches.map((record) => (
+                      <div key={record.projectId} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
+                          <div style={{ fontWeight: 700 }}>{record.projectId}</div>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                            {record.sameGene && <Badge color={COLORS.success}>same gene</Badge>}
+                            {record.sameCellLine && <Badge color={COLORS.accent}>same line</Badge>}
+                            {record.sameClass && <Badge color={COLORS.accentAlt}>same class</Badge>}
+                            {record.guideOverlap > 0 && <Badge color={COLORS.success}>{record.guideOverlap} guide overlap</Badge>}
+                          </div>
+                        </div>
+                        <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
+                          {record.targetGene || "n/a"} | {record.modificationType || "n/a"} | parent {record.parentalLine || "n/a"} | established {record.establishedLine || "n/a"}
+                        </div>
+                        <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
+                          Donor: {record.donorType || "n/a"}{record.registrationDate ? ` | registered ${record.registrationDate}` : ""}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </Grid>
+          )}
+          {result && (historicalContext.recommendedGuides.length > 0 || historicalContext.recommendedDonors.length > 0) && (
+            <div style={{ ...CARD_STYLE, marginTop: 12, background: COLORS.panelAlt, padding: 14 }}>
+              <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Recommended historical sequences</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+                These are pulled from matched established projects. Use them as reference candidates, not as automatic replacements for the current design.
+              </div>
+              {historicalContext.recommendedGuides.length > 0 && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Historical gRNAs</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {historicalContext.recommendedGuides.map((guide) => (
+                      <div key={`${guide.sourceProject}-${guide.sequence}`} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 4 }}>
+                          <div style={{ fontWeight: 700 }}>{guide.name}</div>
+                          <Badge color={COLORS.success}>{guide.matchLabel}</Badge>
+                        </div>
+                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{guide.sourceProject} | {guide.sourceLine}</div>
+                        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{guide.sequence}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {historicalContext.recommendedDonors.length > 0 && (
+                <div>
+                  <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Historical donors</div>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {historicalContext.recommendedDonors.map((donor) => (
+                      <div key={`${donor.sourceProject}-${donor.sequence}`} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 4 }}>
+                          <div style={{ fontWeight: 700 }}>{donor.name} ({donor.donorType})</div>
+                          <Badge color={COLORS.accentAlt}>{donor.matchLabel}</Badge>
+                        </div>
+                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{donor.sourceProject} | {donor.sourceLine}</div>
+                        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{donor.sequence}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+          <SectionTitle>4. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>This export is modeled on your APOE strategy document. Download the HTML file and open it in Word if you want to save it as a `.docx` document afterward.</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
             <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report</button>
@@ -803,7 +1132,89 @@ export default function App() {
                 {(result.type === "ct" || result.type === "nt") && <AnnotatedDonor sequence={result.donor} annotations={result.donorAnnotations} />}
                 {buildSsOdnNotes(result).map((line) => <div key={line} style={{ color: "#CC0000", fontWeight: 700, marginTop: 6 }}>{line}</div>)}
 
-                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>5. Additional Info</div>
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>5. Historical References</div>
+                <div style={{ color: "#555", fontSize: 13, marginBottom: 12 }}>
+                  Imported established-project dataset: {HISTORICAL_PROJECTS_SUMMARY.recordCount} records from {HISTORICAL_PROJECTS_SUMMARY.sheet}.
+                </div>
+                {historicalContext.recommendations.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    {historicalContext.recommendations.map((line) => (
+                      <div key={line} style={{ marginBottom: 6, color: "#333", fontSize: 13, lineHeight: 1.5 }}>
+                        - {line}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {!historicalContext.topMatches.length && (
+                  <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>
+                    No comparable established projects were found in the imported history.
+                  </div>
+                )}
+                {historicalContext.topMatches.length > 0 && (
+                  <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
+                    <thead>
+                      <tr>{["Project", "Gene", "Parental line", "Established line", "Type", "Donor", "Guide overlap"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {historicalContext.topMatches.map((record) => (
+                        <tr key={record.projectId}>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.projectId}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.targetGene || "n/a"}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.parentalLine || "n/a"}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.establishedLine || "n/a"}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.modificationType || "n/a"}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.donorType || "n/a"}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.guideOverlap ? `${record.guideOverlap} exact` : "none"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>6. Recommended Historical Sequences</div>
+                {!historicalContext.recommendedGuides.length && !historicalContext.recommendedDonors.length && (
+                  <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>
+                    No historical sequences met the recommendation threshold for this design.
+                  </div>
+                )}
+                {historicalContext.recommendedGuides.length > 0 && (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ color: "#1f2937", fontWeight: 700, marginBottom: 8 }}>Recommended historical gRNAs</div>
+                    {historicalContext.recommendedGuides.map((guide) => (
+                      <div key={`${guide.sourceProject}-${guide.sequence}`} style={{ padding: 10, border: "1px solid #d7dee7", borderRadius: 10, background: "#f8fafc", marginBottom: 8 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{guide.name}</div>
+                        <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>{guide.matchLabel} | {guide.sourceProject} | {guide.sourceLine}</div>
+                        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{guide.sequence}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {historicalContext.recommendedDonors.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ color: "#1f2937", fontWeight: 700, marginBottom: 8 }}>Recommended historical donors</div>
+                    {historicalContext.recommendedDonors.map((donor) => (
+                      <div key={`${donor.sourceProject}-${donor.sequence}`} style={{ padding: 10, border: "1px solid #d7dee7", borderRadius: 10, background: "#f8fafc", marginBottom: 8 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4 }}>{donor.name} ({donor.donorType})</div>
+                        <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>{donor.matchLabel} | {donor.sourceProject} | {donor.sourceLine}</div>
+                        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{donor.sequence}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>7. Review Checkpoints</div>
+                {!reviewItems.length && <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>No automated warnings were triggered. Manual review is still required before synthesis or ordering.</div>}
+                {reviewItems.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    {reviewItems.map((item, index) => (
+                      <div key={`${item.level}-${index}`} style={{ color: item.level === "warning" ? "#B42318" : "#344054", fontSize: 13, lineHeight: 1.5, marginBottom: 6 }}>
+                        - <strong>{item.level === "warning" ? "Warning" : "Check"}:</strong> {item.text}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>8. Additional Info</div>
                 <div style={{ fontSize: 13, color: "#333", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{buildDesignSummary(result)}</div>
               </>
             )}
