@@ -40,6 +40,27 @@ const CARD_STYLE = {
   padding: 18,
 };
 
+const CODON_TABLE = {
+  TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
+  ATT: "I", ATC: "I", ATA: "I", ATG: "M", GTT: "V", GTC: "V", GTA: "V", GTG: "V",
+  TCT: "S", TCC: "S", TCA: "S", TCG: "S", CCT: "P", CCC: "P", CCA: "P", CCG: "P",
+  ACT: "T", ACC: "T", ACA: "T", ACG: "T", GCT: "A", GCC: "A", GCA: "A", GCG: "A",
+  TAT: "Y", TAC: "Y", TAA: "*", TAG: "*", CAT: "H", CAC: "H", CAA: "Q", CAG: "Q",
+  AAT: "N", AAC: "N", AAA: "K", AAG: "K", GAT: "D", GAC: "D", GAA: "E", GAG: "E",
+  TGA: "*", TGT: "C", TGC: "C", TGG: "W", CGT: "R", CGC: "R", CGA: "R", CGG: "R",
+  AGT: "S", AGC: "S", AGA: "R", AGG: "R", GGT: "G", GGC: "G", GGA: "G", GGG: "G",
+};
+
+const DNA_COMPLEMENT = { A: "T", T: "A", G: "C", C: "G" };
+const PM_REGION_COLORS = {
+  longArm: "#DBEAFE",
+  shortArm: "#DCFCE7",
+};
+const PM_GUIDE_COLORS = {
+  site: "#E9D5FF",
+  pam: "#FDE68A",
+};
+
 function sanitizeSegment(value, fallback) {
   const clean = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\s+/g, " ").trim();
   return clean || fallback;
@@ -68,9 +89,15 @@ function formatDesignLabel(meta, result) {
 function buildDesignSummary(result) {
   if (!result) return "";
   const lines = [];
+  const getGuideName = (guideIndex) => result.gs?.[guideIndex - 1]?.n || `gRNA${guideIndex}`;
   lines.push(`Design: ${result.type === "pm" ? `${result.gene} p.${result.wA}${result.an}${result.mA}` : formatDesignLabel({ projectType: result.type }, result)}`);
   if (result.type === "pm") lines.push(`Codon: ${result.wC} -> ${result.mC}`);
-  if (result.type === "ko") lines.push(`Target exon: ${result.exon}`);
+  if (result.type === "ko") {
+    lines.push(`Target exon: ${result.exon}`);
+    if (result.gs?.length >= 2) lines.push(`Pair spacing: ${Math.abs((result.gs[1]?.d ?? 0) - (result.gs[0]?.d ?? 0))} bp`);
+    if (result.strat) lines.push(`Strategy: ${result.strat}`);
+    return lines.join("\n");
+  }
   if (result.type === "ct" || result.type === "nt") lines.push(`Donor length: ${result.dl} bp`);
   lines.push("");
   lines.push("gRNAs:");
@@ -78,7 +105,7 @@ function buildDesignSummary(result) {
   if (result.ss?.length) {
     lines.push("");
     lines.push("Silent mutations:");
-    result.ss.forEach((mutation) => lines.push(`- gRNA${mutation.gi}: ${mutation.lb} (${mutation.oc} -> ${mutation.nc}) | ${mutation.pur}`));
+    result.ss.forEach((mutation) => lines.push(`- ${getGuideName(mutation.gi)}: ${mutation.lb} (${mutation.oc} -> ${mutation.nc}) | ${mutation.pur}`));
   }
   lines.push("");
   lines.push("Validation primers:");
@@ -103,19 +130,223 @@ function buildGuideRows(result) {
   return (result?.gs || []).map((guide) => [guide.n, `${guide.sp} ${guide.pm}`, `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
 }
 
+function renderGuideSequence(spacer, pam, html = false) {
+  if (html) {
+    return `<span style="font-family:Consolas,monospace;font-weight:700;color:#111827;">${spacer}</span> <span style="display:inline-block;padding:1px 6px;border-radius:999px;background:#FEF3C7;color:#92400E;font-family:Consolas,monospace;font-weight:800;">${pam}</span>`;
+  }
+  return (
+    <>
+      <span style={{ fontFamily: "Consolas, monospace", fontWeight: 700, color: "#111827" }}>{spacer}</span>{" "}
+      <span style={{ display: "inline-block", padding: "1px 6px", borderRadius: 999, background: "#FEF3C7", color: "#92400E", fontFamily: "Consolas, monospace", fontWeight: 800 }}>{pam}</span>
+    </>
+  );
+}
+
 function buildPrimerRows(result) {
   return (result?.ps || []).map((primer) => [primer.n, primer.s]);
 }
 
 function buildSsOdnNotes(result) {
   if (!result || result.type !== "pm") return [];
+  const getGuideName = (guideIndex) => result.gs?.[guideIndex - 1]?.n || `gRNA${guideIndex}`;
   const desired = result.ch.map((change, index) => `Desired edit ${index + 1}: genomic position ${change.p + 1}, ${change.w}->${change.m}`);
-  const silent = (result.ss || []).map((entry) => `gRNA${entry.gi}: ${entry.lb} (${entry.oc} -> ${entry.nc}) | ${entry.pur}`);
+  const silent = (result.ss || []).map((entry) => `${getGuideName(entry.gi)}: ${entry.lb} (${entry.oc} -> ${entry.nc}) | ${entry.pur}`);
   return desired.concat(silent);
+}
+
+function translateCodon(codon) {
+  const aa = CODON_TABLE[codon] || "?";
+  return aa === "*" ? "Stop" : aa;
+}
+
+function reverseComplement(sequence) {
+  return (sequence || "").split("").reverse().map((base) => DNA_COMPLEMENT[base] || "N").join("");
+}
+
+function buildPmArmRegions(sequenceLength, longArmFirst = true) {
+  if (!sequenceLength) return [];
+  const longArmLength = Math.min(91, sequenceLength);
+  const shortArmStart = longArmFirst ? longArmLength : Math.min(36, sequenceLength);
+  const firstArmLength = longArmFirst ? longArmLength : Math.min(36, sequenceLength);
+  return [
+    {
+      label: `${longArmFirst ? "91 bp arm" : "36 bp arm"}`,
+      start: 0,
+      end: firstArmLength,
+      color: longArmFirst ? PM_REGION_COLORS.longArm : PM_REGION_COLORS.shortArm,
+    },
+    {
+      label: `${longArmFirst ? "36 bp arm" : "91 bp arm"}`,
+      start: shortArmStart,
+      end: sequenceLength,
+      color: longArmFirst ? PM_REGION_COLORS.shortArm : PM_REGION_COLORS.longArm,
+    },
+  ].filter((region) => region.end > region.start);
+}
+
+function findPmRegion(index, regions) {
+  return regions.find((region) => index >= region.start && index < region.end) || null;
+}
+
+function buildPmStrandModels(donor) {
+  const length = donor.od?.length || 0;
+  const orderedDiff = [...(donor.df || [])].sort((left, right) => left - right);
+  const oppositeDiff = orderedDiff.map((index) => length - 1 - index).sort((left, right) => left - right);
+  const orderedLabel = donor.guideStrand === "+" ? "- strand donor" : "+ strand donor";
+  const oppositeLabel = donor.guideStrand === "+" ? "+ strand donor" : "- strand donor";
+  const genomicGuide = {
+    siteStart: donor.guideSiteStart,
+    siteEnd: donor.guideSiteEnd,
+    pamStart: donor.guidePamStart,
+    pamEnd: donor.guidePamEnd,
+  };
+  const mapGuide = (reversed) => {
+    if (!reversed) return genomicGuide;
+    return {
+      siteStart: length - genomicGuide.siteEnd,
+      siteEnd: length - genomicGuide.siteStart,
+      pamStart: length - genomicGuide.pamEnd,
+      pamEnd: length - genomicGuide.pamStart,
+    };
+  };
+  return [
+    {
+      key: "ordered",
+      title: orderedLabel,
+      recommended: true,
+      note: `Recommended to order. This strand is reverse complement to ${donor.guideName}. Cut site lies between the 91 bp and 36 bp arms.`,
+      wt: donor.wo,
+      donor: donor.od,
+      diffIndexes: orderedDiff,
+      regions: buildPmArmRegions(length, true),
+      guide: mapGuide(donor.guideStrand === "+"),
+    },
+    {
+      key: "opposite",
+      title: oppositeLabel,
+      recommended: false,
+      note: "Opposite donor strand for reference. Cut site lies between the 36 bp and 91 bp arms on this view.",
+      wt: reverseComplement(donor.wo),
+      donor: reverseComplement(donor.od),
+      diffIndexes: oppositeDiff,
+      regions: buildPmArmRegions(length, false),
+      guide: mapGuide(donor.guideStrand !== "+"),
+    },
+  ];
+}
+
+function splitFramedSequence(sequence) {
+  const safeSequence = sequence || "";
+  const codonLength = Math.floor(safeSequence.length / 3) * 3;
+  const codingRegion = safeSequence.slice(0, codonLength);
+  const codons = [];
+  for (let index = 0; index < codingRegion.length; index += 3) codons.push(codingRegion.slice(index, index + 3));
+  return { prefix: "", codons, suffix: "" };
+}
+
+function buildPmDonorComparison(donor) {
+  const wt = splitFramedSequence(donor.codingWt);
+  const edited = splitFramedSequence(donor.codingDonor);
+  const diffCodonIndexes = edited.codons.reduce((indexes, codon, index) => {
+    if (codon !== wt.codons[index]) indexes.push(index);
+    return indexes;
+  }, []);
+  const wtAa = wt.codons.map(translateCodon);
+  const donorAa = edited.codons.map(translateCodon);
+  const diffAaIndexes = donorAa.reduce((indexes, aa, index) => {
+    if (aa !== wtAa[index]) indexes.push(index);
+    return indexes;
+  }, []);
+  return { wt, donor: edited, wtAa, donorAa, diffCodonIndexes, diffAaIndexes };
 }
 
 function tableHtml(rows, header = false) {
   return rows.map((row) => `<tr>${row.map((cell, index) => header ? `<th style="padding:8px 10px;border:1px solid #bbbbbb;background:#2E75B6;color:#ffffff;text-align:left;">${cell}</th>` : `<td style="padding:8px 10px;border:1px solid #bbbbbb;vertical-align:top;${index === 0 ? "background:#F0F4F8;font-weight:700;width:220px;" : "background:#FFFFFF;"}">${cell}</td>`).join("")}</tr>`).join("");
+}
+
+function buildAlignedRowHtml(label, { prefix = "", tokens = [], suffix = "" }, diffIndexes = [], mode = "donor", tokenWidth = "4ch") {
+  const changedSet = new Set(diffIndexes);
+  const prefixHtml = prefix ? `<span style="color:#98A2B3;">${prefix}</span>` : "";
+  const suffixHtml = suffix ? `<span style="color:#98A2B3;">${suffix}</span>` : "";
+  const tokensHtml = tokens.map((token, index) => {
+    const changed = changedSet.has(index);
+    const styles = [
+      "display:inline-block",
+      `min-width:${tokenWidth}`,
+      "margin-right:6px",
+      "text-align:center",
+      changed ? `color:${mode === "wt" ? "#CC0000" : "#111827"}` : "color:#111827",
+      changed && mode === "donor" ? "background:#FFF59D" : "background:transparent",
+      changed && mode === "wt" ? "text-decoration:line-through" : "text-decoration:none",
+      `font-weight:${changed ? 800 : 400}`,
+    ].join(";");
+    return `<span style="${styles}">${token}</span>`;
+  }).join("");
+  return `
+    <div style="margin:0 0 8px 0;">
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">${label}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;">${prefixHtml}${tokensHtml}${suffixHtml}</div>
+    </div>
+  `;
+}
+
+function buildPmAnnotatedSequenceHtml(label, sequence, diffIndexes, mode, regions, guide) {
+  const diffSet = new Set(diffIndexes);
+  const sequenceHtml = (sequence || "").split("").map((base, index) => {
+    const changed = diffSet.has(index);
+    const region = findPmRegion(index, regions);
+    const inGuide = guide && index >= guide.siteStart && index < guide.siteEnd;
+    const inPam = guide && index >= guide.pamStart && index < guide.pamEnd;
+    const styles = [
+      `background:${inPam ? PM_GUIDE_COLORS.pam : changed && mode === "donor" ? "#FDE68A" : inGuide ? PM_GUIDE_COLORS.site : (region?.color || "transparent")}`,
+      `color:${changed && mode === "wt" ? "#CC0000" : "#111827"}`,
+      `text-decoration:${changed && mode === "wt" ? "line-through" : "none"}`,
+      `font-weight:${inGuide || changed ? 800 : 400}`,
+    ].join(";");
+    return `<span style="${styles}">${base}</span>`;
+  }).join("");
+  return `
+    <div style="margin:0 0 8px 0;">
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">${label}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;">${sequenceHtml}</div>
+    </div>
+  `;
+}
+
+function buildPmStrandCardHtml(strand) {
+  return `
+    <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
+        <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? "#047857" : "#475467"};background:${strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? "Order this strand" : "Reference strand"}</span>
+      </div>
+      <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${strand.note}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+        ${strand.regions.map((region) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${region.color};">${region.label} (${region.end - region.start} nt)</span>`).join("")}
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_GUIDE_COLORS.pam};">PAM</span>
+      </div>
+      ${buildPmAnnotatedSequenceHtml("WT", strand.wt, strand.diffIndexes, "wt", strand.regions, strand.guide)}
+      ${buildPmAnnotatedSequenceHtml("Donor", strand.donor, strand.diffIndexes, "donor", strand.regions, strand.guide)}
+    </div>
+  `;
+}
+
+function buildPmDonorHtml(donor) {
+  const comparison = buildPmDonorComparison(donor);
+  const strands = buildPmStrandModels(donor);
+  return `
+    <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
+    <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
+    ${strands.map((strand) => buildPmStrandCardHtml(strand)).join("")}
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
+      ${buildAlignedRowHtml("WT codons", { prefix: comparison.wt.prefix, tokens: comparison.wt.codons, suffix: comparison.wt.suffix }, comparison.diffCodonIndexes, "wt")}
+      ${buildAlignedRowHtml("Donor codons", { prefix: comparison.donor.prefix, tokens: comparison.donor.codons, suffix: comparison.donor.suffix }, comparison.diffCodonIndexes, "donor")}
+      ${buildAlignedRowHtml("WT amino acids", { tokens: comparison.wtAa }, comparison.diffAaIndexes, "wt")}
+      ${buildAlignedRowHtml("Donor amino acids", { tokens: comparison.donorAa }, comparison.diffAaIndexes, "donor")}
+    </div>
+  `;
 }
 
 function buildReportHtml(meta, result, fileName) {
@@ -127,16 +358,15 @@ function buildReportHtml(meta, result, fileName) {
     ["Cell line", meta.cellLine || "n/a"],
   ];
   const geneRows = buildGeneInfoRows(meta, result, fileName);
-  const guideRows = buildGuideRows(result);
+  const guideRows = (result?.gs || []).map((guide) => [guide.n, renderGuideSequence(guide.sp, guide.pm, true), `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
   const primerRows = buildPrimerRows(result);
   const ssOdnNotes = buildSsOdnNotes(result);
+  const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const donorBlock = result.type === "pm"
-    ? (result.os || []).map((donor) => `
-        <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
-        <p style="font-family:Consolas,monospace;font-size:13px;margin:0 0 6px 0;"><strong style="color:#888;">WT 5'-</strong> ${donor.wo} <strong style="color:#888;">-3'</strong></p>
-        <p style="font-family:Consolas,monospace;font-size:13px;margin:0 0 10px 0;"><strong style="color:#888;">ssODN 5'-</strong> ${donor.od} <strong style="color:#888;">-3'</strong></p>
-      `).join("")
-    : `<p style="font-family:Consolas,monospace;font-size:13px;word-break:break-all;">${result.donor || ""}</p>`;
+    ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
+    : result.type === "ko"
+      ? `<p style="font-size:13px;line-height:1.45;">No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption.</p>`
+      : `<p style="font-family:Consolas,monospace;font-size:13px;word-break:break-all;">${result.donor || ""}</p>`;
 
   return `<!doctype html>
 <html>
@@ -165,8 +395,8 @@ p{font-size:13px;line-height:1.45}
   <h2>3. Validation Primers</h2>
   <table>${tableHtml([["Name", "Sequence"]], true)}${tableHtml(primerRows)}</table>
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
-  <h2>4. ${result.type === "pm" ? "ssODN Donor Templates" : "Donor Design"}</h2>
-  <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : "HDR donor sequence is listed in full below."}</p>
+  <h2>4. ${sectionTitle}</h2>
+  <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
   <h2>5. Additional Info</h2>
@@ -208,6 +438,103 @@ function SequenceDiffRow({ label, sequence, diffIndexes, mode }) {
             </span>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function PmAnnotatedSequenceRow({ label, sequence, diffIndexes, mode, regions, guide }) {
+  const diffSet = new Set(diffIndexes);
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+        {(sequence || "").split("").map((base, index) => {
+          const changed = diffSet.has(index);
+          const region = findPmRegion(index, regions);
+          const inGuide = guide && index >= guide.siteStart && index < guide.siteEnd;
+          const inPam = guide && index >= guide.pamStart && index < guide.pamEnd;
+          return (
+            <span
+              key={`${label}-${index}`}
+              style={{
+                background: inPam ? PM_GUIDE_COLORS.pam : changed && mode === "donor" ? "#FDE68A" : inGuide ? PM_GUIDE_COLORS.site : (region?.color || "transparent"),
+                color: changed && mode === "wt" ? "#CC0000" : "#111827",
+                textDecoration: changed && mode === "wt" ? "line-through" : "none",
+                fontWeight: inGuide || changed ? 800 : 400,
+              }}
+            >
+              {base}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function AlignedTokenRow({ label, prefix = "", tokens = [], suffix = "", diffIndexes = [], mode = "donor", tokenWidth = "4ch" }) {
+  const changedSet = new Set(diffIndexes);
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+        {prefix ? <span style={{ color: "#98A2B3" }}>{prefix}</span> : null}
+        {tokens.map((token, index) => {
+          const changed = changedSet.has(index);
+          return (
+            <span
+              key={`${label}-${token}-${index}`}
+              style={{
+                display: "inline-block",
+                minWidth: tokenWidth,
+                marginRight: 6,
+                textAlign: "center",
+                color: changed ? (mode === "wt" ? "#CC0000" : "#111827") : "#111827",
+                background: changed && mode === "donor" ? "#FFF59D" : "transparent",
+                textDecoration: changed && mode === "wt" ? "line-through" : "none",
+                fontWeight: changed ? 800 : 400,
+              }}
+            >
+              {token}
+            </span>
+          );
+        })}
+        {suffix ? <span style={{ color: "#98A2B3" }}>{suffix}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function PmDonorPreview({ donor }) {
+  const comparison = buildPmDonorComparison(donor);
+  const strands = buildPmStrandModels(donor);
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
+      <div style={{ color: "#555", fontSize: 12, marginBottom: 10 }}>Linked guide: {donor.guideName}</div>
+      {strands.map((strand) => (
+        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, color: "#1f2937" }}>{strand.title}</div>
+            <Badge color={strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? "Order This Strand" : "Reference Strand"}</Badge>
+          </div>
+          <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+            {strand.regions.map((region) => <span key={`${strand.key}-${region.label}-${region.start}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: region.color }}>{region.label} ({region.end - region.start} nt)</span>)}
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
+          </div>
+          <PmAnnotatedSequenceRow label="WT" sequence={strand.wt} diffIndexes={strand.diffIndexes} mode="wt" regions={strand.regions} guide={strand.guide} />
+          <PmAnnotatedSequenceRow label="Donor" sequence={strand.donor} diffIndexes={strand.diffIndexes} mode="donor" regions={strand.regions} guide={strand.guide} />
+        </div>
+      ))}
+      <div style={{ marginTop: 10, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+        <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
+        <AlignedTokenRow label="WT codons" prefix={comparison.wt.prefix} tokens={comparison.wt.codons} suffix={comparison.wt.suffix} diffIndexes={comparison.diffCodonIndexes} mode="wt" />
+        <AlignedTokenRow label="Donor codons" prefix={comparison.donor.prefix} tokens={comparison.donor.codons} suffix={comparison.donor.suffix} diffIndexes={comparison.diffCodonIndexes} mode="donor" />
+        <AlignedTokenRow label="WT amino acids" tokens={comparison.wtAa} diffIndexes={comparison.diffAaIndexes} mode="wt" />
+        <AlignedTokenRow label="Donor amino acids" tokens={comparison.donorAa} diffIndexes={comparison.diffAaIndexes} mode="donor" />
       </div>
     </div>
   );
@@ -280,14 +607,19 @@ export default function App() {
     setError("");
     setResult(null);
     setCopyState("");
-    const design = runDesign(projectType, gbRaw, mutation, tag, homologyArm);
-    if (design.err) {
-      setError(design.err);
+    try {
+      const design = runDesign(projectType, gbRaw, mutation, tag, homologyArm);
+      if (design.err) {
+        setError(design.err);
+        setDebug(design.dbg || "");
+        return;
+      }
       setDebug(design.dbg || "");
-      return;
+      setResult(design);
+    } catch (runError) {
+      setError(runError?.message || "Design generation failed unexpectedly.");
+      setDebug("");
     }
-    setDebug(design.dbg || "");
-    setResult(design);
   };
 
   const copyText = async (value, label) => {
@@ -438,7 +770,15 @@ export default function App() {
                     <tr>{["Name", "Sequence", "Strand", "GC", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {buildGuideRows(result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
+                    {(result?.gs || []).map((guide, rowIndex) => (
+                      <tr key={rowIndex}>
+                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.n}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm)}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.str} strand</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.gc}%</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.arm || guide.note || ""}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
 
@@ -453,15 +793,14 @@ export default function App() {
                 </table>
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {result.amp || "n/a"}</div>
 
-                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {result.type === "pm" ? "ssODN Donor Templates" : "Donor Design"}</div>
-                {result.type === "pm" && (result.os || []).map((donor) => (
-                  <div key={donor.n} style={{ marginBottom: 14 }}>
-                    <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
-                    <SequenceDiffRow label="WT" sequence={donor.wo} diffIndexes={donor.df} mode="wt" />
-                    <SequenceDiffRow label="ssODN" sequence={donor.od} diffIndexes={donor.df} mode="donor" />
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design"}</div>
+                {result.type === "pm" && (result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} />)}
+                {result.type === "ko" && (
+                  <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5 }}>
+                    No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption.
                   </div>
-                ))}
-                {result.type !== "pm" && <AnnotatedDonor sequence={result.donor} annotations={result.donorAnnotations} />}
+                )}
+                {(result.type === "ct" || result.type === "nt") && <AnnotatedDonor sequence={result.donor} annotations={result.donorAnnotations} />}
                 {buildSsOdnNotes(result).map((line) => <div key={line} style={{ color: "#CC0000", fontWeight: 700, marginTop: 6 }}>{line}</div>)}
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>5. Additional Info</div>
