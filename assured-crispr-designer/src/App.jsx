@@ -62,6 +62,7 @@ const PM_GUIDE_COLORS = {
   site: "#E9D5FF",
   pam: "#FDE68A",
 };
+
 function sanitizeSegment(value, fallback) {
   const clean = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\s+/g, " ").trim();
   return clean || fallback;
@@ -344,13 +345,122 @@ function normalizeFileLookupKey(value) {
 function buildFolderLibrary(entries) {
   const byName = new Map();
   const byStem = new Map();
+  const byGene = new Map();
   entries.forEach((entry) => {
     const fileKey = normalizeFileLookupKey(entry.fileName);
-    const stemKey = normalizeFileLookupKey(entry.fileName.replace(/\.[^.]+$/, ""));
+    const stem = entry.fileName.replace(/\.[^.]+$/, "");
+    const stemKey = normalizeFileLookupKey(stem);
+    const geneKey = normalizeGeneToken(stem);
     if (fileKey && !byName.has(fileKey)) byName.set(fileKey, entry);
     if (stemKey && !byStem.has(stemKey)) byStem.set(stemKey, entry);
+    if (geneKey && !byGene.has(geneKey)) byGene.set(geneKey, entry);
   });
-  return { byName, byStem };
+  return { byName, byStem, byGene };
+}
+
+function detectCellLineToken(text) {
+  const match = String(text || "").match(/\b[A-Za-z]{2,10}\d{3}-A(?:-[A-Za-z0-9]+)?\b/);
+  return match ? match[0] : "";
+}
+
+function detectMutationToken(text) {
+  const match = String(text || "").match(/\b([A-Za-z])\s*-?(\d+)\s*-?([A-Za-z])\b/);
+  return match ? `${match[1].toUpperCase()}${match[2]}${match[3].toUpperCase()}` : "";
+}
+
+function detectProjectTypeFromText(text, mutation, cassetteKey) {
+  const lower = String(text || "").toLowerCase();
+  if (/\b(ko|knockout)\b/.test(lower)) return "ko";
+  if (/\b(c[\s-]?term(?:inal)?|ct)\b/.test(lower)) return "ct";
+  if (/\b(n[\s-]?term(?:inal)?|nt)\b/.test(lower)) return "nt";
+  if (cassetteKey?.startsWith("N:")) return "nt";
+  if (cassetteKey) return "ct";
+  if (mutation) return "pm";
+  return "pm";
+}
+
+function detectCassetteKey(text, targetType = "") {
+  const normalizedLine = String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const keys = Object.keys(CASSETTES).sort((a, b) => b.length - a.length);
+  for (const key of keys) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const bareKey = normalizedKey.replace(/^n/, "");
+    if (normalizedLine.includes(normalizedKey)) {
+      if (!targetType || (targetType === "nt" ? key.startsWith("N:") : !key.startsWith("N:"))) return key;
+    }
+    if (targetType === "nt" && key.startsWith("N:") && normalizedLine.includes(bareKey)) return key;
+    if (targetType === "ct" && !key.startsWith("N:") && normalizedLine.includes(normalizedKey)) return key;
+  }
+  return "";
+}
+
+function detectGeneToken(text, cellLine, mutation, cassetteKey) {
+  const raw = String(text || "").replace(/[,;]+/g, " ").trim();
+  const tokens = raw.split(/\s+/).filter(Boolean);
+  const stopTokens = new Set([
+    "ko", "knockout", "ct", "nt", "cterminal", "nterminal", "c-terminal", "n-terminal",
+    "c", "n", "term", "terminal", "in", "with",
+  ]);
+  const mutationLower = mutation.toLowerCase();
+  const cellLineLower = String(cellLine || "").toLowerCase();
+  const cassettePieces = new Set(String(cassetteKey || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
+  const token = tokens.find((value) => {
+    const lower = value.toLowerCase();
+    if (!/[a-z]/i.test(value)) return false;
+    if (stopTokens.has(lower)) return false;
+    if (cellLineLower && lower === cellLineLower) return false;
+    if (mutation && lower === mutationLower) return false;
+    if (cassettePieces.has(lower)) return false;
+    return true;
+  });
+  return token ? normalizeGeneToken(token) : "";
+}
+
+function parseRequestLine(line, index, folderLibrary) {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return null;
+  const initialCassette = detectCassetteKey(trimmed);
+  const mutation = detectMutationToken(trimmed);
+  const projectType = detectProjectTypeFromText(trimmed, mutation, initialCassette);
+  const cassetteKey = detectCassetteKey(trimmed, projectType) || (projectType === "ct" || projectType === "nt" ? initialCassette : "");
+  const cellLine = detectCellLineToken(trimmed);
+  const gene = detectGeneToken(trimmed, cellLine, mutation, cassetteKey);
+  const geneMatch = folderLibrary.byGene.get(gene);
+  const fileEntry = geneMatch || null;
+  const row = {
+    ...createBatchRow(index),
+    label: trimmed,
+    editSummary: trimmed,
+    gene,
+    cellLine,
+    projectType,
+    mutation: projectType === "pm" ? mutation : "",
+    tag: projectType === "ct" || projectType === "nt" ? (cassetteKey || (projectType === "nt" ? "N:EGFP-Linker" : "SD40-2xHA")) : "SD40-2xHA",
+    homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
+    gbRaw: fileEntry?.gbRaw || "",
+    fileName: fileEntry?.fileName || "",
+    parseIssue: "",
+  };
+  row.parseIssue = summarizeRowParseIssue(row, fileEntry);
+  return row;
+}
+
+function parseRequestText(text, folderLibrary) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line, index) => parseRequestLine(line, index, folderLibrary))
+    .filter(Boolean);
+}
+
+function summarizeRowParseIssue(row, fileEntryOverride = null) {
+  const issues = [];
+  if (!row?.gene) issues.push("gene");
+  if (!row?.cellLine) issues.push("cell line");
+  if (row?.projectType === "pm" && !row?.mutation) issues.push("mutation");
+  if ((row?.projectType === "ct" || row?.projectType === "nt") && !row?.tag) issues.push("cassette");
+  const hasFile = Boolean(fileEntryOverride || row?.gbRaw || row?.fileName);
+  if (!hasFile) issues.push("GenBank");
+  return issues.length ? `Needs ${issues.join(", ")}` : "";
 }
 
 function parseBatchDefinitionText(text) {
@@ -1122,6 +1232,7 @@ export default function App() {
   const [batchCopyState, setBatchCopyState] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
+  const [requestText, setRequestText] = useState("");
   const [batchDefinitionText, setBatchDefinitionText] = useState("");
   const [idtDefaults, setIdtDefaults] = useState({
     crisprScale: "",
@@ -1177,8 +1288,36 @@ export default function App() {
     }
   }, [batchSuccessfulResults, selectedProjectId]);
 
+  useEffect(() => {
+    if (!batchFolderEntries.length) return;
+    setBatchRows((current) => current.map((row) => {
+      if (row.gbRaw && row.fileName) return row;
+      const match = batchFolderLibrary.byGene.get(normalizeGeneToken(row.gene));
+      if (!match) return row;
+      const nextRow = {
+        ...row,
+        gbRaw: match.gbRaw,
+        fileName: match.fileName,
+      };
+      return {
+        ...nextRow,
+        parseIssue: summarizeRowParseIssue(nextRow, match),
+      };
+    }));
+  }, [batchFolderEntries, batchFolderLibrary]);
+
   const updateBatchRow = (index, key, value) => {
-    setBatchRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
+    setBatchRows((current) => current.map((row, rowIndex) => {
+      if (rowIndex !== index) return row;
+      const nextRow = { ...row, [key]: value };
+      if (key === "gene" && !nextRow.fileName && batchFolderLibrary.byGene.has(normalizeGeneToken(value))) {
+        const match = batchFolderLibrary.byGene.get(normalizeGeneToken(value));
+        nextRow.gbRaw = match.gbRaw;
+        nextRow.fileName = match.fileName;
+      }
+      nextRow.parseIssue = summarizeRowParseIssue(nextRow);
+      return nextRow;
+    }));
     setBatchResults([]);
     setBatchError("");
     setBatchCopyState("");
@@ -1224,6 +1363,13 @@ export default function App() {
         fileName: file.name,
         label: row.label || file.name.replace(/\.[^.]+$/, ""),
         gene: row.gene || file.name.replace(/\.[^.]+$/, ""),
+        parseIssue: summarizeRowParseIssue({
+          ...row,
+          gbRaw: content,
+          fileName: file.name,
+          label: row.label || file.name.replace(/\.[^.]+$/, ""),
+          gene: row.gene || file.name.replace(/\.[^.]+$/, ""),
+        }),
       } : row)));
     };
     reader.onerror = () => setBatchError(`Failed to read ${file.name}.`);
@@ -1260,7 +1406,7 @@ export default function App() {
     setBatchCopyState("");
     const activeRows = batchRows.filter((row) => row.gbRaw);
     if (!activeRows.length) {
-      setBatchError("Upload at least one GenBank file in the batch table.");
+      setBatchError("Upload at least one GenBank file in the design table.");
       return;
     }
     const nextResults = batchRows.map((row, index) => {
@@ -1317,6 +1463,18 @@ export default function App() {
     } catch (definitionError) {
       setBatchError(definitionError?.message || "Failed to apply batch definitions.");
     }
+  };
+
+  const parseRequests = () => {
+    setBatchError("");
+    setBatchResults([]);
+    setBatchCopyState("");
+    const parsedRows = parseRequestText(requestText, batchFolderLibrary);
+    if (!parsedRows.length) {
+      setBatchError("Paste at least one request line to parse.");
+      return;
+    }
+    setBatchRows(parsedRows);
   };
 
   const copyText = async (value, label) => {
@@ -1399,45 +1557,40 @@ export default function App() {
         </div>
 
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
-          <SectionTitle>1. Design Projects</SectionTitle>
+          <SectionTitle>1. Design Requests</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Build one or many designs from the same workflow. Each row owns its own IRIS ID, group, gene, cell line, edit request, and GenBank file.
+            Paste one request per line, upload a GenBank folder once, then review only the parsed rows that need adjustment.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
-            <label style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <span style={{ color: COLORS.muted, fontSize: 12 }}>Project count</span>
-              <input type="number" min="1" max="48" value={batchRows.length} onChange={(event) => setProjectCount(event.target.value)} style={{ ...FIELD_STYLE, width: 96 }} />
+            <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
+              <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
+              <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
             </label>
-            <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>+ Add design</button>
-            <Badge color={COLORS.success}>{batchRows.filter((row) => row.gbRaw).length} loaded</Badge>
+            <button type="button" onClick={parseRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Parse requests</button>
+            <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Add blank row</button>
+            <Badge color={COLORS.accent}>{batchFolderEntries.length} folder files</Badge>
+            <Badge color={COLORS.success}>{batchRows.length} parsed rows</Badge>
             <Badge color={COLORS.accentAlt}>{batchSuccessfulResults.length} successful</Badge>
             <Badge>{batchOrderRows.length} order lines</Badge>
           </div>
 
           <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14, marginBottom: 14 }}>
-            <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Optional bulk setup</div>
+            <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Paste requests</div>
             <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-              Upload a folder of GenBank files and paste a simple definition list if you want to prefill multiple rows at once.
-            </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-              <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
-                <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
-                <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
-              </label>
-              <button type="button" onClick={applyBatchDefinitions} disabled={!batchDefinitionText.trim() || !batchFolderEntries.length} style={{ ...FIELD_STYLE, width: "auto", cursor: batchDefinitionText.trim() && batchFolderEntries.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-                Apply folder definitions
-              </button>
-              <Badge color={COLORS.accent}>{batchFolderEntries.length} folder files</Badge>
+              Use simple natural-language lines. The parser will infer KO, SNP, C-terminal, or N-terminal design types and match GenBank files by gene where possible.
             </div>
             <label style={{ display: "block" }}>
-              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Definition list</div>
+              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Request lines</div>
               <textarea
-                value={batchDefinitionText}
-                onChange={(event) => setBatchDefinitionText(event.target.value)}
+                value={requestText}
+                onChange={(event) => setRequestText(event.target.value)}
                 style={{ ...FIELD_STYLE, minHeight: 126, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
-                placeholder={"file,design_type,modification_or_cassette,homology_arm,label\npsen1.gb,pm,N32R,,PSEN1 N32R\nmapt.gb,ko,,,\napp.gb,ct,SD40-2xHA,500,APP C-term KI\nsnca.gb,nt,N:EGFP-Linker,250,SNCA N-term EGFP"}
+                placeholder={"PSEN1 G384A BIHi005-A\nSORCS1 knockout BIHi274-A\nAPP C-terminal SD40-2xHA HMGUi001-A\nSNCA N-terminal N:EGFP-Linker BIHi268-A"}
               />
             </label>
+            <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+              The parser works best with: `GENE edit cell-line`. If a line cannot infer gene, cell line, mutation, cassette, or GenBank file, the row below will be flagged for review.
+            </div>
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
@@ -1450,6 +1603,7 @@ export default function App() {
                     <div style={{ fontWeight: 700 }}>Design {slot}</div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       {row.fileName && <Badge color={COLORS.success}>{row.fileName}</Badge>}
+                      {row.parseIssue && <Badge color={COLORS.accentAlt}>{row.parseIssue}</Badge>}
                       {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
                       {batchStatus?.status === "error" && <Badge color={COLORS.danger}>Error</Badge>}
                       {batchSuccessfulResults.length > 1 && batchStatus?.status === "success" && (

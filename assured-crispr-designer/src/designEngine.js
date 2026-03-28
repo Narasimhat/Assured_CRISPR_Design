@@ -1,3 +1,17 @@
+import {
+  codingPosToGenomic,
+  describeKoGenomicContextFromModel,
+  extractCodingDonorWindowFromModel,
+  findKoDesignTargetFromModel,
+  genomicPosToAa,
+  getFeatureCount,
+  getCdsFromModel,
+  getCodonAtAa,
+  getGenomicSequence,
+  normalizeGenBankToTranscriptModel,
+  selectNearbyGuidesForModel,
+} from "./transcriptModel";
+
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
   ATT: "I", ATC: "I", ATA: "I", ATG: "M", GTT: "V", GTC: "V", GTA: "V", GTG: "V",
@@ -102,100 +116,12 @@ export function parseGB(rawText) {
   return { seq: seq.toUpperCase(), feats };
 }
 
-function getCDS(gb) {
-  for (const feature of gb.feats) {
-    if (feature.type !== "CDS") continue;
-    const nums = feature.loc.match(/\d+/g);
-    if (!nums || nums.length < 2) continue;
-    const segs = [];
-    for (let index = 0; index < nums.length - 1; index += 2) segs.push([parseInt(nums[index], 10) - 1, parseInt(nums[index + 1], 10)]);
-    let cds = "";
-    for (const [start, end] of segs) cds += gb.seq.slice(start, end);
-    const geneFeature = gb.feats.find((entry) => entry.type === "gene");
-    const name = geneFeature?.q?.label || geneFeature?.q?.gene || "Gene";
-    return { segs, cds, prot: Math.floor(cds.length / 3) - 1, name };
-  }
-  return null;
-}
-
-function getExons(gb) {
-  return gb.feats
-    .filter((feature) => feature.type === "exon")
-    .map((feature, index) => {
-      const nums = feature.loc.match(/\d+/g);
-      if (!nums || nums.length < 2) return null;
-      const start = parseInt(nums[0], 10) - 1;
-      const end = parseInt(nums[1], 10);
-      const label = feature.q?.label || `Exon ${index + 1}`;
-      const labelMatch = label.match(/Exon\s+(\d+)/i);
-      return {
-        start,
-        end,
-        exonNumber: labelMatch ? parseInt(labelMatch[1], 10) : index + 1,
-        label,
-      };
-    })
-    .filter(Boolean)
-    .sort((left, right) => left.start - right.start);
-}
-
-function findExonBySegment(exons, start, end) {
-  return exons.find((exon) => exon.start <= start && exon.end >= end)
-    || exons.find((exon) => !(exon.end <= start || exon.start >= end))
-    || null;
-}
-
-function c2g(segs, codingPos) {
-  let cursor = 0;
-  for (const [start, end] of segs) {
-    if (cursor + (end - start) > codingPos) return start + (codingPos - cursor);
-    cursor += end - start;
-  }
-  return null;
-}
-
-function g2aa(segs, genomicPos) {
-  let cursor = 0;
-  for (const [start, end] of segs) {
-    if (start <= genomicPos && genomicPos < end) return Math.floor((cursor + genomicPos - start) / 3) + 1;
-    cursor += end - start;
-  }
-  return null;
-}
-
-function gCodon(segs, seq, aaNumber) {
-  const genomicPos = c2g(segs, (aaNumber - 1) * 3);
-  if (genomicPos === null) return null;
-  const codon = seq.slice(genomicPos, genomicPos + 3);
-  return { g: genomicPos, cod: codon, aa: toAA(codon) };
-}
-
-function findG(seq, target, range = 50) {
-  const results = [];
-  for (let pos = Math.max(0, target - range - 23); pos <= Math.min(seq.length - 23, target + range); pos += 1) {
-    const plusPam = seq.slice(pos + 20, pos + 23);
-    if (["AGG", "TGG", "CGG", "GGG"].includes(plusPam)) {
-      const spacer = seq.slice(pos, pos + 20);
-      const cut = pos + 17;
-      const gc = Math.round((spacer.split("").filter((base) => base === "G" || base === "C").length / 20) * 100);
-      if (!spacer.includes("TTTTT") && !spacer.includes("AAAAA") && Math.abs(cut - target) <= range) results.push({ sp: spacer, pam: plusPam, str: "+", cut, d: cut - target, gc, ps: pos });
-    }
-    const minusPam = seq.slice(pos, pos + 3);
-    if (["CCA", "CCT", "CCC", "CCG"].includes(minusPam)) {
-      const spacer = reverseComplement(seq.slice(pos + 3, pos + 23));
-      const cut = pos + 6;
-      const gc = Math.round((spacer.split("").filter((base) => base === "G" || base === "C").length / 20) * 100);
-      if (!spacer.includes("TTTTT") && !spacer.includes("AAAAA") && Math.abs(cut - target) <= range) results.push({ sp: spacer, pam: reverseComplement(minusPam), str: "-", cut, d: cut - target, gc, ps: pos });
-    }
-  }
-  return results;
-}
-
 function armType(guide, mutationPos) {
   return guide.str === "+" ? (mutationPos > guide.cut ? "PROX" : "DIST") : (mutationPos < guide.cut ? "PROX" : "DIST");
 }
 
-function findSilent(seq, segs, guide, blockedPositions = new Set()) {
+function findSilent(model, guide, blockedPositions = new Set()) {
+  const seq = getGenomicSequence(model);
   let pamStart;
   if (guide.str === "+") pamStart = guide.ps + 20;
   else {
@@ -211,12 +137,13 @@ function findSilent(seq, segs, guide, blockedPositions = new Set()) {
     const genomicPos = pamStart + pamIndex;
     if (genomicPos < 0 || genomicPos >= seq.length) continue;
     if (blockedPositions.has(genomicPos)) continue;
-    const aaNumber = g2aa(segs, genomicPos);
+    const aaNumber = genomicPosToAa(model, genomicPos);
     if (!aaNumber) continue;
-    const codonPos = c2g(segs, (aaNumber - 1) * 3);
-    if (codonPos === null) continue;
-    const codon = seq.slice(codonPos, codonPos + 3);
-    const codonIndex = genomicPos - codonPos;
+    const codonInfo = getCodonAtAa(model, aaNumber, toAA);
+    if (!codonInfo) continue;
+    const codon = codonInfo.cod;
+    const codonIndex = codonInfo.genomicPositions.indexOf(genomicPos);
+    if (codonIndex < 0) continue;
     const originalAA = toAA(codon);
     for (const alt of ["A", "C", "G", "T"]) {
       if (alt === codon[codonIndex]) continue;
@@ -244,12 +171,13 @@ function findSilent(seq, segs, guide, blockedPositions = new Set()) {
     }
     if (genomicPos === undefined || genomicPos < 0 || genomicPos >= seq.length) continue;
     if (blockedPositions.has(genomicPos)) continue;
-    const aaNumber = g2aa(segs, genomicPos);
+    const aaNumber = genomicPosToAa(model, genomicPos);
     if (!aaNumber) continue;
-    const codonPos = c2g(segs, (aaNumber - 1) * 3);
-    if (codonPos === null) continue;
-    const codon = seq.slice(codonPos, codonPos + 3);
-    const codonIndex = genomicPos - codonPos;
+    const codonInfo = getCodonAtAa(model, aaNumber, toAA);
+    if (!codonInfo) continue;
+    const codon = codonInfo.cod;
+    const codonIndex = codonInfo.genomicPositions.indexOf(genomicPos);
+    if (codonIndex < 0) continue;
     const originalAA = toAA(codon);
     for (const alt of ["A", "C", "G", "T"]) {
       if (alt === codon[codonIndex]) continue;
@@ -260,33 +188,8 @@ function findSilent(seq, segs, guide, blockedPositions = new Set()) {
   return null;
 }
 
-function extractCodingDonorWindow(seq, segs, donorStart, donorEnd, payload) {
-  const entries = [];
-  let codingCursor = 0;
-  segs.forEach(([segStart, segEnd]) => {
-    const overlapStart = Math.max(donorStart, segStart);
-    const overlapEnd = Math.min(donorEnd, segEnd);
-    for (let genomicPos = overlapStart; genomicPos < overlapEnd; genomicPos += 1) {
-      entries.push({
-        wt: seq[genomicPos],
-        donor: payload[genomicPos - donorStart],
-        codingIndex: codingCursor + (genomicPos - segStart),
-      });
-    }
-    codingCursor += segEnd - segStart;
-  });
-  if (!entries.length) return { codingWt: "", codingDonor: "" };
-  const trimStart = (3 - (entries[0].codingIndex % 3)) % 3;
-  const trimmed = entries.slice(trimStart);
-  const usableLength = trimmed.length - (trimmed.length % 3);
-  const finalEntries = trimmed.slice(0, usableLength);
-  return {
-    codingWt: finalEntries.map((entry) => entry.wt).join(""),
-    codingDonor: finalEntries.map((entry) => entry.donor).join(""),
-  };
-}
-
-function mkODN(seq, segs, guide, mutationPositions, mutationBases, silentMutations = []) {
+function mkODN(model, guide, mutationPositions, mutationBases, silentMutations = []) {
+  const seq = getGenomicSequence(model);
   let donorStart;
   let donorEnd;
   if (guide.str === "+") { donorStart = guide.cut - 36; donorEnd = guide.cut + 91; }
@@ -322,7 +225,7 @@ function mkODN(seq, segs, guide, mutationPositions, mutationBases, silentMutatio
   const guidePamEnd = guidePamStart + 3;
   const ssOdn = guide.str === "+" ? reverseComplement(payload.join("")) : payload.join("");
   const wtOdn = guide.str === "+" ? reverseComplement(wildType) : wildType;
-  const { codingWt, codingDonor } = extractCodingDonorWindow(seq, segs, donorStart, donorEnd, payload);
+  const { codingWt, codingDonor } = extractCodingDonorWindowFromModel(model, donorStart, donorEnd, payload);
   const diff = [];
   for (let index = 0; index < 127; index += 1) if (ssOdn[index] !== wtOdn[index]) diff.push(index);
   return {
@@ -473,56 +376,6 @@ function buildDonorAnnotations(h5Length, insertSegments, h3Length) {
   return annotations;
 }
 
-function selectNearbyGuides(seq, targetPos, window = 10) {
-  const guidesInWindow = findG(seq, targetPos, window).sort((left, right) => Math.abs(left.d) - Math.abs(right.d));
-  if (!guidesInWindow.length) return [];
-  const plusGuide = guidesInWindow.find((guide) => guide.str === "+");
-  const minusGuide = guidesInWindow.find((guide) => guide.str === "-");
-  if (plusGuide && minusGuide) return [plusGuide, minusGuide];
-  return guidesInWindow.slice(0, Math.min(2, guidesInWindow.length));
-}
-
-function describeKoGenomicContext(cut, exons, fallbackSegs) {
-  const regions = exons?.length
-    ? exons.map((exon) => ({ start: exon.start, end: exon.end, exonNumber: exon.exonNumber }))
-    : fallbackSegs.map(([start, end], index) => ({ start, end, exonNumber: index + 1 }));
-
-  for (let index = 0; index < regions.length; index += 1) {
-    const { start, end, exonNumber } = regions[index];
-    if (cut >= start && cut < end) {
-      return {
-        label: `exon ${exonNumber}`,
-        detail: `${cut - start} bp into exon ${exonNumber}`,
-      };
-    }
-    const next = regions[index + 1];
-    if (next && cut >= end && cut < next.start) {
-      const afterPrev = cut - end;
-      const beforeNext = next.start - cut;
-      const usePrev = afterPrev <= beforeNext;
-      return {
-        label: `intron between exon ${exonNumber} and exon ${next.exonNumber}`,
-        detail: usePrev
-          ? `${afterPrev} bp downstream of exon ${exonNumber}`
-          : `${beforeNext} bp upstream of exon ${next.exonNumber}`,
-      };
-    }
-  }
-
-  if (cut < regions[0].start) {
-    return {
-      label: "upstream of CDS",
-      detail: `${regions[0].start - cut} bp upstream of exon ${regions[0].exonNumber}`,
-    };
-  }
-
-  const lastRegion = regions[regions.length - 1];
-  return {
-    label: "downstream of CDS",
-    detail: `${cut - lastRegion.end} bp downstream of exon ${lastRegion.exonNumber}`,
-  };
-}
-
 function selectKoGuidePair(guides, maxSpacing = 140) {
   const candidatePairs = [];
   for (let leftIndex = 0; leftIndex < guides.length; leftIndex += 1) {
@@ -550,38 +403,6 @@ function selectKoGuidePair(guides, maxSpacing = 140) {
   return candidatePairs[0] || null;
 }
 
-function findKoDesignTarget(seq, segs, exons = []) {
-  const targetSegments = segs.slice(1, 4);
-  if (!targetSegments.length) return null;
-  const boundaryWindow = 25;
-
-  const candidates = targetSegments.map(([start, end], offset) => {
-    const exonLength = end - start;
-    const exon = findExonBySegment(exons, start, end);
-    const guides = findG(seq, Math.floor((start + end) / 2), Math.floor(exonLength / 2) + 10)
-      .filter((guide) => guide.cut >= start - boundaryWindow && guide.cut <= end + boundaryWindow)
-      .sort((left, right) => right.gc - left.gc);
-    const pair = selectKoGuidePair(guides);
-    return {
-      segmentIndex: offset + 2,
-      exonNumber: exon?.exonNumber || offset + 2,
-      start,
-      end,
-      exonLength,
-      pair,
-    };
-  }).filter((entry) => entry.pair);
-
-  candidates.sort((left, right) => {
-    if (left.pair.oppositeStrands !== right.pair.oppositeStrands) return left.pair.oppositeStrands ? -1 : 1;
-    if (right.exonLength !== left.exonLength) return right.exonLength - left.exonLength;
-    if (right.pair.score !== left.pair.score) return right.pair.score - left.pair.score;
-    return left.pair.spacing - right.pair.spacing;
-  });
-
-  return candidates[0] || null;
-}
-
 function parsePointMutationInput(value) {
   const normalized = String(value || "").trim().replace(/^p\./i, "").replace(/\s+/g, "").toUpperCase();
   const canonical = normalized.match(/^([A-Z])(\d+)([A-Z])$/);
@@ -601,12 +422,13 @@ function parsePointMutationInput(value) {
 }
 
 export function designPM(gb, mutationString) {
-  const cds = getCDS(gb);
+  const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
+  const seq = getGenomicSequence(gb);
   const mutation = parsePointMutationInput(mutationString);
   if (mutation.err) return { err: mutation.err };
   const { wtAA, aaNumber, mutAA } = mutation;
-  const codonInfo = gCodon(cds.segs, gb.seq, aaNumber);
+  const codonInfo = getCodonAtAa(gb, aaNumber, toAA);
   if (!codonInfo) return { err: `Cannot map amino acid ${aaNumber} to the genomic sequence.` };
   if (codonInfo.aa !== wtAA.toUpperCase()) return { err: `Expected ${wtAA.toUpperCase()} at position ${aaNumber} but found ${codonInfo.aa} (${codonInfo.cod}).` };
 
@@ -618,7 +440,11 @@ export function designPM(gb, mutationString) {
         const mutantCodon = `${base1}${base2}${base3}`;
         if (toAA(mutantCodon) !== mutAA.toUpperCase()) continue;
         const changes = [];
-        for (let index = 0; index < 3; index += 1) if (codonInfo.cod[index] !== mutantCodon[index]) changes.push({ p: codonInfo.g + index, w: codonInfo.cod[index], m: mutantCodon[index] });
+        for (let index = 0; index < 3; index += 1) {
+          if (codonInfo.cod[index] !== mutantCodon[index]) {
+            changes.push({ p: codonInfo.genomicPositions[index], w: codonInfo.cod[index], m: mutantCodon[index] });
+          }
+        }
         if (!bestMutantCodon || changes.length < bestChanges.length) { bestMutantCodon = mutantCodon; bestChanges = changes; }
       }
     }
@@ -627,15 +453,15 @@ export function designPM(gb, mutationString) {
 
   const mutationPositions = bestChanges.map((change) => change.p);
   const mutationBases = bestChanges.map((change) => change.m);
-  const selectedGuides = selectNearbyGuides(gb.seq, codonInfo.g, 10);
+  const selectedGuides = selectNearbyGuidesForModel(gb, reverseComplement, codonInfo.g, 10);
   if (!selectedGuides.length) return { err: "No gRNAs found with cut sites within 10 bp of the mutation site." };
   const blockedPositions = new Set(mutationPositions);
 
-  const result = { type: "pm", gene: cds.name, an: aaNumber, wA: wtAA.toUpperCase(), mA: mutAA.toUpperCase(), wC: codonInfo.cod, mC: bestMutantCodon, gp: codonInfo.g, ch: bestChanges, gs: [], os: [], ss: [], ps: [] };
+  const result = { type: "pm", gene: gb.gene, an: aaNumber, wA: wtAA.toUpperCase(), mA: mutAA.toUpperCase(), wC: codonInfo.cod, mC: bestMutantCodon, gp: codonInfo.g, ch: bestChanges, gs: [], os: [], ss: [], ps: [] };
   selectedGuides.forEach((guide, index) => {
-    const silent = findSilent(gb.seq, cds.segs, guide, blockedPositions);
-    const donor = mkODN(gb.seq, cds.segs, guide, mutationPositions, mutationBases, silent ? [silent] : []);
-    const guideName = makeGuideName(cds.name, "pm", index, mutationString);
+    const silent = findSilent(gb, guide, blockedPositions);
+    const donor = mkODN(gb, guide, mutationPositions, mutationBases, silent ? [silent] : []);
+    const guideName = makeGuideName(gb.gene, "pm", index, mutationString);
     result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: `Cut-to-edit distance ${Math.abs(guide.d)} bp` });
     if (donor) result.os.push({ ...donor, n: `ssODN${index + 1}`, gi: index, guideName, guideStrand: guide.str });
     if (silent) result.ss.push({ ...silent, gi: index + 1 });
@@ -643,33 +469,34 @@ export function designPM(gb, mutationString) {
 
   const forwardPrimerStart = Math.max(0, codonInfo.g - 250);
   result.ps = [
-    { n: makePrimerName(cds.name, "pm", "Fw", mutationString), s: gb.seq.slice(forwardPrimerStart, forwardPrimerStart + 24) },
-    { n: makePrimerName(cds.name, "pm", "Rev", mutationString), s: reverseComplement(gb.seq.slice(Math.min(gb.seq.length - 24, codonInfo.g + 250), Math.min(gb.seq.length, codonInfo.g + 274))) },
+    { n: makePrimerName(gb.gene, "pm", "Fw", mutationString), s: seq.slice(forwardPrimerStart, forwardPrimerStart + 24) },
+    { n: makePrimerName(gb.gene, "pm", "Rev", mutationString), s: reverseComplement(seq.slice(Math.min(seq.length - 24, codonInfo.g + 250), Math.min(seq.length, codonInfo.g + 274))) },
   ];
   return result;
 }
 
 export function designCT(gb, tag, homologyArmLength) {
-  const cds = getCDS(gb);
+  const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
-  const lastSegment = cds.segs[cds.segs.length - 1];
+  const seq = getGenomicSequence(gb);
+  const lastSegment = gb.cdsSegments[gb.cdsSegments.length - 1];
   const stopStart = lastSegment[1] - 3;
-  const stopCodon = gb.seq.slice(stopStart, stopStart + 3);
+  const stopCodon = seq.slice(stopStart, stopStart + 3);
   if (!["TAA", "TAG", "TGA"].includes(stopCodon)) return { err: `Expected a stop codon at the end of the CDS, found ${stopCodon}.` };
   const preset = getInsertPreset(tag, "ct");
   if (!preset) return { err: `Tag "${tag}" is not available.` };
 
   const armLength = parseInt(homologyArmLength, 10) || 250;
   const homology5Start = Math.max(0, stopStart - armLength);
-  const homology3End = Math.min(gb.seq.length, stopStart + 3 + armLength);
-  const homology5 = gb.seq.slice(homology5Start, stopStart);
-  const homology3 = gb.seq.slice(stopStart + 3, homology3End);
-  const guides = selectNearbyGuides(gb.seq, stopStart, 10);
+  const homology3End = Math.min(seq.length, stopStart + 3 + armLength);
+  const homology5 = seq.slice(homology5Start, stopStart);
+  const homology3 = seq.slice(stopStart + 3, homology3End);
+  const guides = selectNearbyGuidesForModel(gb, reverseComplement, stopStart, 10);
   if (!guides.length) return { err: "No SpCas9 gRNAs found with cut sites within 10 bp of the stop codon." };
 
   const silentMutations = [];
   guides.slice(0, 2).forEach((guide, index) => {
-    const silent = findSilent(gb.seq, cds.segs, guide);
+    const silent = findSilent(gb, guide);
     if (silent && silent.gp >= homology5Start && silent.gp < stopStart) silentMutations.push({ ...silent, gi: index + 1 });
   });
   const homology5Array = homology5.split("");
@@ -680,14 +507,14 @@ export function designCT(gb, tag, homologyArmLength) {
 
   const donor = `${homology5Array.join("")}${preset.seq}${homology3}`;
   const donorAnnotations = buildDonorAnnotations(homology5.length, preset.segments, homology3.length);
-  const lastAA = gCodon(cds.segs, gb.seq, cds.prot);
+  const lastAA = getCodonAtAa(gb, gb.proteinLength, toAA);
   return {
     type: "ct",
-    gene: cds.name,
+    gene: gb.gene,
     stop: stopCodon,
     sp: stopStart + 1,
-    prot: cds.prot,
-    lastAA: lastAA ? `${lastAA.aa}${cds.prot}` : "?",
+    prot: gb.proteinLength,
+    lastAA: lastAA ? `${lastAA.aa}${gb.proteinLength}` : "?",
     tag,
     td: `${tag} (${preset.seq.length} bp)`,
     il: preset.seq.length,
@@ -697,35 +524,35 @@ export function designCT(gb, tag, homologyArmLength) {
     dl: donor.length,
     donor,
     donorAnnotations,
-    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(cds.name, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: `Cut ${Math.abs(guide.d)} bp ${guide.d < 0 ? "5-prime" : "3-prime"} of stop` })),
+    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: `Cut ${Math.abs(guide.d)} bp ${guide.d < 0 ? "5-prime" : "3-prime"} of stop` })),
     ss: silentMutations,
     ps: [
-      { n: makePrimerName(cds.name, "ct", "Fw", "", tag), s: gb.seq.slice(Math.max(0, homology5Start - 50), Math.max(0, homology5Start - 50) + 24) },
-      { n: makePrimerName(cds.name, "ct", "Rev", "", tag), s: reverseComplement(gb.seq.slice(Math.min(gb.seq.length - 24, homology3End + 25), Math.min(gb.seq.length, homology3End + 49))) },
+      { n: makePrimerName(gb.gene, "ct", "Fw", "", tag), s: seq.slice(Math.max(0, homology5Start - 50), Math.max(0, homology5Start - 50) + 24) },
+      { n: makePrimerName(gb.gene, "ct", "Rev", "", tag), s: reverseComplement(seq.slice(Math.min(seq.length - 24, homology3End + 25), Math.min(seq.length, homology3End + 49))) },
     ],
     amp: `WT ~${homology3End + 49 - homology5Start + 50} bp | KI ~${homology3End + 49 - homology5Start + 50 + preset.seq.length} bp`,
   };
 }
 
 export function designKO(gb) {
-  const cds = getCDS(gb);
+  const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found." };
-  const exons = getExons(gb);
-  if (cds.segs.length < 2) return { err: "Not enough coding exons available for KO design." };
-  const target = findKoDesignTarget(gb.seq, cds.segs, exons);
+  if (gb.cdsSegments.length < 2) return { err: "Not enough coding exons available for KO design." };
+  const target = findKoDesignTargetFromModel(gb, reverseComplement, selectKoGuidePair);
   if (!target) return { err: "No gRNA pair found with cut-site spacing up to 140 bp across coding exons 2-4, including exon-intron boundaries." };
   const { start: exonStart, end: exonEnd, exonLength: bestLength, exonNumber, pair: selectedPair } = target;
+  const seq = getGenomicSequence(gb);
 
   return {
     type: "ko",
-    gene: cds.name,
+    gene: gb.gene,
     exon: `Exon ${exonNumber} (${exonStart + 1}-${exonEnd}, ${bestLength} bp)`,
     exSz: bestLength,
-    prot: cds.prot,
+    prot: gb.proteinLength,
     gs: selectedPair.guides.map((guide, index) => {
-      const context = describeKoGenomicContext(guide.cut, exons, cds.segs);
+      const context = describeKoGenomicContextFromModel(gb, guide.cut);
       return {
-        n: makeGuideName(cds.name, "ko", index),
+        n: makeGuideName(gb.gene, "ko", index),
         sp: guide.sp,
         pm: guide.pam,
         str: guide.str,
@@ -735,8 +562,8 @@ export function designKO(gb) {
       };
     }),
     ps: [
-      { n: makePrimerName(cds.name, "ko", "Fw"), s: gb.seq.slice(Math.max(0, exonStart - 200), Math.max(0, exonStart - 200) + 24) },
-      { n: makePrimerName(cds.name, "ko", "Rev"), s: reverseComplement(gb.seq.slice(Math.min(gb.seq.length - 24, exonEnd + 175), Math.min(gb.seq.length, exonEnd + 199))) },
+      { n: makePrimerName(gb.gene, "ko", "Fw"), s: seq.slice(Math.max(0, exonStart - 200), Math.max(0, exonStart - 200) + 24) },
+      { n: makePrimerName(gb.gene, "ko", "Rev"), s: reverseComplement(seq.slice(Math.min(seq.length - 24, exonEnd + 175), Math.min(seq.length, exonEnd + 199))) },
     ],
     amp: `~${exonEnd + 199 - exonStart + 200} bp`,
     strat: "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
@@ -744,10 +571,11 @@ export function designKO(gb) {
 }
 
 export function designNT(gb, tag, homologyArmLength) {
-  const cds = getCDS(gb);
+  const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found." };
-  const startCodonPos = cds.segs[0][0];
-  if (gb.seq.slice(startCodonPos, startCodonPos + 3) !== "ATG") return { err: `Expected ATG at CDS start, found ${gb.seq.slice(startCodonPos, startCodonPos + 3)}.` };
+  const seq = getGenomicSequence(gb);
+  const startCodonPos = gb.cdsSegments[0][0];
+  if (seq.slice(startCodonPos, startCodonPos + 3) !== "ATG") return { err: `Expected ATG at CDS start, found ${seq.slice(startCodonPos, startCodonPos + 3)}.` };
   const preset = getInsertPreset(tag, "nt");
   if (!preset) return { err: `Unknown tag: ${tag}.` };
 
@@ -755,15 +583,15 @@ export function designNT(gb, tag, homologyArmLength) {
   const insertionSite = startCodonPos;
   const codingResume = startCodonPos + 3;
   const homology5Start = Math.max(0, insertionSite - armLength);
-  const homology3End = Math.min(gb.seq.length, codingResume + armLength);
-  const homology5 = gb.seq.slice(homology5Start, insertionSite);
-  const homology3 = gb.seq.slice(codingResume, homology3End);
-  const guides = selectNearbyGuides(gb.seq, startCodonPos, 10);
+  const homology3End = Math.min(seq.length, codingResume + armLength);
+  const homology5 = seq.slice(homology5Start, insertionSite);
+  const homology3 = seq.slice(codingResume, homology3End);
+  const guides = selectNearbyGuidesForModel(gb, reverseComplement, startCodonPos, 10);
   if (!guides.length) return { err: "No gRNAs found with cut sites within 10 bp of the start codon." };
 
   const silentMutations = [];
   guides.slice(0, 2).forEach((guide, index) => {
-    const silent = findSilent(gb.seq, cds.segs, guide);
+    const silent = findSilent(gb, guide);
     if (silent && silent.gp >= homology5Start && silent.gp < homology3End) silentMutations.push({ ...silent, gi: index + 1 });
   });
 
@@ -780,8 +608,8 @@ export function designNT(gb, tag, homologyArmLength) {
   const donorAnnotations = buildDonorAnnotations(homology5.length, preset.segments, homology3.length);
   return {
     type: "nt",
-    gene: cds.name,
-    prot: cds.prot,
+    gene: gb.gene,
+    prot: gb.proteinLength,
     tag,
     td: `${tag} (${preset.seq.length} bp)`,
     il: preset.seq.length,
@@ -791,32 +619,43 @@ export function designNT(gb, tag, homologyArmLength) {
     dl: donor.length,
     donor,
     donorAnnotations,
-    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(cds.name, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: `Cut ${Math.abs(guide.d)} bp from start codon replacement site` })),
+    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: `Cut ${Math.abs(guide.d)} bp from start codon replacement site` })),
     ss: silentMutations,
     ps: [
-      { n: makePrimerName(cds.name, "nt", "Fw", "", tag), s: gb.seq.slice(Math.max(0, homology5Start - 50), Math.max(0, homology5Start - 50) + 24) },
-      { n: makePrimerName(cds.name, "nt", "Rev", "", tag), s: reverseComplement(gb.seq.slice(Math.min(gb.seq.length - 24, homology3End + 25), Math.min(gb.seq.length, homology3End + 49))) },
+      { n: makePrimerName(gb.gene, "nt", "Fw", "", tag), s: seq.slice(Math.max(0, homology5Start - 50), Math.max(0, homology5Start - 50) + 24) },
+      { n: makePrimerName(gb.gene, "nt", "Rev", "", tag), s: reverseComplement(seq.slice(Math.min(seq.length - 24, homology3End + 25), Math.min(seq.length, homology3End + 49))) },
     ],
     amp: `WT ~${homology3End + 49 - homology5Start + 50} bp | KI ~${homology3End + 49 - homology5Start + 50 + preset.seq.length - 3} bp`,
   };
 }
 
-export function runDesign(projectType, gbRaw, mutation, tag, homologyArmLength) {
-  if (!gbRaw) return { err: "Upload a GenBank file first." };
+export function runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength) {
+  if (!model?.genomicSequence) return { err: "Transcript model is missing genomic sequence." };
   if (!projectType) return { err: "Select a project type first." };
-
-  const gb = parseGB(gbRaw);
-  if (!gb.seq) return { err: "Could not parse a DNA sequence from the file." };
-  const cds = getCDS(gb);
-  if (!cds) return { err: "No CDS annotation found. The GenBank file needs a CDS feature." };
+  const cds = getCdsFromModel(model);
+  if (!cds) return { err: "Transcript model is missing CDS segments." };
 
   let designResult;
   if (projectType === "pm") {
     if (!mutation) return { err: "Enter a mutation such as L72S." };
-    designResult = designPM(gb, mutation);
-  } else if (projectType === "ct") designResult = designCT(gb, tag, homologyArmLength);
-  else if (projectType === "nt") designResult = designNT(gb, tag, homologyArmLength);
-  else designResult = designKO(gb);
+    designResult = designPM(model, mutation);
+  } else if (projectType === "ct") designResult = designCT(model, tag, homologyArmLength);
+  else if (projectType === "nt") designResult = designNT(model, tag, homologyArmLength);
+  else designResult = designKO(model);
 
-  return { gb, cds, dbg: `Parsed ${gb.seq.length} bp with ${gb.feats.length} features. CDS: ${cds.name}, ${cds.segs.length} segments, ${cds.prot} aa.`, ...designResult };
+  return {
+    gb: model,
+    cds,
+    dbg: `Parsed ${model.genomicSequence.length} bp with ${getFeatureCount(model)} features. CDS: ${model.gene}, ${model.cdsSegments.length} segments, ${model.proteinLength} aa.`,
+    ...designResult,
+  };
+}
+
+export function runDesign(projectType, gbRaw, mutation, tag, homologyArmLength) {
+  if (!gbRaw) return { err: "Upload a GenBank file first." };
+  const parsedGenBank = parseGB(gbRaw);
+  if (!parsedGenBank.seq) return { err: "Could not parse a DNA sequence from the file." };
+  const model = normalizeGenBankToTranscriptModel(parsedGenBank);
+  if (!model?.genomicSequence) return { err: "Could not normalize the GenBank file into a transcript model." };
+  return runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength);
 }
