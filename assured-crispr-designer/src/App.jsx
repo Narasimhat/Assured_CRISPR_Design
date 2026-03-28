@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 import { CASSETTES, runDesign } from "./designEngine";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
@@ -88,6 +89,17 @@ function formatDesignLabel(meta, result) {
   return `${result.gene} ${result.type === "ct" ? "C-terminal" : "N-terminal"} ${result.tag}`;
 }
 
+function buildDisplayedEditLabel(meta, result) {
+  if (!result) return meta.editSummary || "";
+  const canonical = formatDesignLabel(meta, result);
+  const requested = String(meta.editSummary || "").trim();
+  if (result.type === "pm") {
+    if (!requested) return canonical;
+    return requested === canonical ? canonical : `${canonical} | requested: ${requested}`;
+  }
+  return requested || canonical;
+}
+
 function buildDesignSummary(result) {
   if (!result) return "";
   const lines = [];
@@ -121,7 +133,7 @@ function buildGeneInfoRows(meta, result, fileName) {
   return [
     ["Gene", meta.gene || result.gene],
     ["Design class", getProjectTypeMeta(meta.projectType).label],
-    ["Target", meta.editSummary || formatDesignLabel(meta, result)],
+    ["Target", buildDisplayedEditLabel(meta, result)],
     ["Cell line", meta.cellLine || "n/a"],
     ["Protein / CDS", result.prot ? `${result.prot} aa` : "n/a"],
     ["Reference file", fileName || "Uploaded GenBank"],
@@ -346,6 +358,50 @@ function parseBatchDefinitionText(text) {
   return definitions;
 }
 
+function buildIdtTemplateRows(orderRows, defaults) {
+  return {
+    crispr: orderRows
+      .filter((row) => row.itemType === "gRNA")
+      .map((row) => ({ Name: row.name, Sequence: row.sequence, Scale: defaults.crisprScale })),
+    oligo: orderRows
+      .filter((row) => row.itemType === "Primer")
+      .map((row) => ({ Name: row.name, Sequence: row.sequence, Scale: defaults.oligoScale, Purification: defaults.oligoPurification })),
+    hdr: orderRows
+      .filter((row) => row.itemType === "Donor")
+      .map((row) => ({ Name: row.name, Sequence: row.sequence, Scale: defaults.hdrScale, Modification: defaults.hdrModification })),
+  };
+}
+
+function downloadXlsxTemplate(headers, rows, fileName) {
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows.map((row) => headers.map((header) => row[header] ?? ""))]);
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+  XLSX.writeFile(workbook, fileName);
+}
+
+function downloadIdtWorkbook(kind, templateRows, filePrefix = "") {
+  const config = {
+    crispr: {
+      headers: ["Name", "Sequence", "Scale"],
+      rows: templateRows.crispr,
+      fileName: `${filePrefix}template-paste-entry-crispr.xlsx`,
+    },
+    oligo: {
+      headers: ["Name", "Sequence", "Scale", "Purification"],
+      rows: templateRows.oligo,
+      fileName: `${filePrefix}template-paste-entry.xlsx`,
+    },
+    hdr: {
+      headers: ["Name", "Sequence", "Scale", "Modification"],
+      rows: templateRows.hdr,
+      fileName: `${filePrefix}template-paste-entry-hdr.xlsx`,
+    },
+  }[kind];
+  if (!config?.rows?.length) return null;
+  downloadXlsxTemplate(config.headers, config.rows, config.fileName);
+  return config.fileName;
+}
+
 function normalizeGeneToken(value) {
   const upper = String(value || "").toUpperCase().trim();
   const withoutIds = upper.replace(/[-_\s]*(ENSG|NM_|NCBI)\S*/g, " ");
@@ -357,9 +413,81 @@ function normalizeCellLine(value) {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
 }
 
-function mapHistoricalClass(projectType) {
-  if (projectType === "ct" || projectType === "nt") return "ki";
-  return projectType || "other";
+function inferCurrentHistoricalSubtype(result, projectType) {
+  const kind = result?.type || projectType;
+  if (kind === "ko") return "ko";
+  if (kind === "pm") return "snp_ki";
+  if (kind === "ct") return "ct_ki";
+  if (kind === "nt") return "nt_ki";
+  return "other";
+}
+
+function inferHistoricalSubtype(record) {
+  const modClass = String(record.modificationClass || "").toLowerCase();
+  const modType = String(record.modificationType || "").toLowerCase();
+  const donorType = String(record.donorType || "").toLowerCase();
+  const descriptor = `${record.modificationDescription || ""} ${record.donorName || ""} ${record.targetGene || ""}`.toLowerCase();
+
+  if (modClass === "ko" || modType === "ko" || descriptor.includes("knockout")) return "ko";
+  if (
+    modClass === "pm"
+    || modType === "snp"
+    || donorType === "ssodn"
+    || /\b[a-z]\d+[a-z]\b/i.test(record.modificationDescription || "")
+    || descriptor.includes(" snp")
+  ) return "snp_ki";
+
+  if (modClass === "ki" || modType === "ki") {
+    if (
+      descriptor.includes("n-term")
+      || descriptor.includes("n term")
+      || descriptor.includes("nterminal")
+      || descriptor.includes("n-terminal")
+      || descriptor.includes("start codon")
+      || descriptor.includes(" atg")
+      || descriptor.includes("exn1")
+      || descriptor.includes("exon1")
+      || descriptor.includes("exon 1")
+    ) return "nt_ki";
+    if (
+      descriptor.includes("c-term")
+      || descriptor.includes("c term")
+      || descriptor.includes("cterminal")
+      || descriptor.includes("c-terminal")
+      || descriptor.includes("stop codon")
+      || descriptor.includes("gfp-tag")
+      || descriptor.includes("snap-tag")
+      || descriptor.includes("sd40")
+      || descriptor.includes("dtag")
+      || descriptor.includes("maid")
+      || descriptor.includes("2xha")
+      || descriptor.includes("egfp")
+      || descriptor.includes("mcherry")
+      || descriptor.includes("mscarlet")
+      || descriptor.includes("luc2")
+    ) return "ct_ki";
+    return "ki_generic";
+  }
+
+  return "other";
+}
+
+function inferCurrentHistoricalSignature(result) {
+  if (!result) return "";
+  if (result.type === "pm") return `${result.wA}${result.an}${result.mA}`.toLowerCase();
+  if (result.type === "ct" || result.type === "nt") return simplifyTagName(result.tag).toLowerCase();
+  return "";
+}
+
+function inferRecordSpecificMatch(record, targetSubtype, signature) {
+  if (!signature) return false;
+  const descriptor = `${record.modificationDescription || ""} ${record.donorName || ""} ${record.targetGene || ""}`.toLowerCase();
+  if (targetSubtype === "snp_ki") {
+    const normalized = signature.replace(/\s+/g, "");
+    return descriptor.includes(normalized) || descriptor.includes(`p.${normalized}`);
+  }
+  if (targetSubtype === "ct_ki" || targetSubtype === "nt_ki") return descriptor.includes(signature);
+  return false;
 }
 
 function inferCurrentDonorType(result) {
@@ -372,7 +500,8 @@ function inferCurrentDonorType(result) {
 function buildHistoricalContext(meta, result, projectType) {
   const targetGene = normalizeGeneToken(meta.gene || result?.gene);
   const targetCellLine = normalizeCellLine(meta.cellLine);
-  const targetClass = mapHistoricalClass(result?.type || projectType);
+  const targetSubtype = inferCurrentHistoricalSubtype(result, projectType);
+  const targetSignature = inferCurrentHistoricalSignature(result);
   const currentGuides = new Set((result?.gs || []).map((guide) => guide.sp));
   const donorType = inferCurrentDonorType(result);
 
@@ -381,27 +510,39 @@ function buildHistoricalContext(meta, result, projectType) {
     const recordCellLine = normalizeCellLine(record.parentalLine);
     const sameGene = Boolean(targetGene && recordGene === targetGene);
     const sameCellLine = Boolean(targetCellLine && recordCellLine === targetCellLine);
-    const sameClass = record.modificationClass === targetClass;
+    const subtype = inferHistoricalSubtype(record);
+    const sameSubtype = subtype === targetSubtype;
+    const sameSpecificEdit = sameGene && sameSubtype && inferRecordSpecificMatch(record, targetSubtype, targetSignature);
+    const compatibleSubtype = sameSubtype
+      || ((targetSubtype === "ct_ki" || targetSubtype === "nt_ki") && subtype === "ki_generic");
     const guideOverlap = (record.guides || []).filter((guide) => currentGuides.has(guide.sequence)).length;
     let score = 0;
+    if (sameSpecificEdit) score += 12;
     if (sameGene) score += 6;
-    if (sameClass) score += 4;
+    if (sameSubtype) score += 6;
+    else if (compatibleSubtype) score += 2;
     if (sameCellLine) score += 3;
     if (record.donorType === donorType) score += 1;
     score += guideOverlap * 5;
-    return { ...record, sameGene, sameCellLine, sameClass, guideOverlap, score };
+    return { ...record, sameGene, sameCellLine, sameSubtype, sameSpecificEdit, compatibleSubtype, subtype, guideOverlap, score };
   }).filter((record) => record.score > 0);
 
   const matches = scored.sort((left, right) => {
+    if (right.sameSpecificEdit !== left.sameSpecificEdit) return right.sameSpecificEdit ? 1 : -1;
+    if (right.sameGene !== left.sameGene) return right.sameGene ? 1 : -1;
+    if (right.sameSubtype !== left.sameSubtype) return right.sameSubtype ? 1 : -1;
+    if (right.compatibleSubtype !== left.compatibleSubtype) return right.compatibleSubtype ? 1 : -1;
     if (right.score !== left.score) return right.score - left.score;
     if (right.guideOverlap !== left.guideOverlap) return right.guideOverlap - left.guideOverlap;
     return (left.projectId || "").localeCompare(right.projectId || "");
   });
 
+  const sameSpecificMatches = matches.filter((record) => record.sameSpecificEdit);
   const sameGeneMatches = matches.filter((record) => record.sameGene);
-  const sameGeneAndClass = matches.filter((record) => record.sameGene && record.sameClass);
+  const sameGeneAndSubtype = matches.filter((record) => record.sameGene && record.sameSubtype);
   const sameGeneAndCell = matches.filter((record) => record.sameGene && record.sameCellLine);
-  const sameClassAndCell = matches.filter((record) => record.sameClass && record.sameCellLine);
+  const sameSubtypeAndCell = matches.filter((record) => record.sameSubtype && record.sameCellLine);
+  const compatibleKiMatches = matches.filter((record) => record.compatibleSubtype && !record.sameSubtype);
   const exactGuideReuse = matches.filter((record) => record.guideOverlap > 0);
   const recommendations = [];
   const recommendedGuides = [];
@@ -409,15 +550,23 @@ function buildHistoricalContext(meta, result, projectType) {
   const seenGuideSequences = new Set();
   const seenDonorSequences = new Set();
 
+  if (sameSpecificMatches.length) recommendations.push(`Found ${sameSpecificMatches.length} historical record${sameSpecificMatches.length === 1 ? "" : "s"} that appear to match this exact edit signature.`);
   if (sameGeneAndCell.length) recommendations.push(`Found ${sameGeneAndCell.length} established project${sameGeneAndCell.length === 1 ? "" : "s"} for this gene in the same parental line.`);
-  if (!sameGeneAndCell.length && sameGeneAndClass.length) recommendations.push(`Found ${sameGeneAndClass.length} established project${sameGeneAndClass.length === 1 ? "" : "s"} for this gene with the same edit class.`);
-  if (!sameGeneAndClass.length && sameClassAndCell.length) recommendations.push(`No same-gene precedent was found, but ${sameClassAndCell.length} established project${sameClassAndCell.length === 1 ? "" : "s"} exist in the same parental line for this edit class.`);
+  if (!sameGeneAndCell.length && sameGeneAndSubtype.length) recommendations.push(`Found ${sameGeneAndSubtype.length} established project${sameGeneAndSubtype.length === 1 ? "" : "s"} for this gene with the same edit subtype.`);
+  if (!sameGeneAndSubtype.length && sameSubtypeAndCell.length) recommendations.push(`No same-gene precedent was found, but ${sameSubtypeAndCell.length} established project${sameSubtypeAndCell.length === 1 ? "" : "s"} exist in the same parental line for this exact design subtype.`);
+  if (!sameGeneAndSubtype.length && !sameSubtypeAndCell.length && compatibleKiMatches.length) recommendations.push(`Only generic KI precedent was found for this gene or cell line. Orientation-specific KI precedent is limited, so review insertion context manually.`);
   if (exactGuideReuse.length) recommendations.push(`Exact guide reuse appears in ${exactGuideReuse.length} established record${exactGuideReuse.length === 1 ? "" : "s"}; review those projects before ordering.`);
   if (result?.type === "pm" && sameGeneMatches.some((record) => record.donorType === "ssODN")) recommendations.push("Historical matches for this gene used ssODN donors, which supports the current SNP design strategy.");
-  if ((result?.type === "ct" || result?.type === "nt") && !sameGeneAndClass.length) recommendations.push("No close KI precedent was found in the imported history; verify donor frame, junction PCR, and protein expression plan manually.");
+  if ((result?.type === "ct" || result?.type === "nt") && !sameGeneAndSubtype.length) recommendations.push("No close orientation-matched KI precedent was found in the imported history; verify donor frame, insertion orientation, and junction-PCR plan manually.");
 
-  matches.forEach((record) => {
-    if ((record.sameGene || record.sameCellLine || record.guideOverlap > 0) && recommendedGuides.length < 6) {
+  let prioritizedMatches = matches;
+  if (sameSpecificMatches.length) prioritizedMatches = sameSpecificMatches;
+  else if (sameGeneAndSubtype.length) prioritizedMatches = sameGeneAndSubtype;
+  else if (sameGeneMatches.length) prioritizedMatches = sameGeneMatches;
+  else if (sameSubtypeAndCell.length) prioritizedMatches = sameSubtypeAndCell;
+
+  prioritizedMatches.forEach((record) => {
+    if ((record.sameSubtype || record.compatibleSubtype || record.sameGene || record.sameCellLine || record.guideOverlap > 0) && recommendedGuides.length < 6) {
       (record.guides || []).forEach((guide) => {
         if (recommendedGuides.length >= 6) return;
         if (!guide.sequence || seenGuideSequences.has(guide.sequence)) return;
@@ -427,12 +576,12 @@ function buildHistoricalContext(meta, result, projectType) {
           sequence: guide.sequence,
           sourceProject: record.projectId,
           sourceLine: record.parentalLine || "n/a",
-          matchLabel: record.guideOverlap > 0 ? "exact guide reuse" : record.sameGene && record.sameCellLine ? "same gene + same line" : record.sameGene ? "same gene" : "same line",
+          matchLabel: record.guideOverlap > 0 ? "exact guide reuse" : record.sameSpecificEdit ? "same edit" : record.sameSubtype ? "same subtype" : record.compatibleSubtype ? "generic KI fallback" : record.sameGene && record.sameCellLine ? "same gene + same line" : record.sameGene ? "same gene" : "same line",
         });
       });
     }
 
-    if ((record.sameGene || record.sameCellLine) && record.donorSequence && recommendedDonors.length < 3 && !seenDonorSequences.has(record.donorSequence)) {
+    if ((record.sameSubtype || record.compatibleSubtype || record.sameGene || record.sameCellLine) && record.donorSequence && recommendedDonors.length < 3 && !seenDonorSequences.has(record.donorSequence)) {
       seenDonorSequences.add(record.donorSequence);
       recommendedDonors.push({
         name: record.donorName || "Historical donor",
@@ -440,24 +589,26 @@ function buildHistoricalContext(meta, result, projectType) {
         donorType: record.donorType || "donor",
         sourceProject: record.projectId,
         sourceLine: record.parentalLine || "n/a",
-        matchLabel: record.sameGene && record.sameCellLine ? "same gene + same line" : record.sameGene ? "same gene" : "same line",
+        matchLabel: record.sameSpecificEdit ? "same edit" : record.sameSubtype ? "same subtype" : record.compatibleSubtype ? "generic KI fallback" : record.sameGene && record.sameCellLine ? "same gene + same line" : record.sameGene ? "same gene" : "same line",
       });
     }
   });
 
   return {
     targetGene,
-    targetClass,
+    targetSubtype,
     totalMatches: matches.length,
-    topMatches: matches.slice(0, 6),
+    topMatches: prioritizedMatches.slice(0, 6),
     recommendations: recommendations.slice(0, 4),
     recommendedGuides,
     recommendedDonors,
     stats: {
+      sameSpecificEdit: sameSpecificMatches.length,
       sameGene: sameGeneMatches.length,
-      sameGeneAndClass: sameGeneAndClass.length,
+      sameGeneAndSubtype: sameGeneAndSubtype.length,
       sameGeneAndCell: sameGeneAndCell.length,
-      sameClassAndCell: sameClassAndCell.length,
+      sameSubtypeAndCell: sameSubtypeAndCell.length,
+      compatibleKiFallbacks: compatibleKiMatches.length,
       exactGuideReuse: exactGuideReuse.length,
     },
   };
@@ -708,18 +859,19 @@ function buildAnnotatedDonorHtml(sequence, annotations = []) {
 
 function buildHistoricalRowsHtml(matches) {
   if (!matches.length) {
-    return `<p style="font-size:13px;line-height:1.45;">No comparable established projects were found in the imported internal history for the current gene, parental line, or edit class.</p>`;
+    return `<p style="font-size:13px;line-height:1.45;">No comparable established projects were found in the imported internal history for the current gene, parental line, or design subtype.</p>`;
   }
   const rows = matches.map((record) => [
     record.projectId,
     record.targetGene || "n/a",
     record.parentalLine || "n/a",
     record.establishedLine || "n/a",
+    record.sameSubtype ? "same subtype" : record.compatibleSubtype ? "generic KI fallback" : record.sameGene ? "same gene" : "related",
     record.modificationType || "n/a",
     record.donorType || "n/a",
     record.guideOverlap ? `${record.guideOverlap} exact` : "none",
   ]);
-  return `<table>${tableHtml([["Project", "Gene", "Parental line", "Established line", "Type", "Donor", "Guide overlap"]], true)}${tableHtml(rows)}</table>`;
+  return `<table>${tableHtml([["Project", "Gene", "Parental line", "Established line", "Match", "Type", "Donor", "Guide overlap"]], true)}${tableHtml(rows)}</table>`;
 }
 
 function buildRecommendedSequencesHtml(historicalContext) {
@@ -758,7 +910,7 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems)
   const headerRows = [
     ["Group", meta.clientName || "n/a"],
     ["IRIS ID", meta.irisId || "[to be assigned]"],
-    ["Mutation / edit", meta.editSummary || formatDesignLabel(meta, result)],
+    ["Mutation / edit", buildDisplayedEditLabel(meta, result)],
     ["Cell line", meta.cellLine || "n/a"],
   ];
   const geneRows = buildGeneInfoRows(meta, result, fileName);
@@ -767,7 +919,9 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems)
   const ssOdnNotes = buildSsOdnNotes(result);
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const donorBlock = result.type === "pm"
-    ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
+    ? ((result.os || []).length
+      ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
+      : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
     : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption.</p>`
       : buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || []);
@@ -984,6 +1138,8 @@ export default function App() {
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
   const [copyState, setCopyState] = useState("");
+  const [showHistoricalMatches, setShowHistoricalMatches] = useState(false);
+  const [showHistoricalSequences, setShowHistoricalSequences] = useState(false);
   const [batchSize, setBatchSize] = useState(8);
   const [batchRows, setBatchRows] = useState(() => resizeBatchRows([], 8));
   const [batchResults, setBatchResults] = useState([]);
@@ -991,6 +1147,13 @@ export default function App() {
   const [batchCopyState, setBatchCopyState] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
   const [batchDefinitionText, setBatchDefinitionText] = useState("");
+  const [idtDefaults, setIdtDefaults] = useState({
+    crisprScale: "",
+    oligoScale: "",
+    oligoPurification: "",
+    hdrScale: "",
+    hdrModification: "",
+  });
   const [meta, setMeta] = useState({
     irisId: "",
     clientId: "",
@@ -1003,17 +1166,34 @@ export default function App() {
     projectType: "pm",
   });
 
-  const cassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
+  const ctCassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
+  const ntCassetteOptions = useMemo(() => Object.keys(CASSETTES), []);
   const folderName = useMemo(() => buildProjectFolderName(meta), [meta]);
   const historicalContext = useMemo(() => buildHistoricalContext(meta, result, projectType), [meta, result, projectType]);
   const reviewItems = useMemo(() => buildReviewItems(meta, result, fileName), [meta, result, fileName]);
   const reportHtml = useMemo(() => buildReportHtml(meta, result, fileName, historicalContext, reviewItems), [meta, result, fileName, historicalContext, reviewItems]);
+  const singleOrderRows = useMemo(() => {
+    if (!result) return [];
+    return buildBatchOrderRows([{
+      slot: 1,
+      row: {
+        fileName,
+        label: meta.editSummary || formatDesignLabel(meta, result),
+      },
+      status: "success",
+      result,
+    }]);
+  }, [result, fileName, meta]);
   const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
   const batchOrderRows = useMemo(() => buildBatchOrderRows(batchSuccessfulResults), [batchSuccessfulResults]);
   const batchFolderLibrary = useMemo(() => buildFolderLibrary(batchFolderEntries), [batchFolderEntries]);
+  const singleIdtTemplateRows = useMemo(() => buildIdtTemplateRows(singleOrderRows, idtDefaults), [singleOrderRows, idtDefaults]);
+  const idtTemplateRows = useMemo(() => buildIdtTemplateRows(batchOrderRows, idtDefaults), [batchOrderRows, idtDefaults]);
+  const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
 
   const updateMeta = (key, value) => setMeta((current) => ({ ...current, [key]: value }));
   const updateBatchRow = (index, key, value) => setBatchRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
+  const updateIdtDefault = (key, value) => setIdtDefaults((current) => ({ ...current, [key]: value }));
 
   const onFile = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -1168,16 +1348,6 @@ export default function App() {
     }
   };
 
-  const copyBatchOrderSheet = async () => {
-    if (!batchOrderRows.length) return;
-    try {
-      await navigator.clipboard.writeText(buildBatchOrderDelimited(batchOrderRows, "\t"));
-      setBatchCopyState("Batch order sheet copied as tab-delimited text.");
-    } catch (copyError) {
-      setBatchCopyState(`Copy failed: ${copyError.message}`);
-    }
-  };
-
   const downloadReport = () => {
     if (!reportHtml) return;
     const blob = new Blob([reportHtml], { type: "text/html" });
@@ -1190,16 +1360,17 @@ export default function App() {
     setCopyState("HTML report downloaded.");
   };
 
-  const downloadBatchOrderSheet = () => {
-    if (!batchOrderRows.length) return;
-    const blob = new Blob([buildBatchOrderDelimited(batchOrderRows)], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `idt_batch_order_${batchSuccessfulResults.length}_designs.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-    setBatchCopyState("Batch order sheet downloaded.");
+  const downloadIdtTemplate = (kind) => {
+    const fileName = downloadIdtWorkbook(kind, idtTemplateRows);
+    if (!fileName) return;
+    setBatchCopyState(`Downloaded ${fileName}.`);
+  };
+
+  const downloadSingleIdtTemplate = (kind) => {
+    const filePrefix = `${buildSafeToken(result?.gene, "GENE")}_`;
+    const fileName = downloadIdtWorkbook(kind, singleIdtTemplateRows, filePrefix);
+    if (!fileName) return;
+    setCopyState(`Downloaded ${fileName}.`);
   };
 
   const projectTypeMeta = getProjectTypeMeta(projectType);
@@ -1269,7 +1440,7 @@ export default function App() {
             {projectType === "pm" && <label style={{ display: "block", marginBottom: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Mutation</div><input value={mutation} onChange={(event) => setMutation(event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
             {(projectType === "ct" || projectType === "nt") && (
               <Grid>
-                <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cassette</div><select value={tag} onChange={(event) => setTag(event.target.value)} style={FIELD_STYLE}>{cassetteOptions.map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}</select></label>
+                <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cassette</div><select value={tag} onChange={(event) => setTag(event.target.value)} style={FIELD_STYLE}>{(projectType === "nt" ? ntCassetteOptions : ctCassetteOptions).map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}</select></label>
                 <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Homology arm</div><select value={homologyArm} onChange={(event) => setHomologyArm(event.target.value)} style={FIELD_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
               </Grid>
             )}
@@ -1280,104 +1451,149 @@ export default function App() {
           </div>
         </Grid>
 
-        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
-          <SectionTitle>3. Historical References</SectionTitle>
-          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Imported from your established-project workbook. This panel is advisory only and is meant to show precedent, guide reuse, and how much same-gene or same-cell-line support exists before the design is finalized.
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-            <Badge color={COLORS.success}>{HISTORICAL_PROJECTS_SUMMARY.recordCount} imported projects</Badge>
-            <Badge color={COLORS.accentAlt}>{historicalContext.stats.sameGene} same-gene matches</Badge>
-            <Badge color={COLORS.accent}>{historicalContext.stats.sameGeneAndCell} same-gene same-line</Badge>
-            <Badge color={COLORS.success}>{historicalContext.stats.exactGuideReuse} exact guide reuses</Badge>
-          </div>
-          {!result && <div style={{ color: COLORS.muted, fontSize: 13 }}>Run a design to compare it against the imported established projects.</div>}
-          {result && (
-            <Grid>
-              <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14 }}>
-                <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Recommendations</div>
-                {historicalContext.recommendations.length ? (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {historicalContext.recommendations.map((line) => (
-                      <div key={line} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
-                        {line}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>No close precedent was found for this exact combination. Treat the design as novel and review all ordering assumptions manually.</div>
-                )}
+        <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(148,163,184,0.10), rgba(15,28,46,0.92))", borderStyle: "dashed" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 14, alignItems: "flex-start", marginBottom: 12 }}>
+            <div>
+              <SectionTitle>3. Historical Reference Brief</SectionTitle>
+              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5, maxWidth: 760 }}>
+                Advisory only. This sits apart from the active design and is meant to answer one question quickly: how much precedent exists for this target before ordering?
               </div>
-              <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14 }}>
-                <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Top established matches</div>
-                {!historicalContext.topMatches.length && <div style={{ color: COLORS.muted, fontSize: 13 }}>No comparable records found.</div>}
-                {historicalContext.topMatches.length > 0 && (
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {historicalContext.topMatches.map((record) => (
-                      <div key={record.projectId} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
-                          <div style={{ fontWeight: 700 }}>{record.projectId}</div>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                            {record.sameGene && <Badge color={COLORS.success}>same gene</Badge>}
-                            {record.sameCellLine && <Badge color={COLORS.accent}>same line</Badge>}
-                            {record.sameClass && <Badge color={COLORS.accentAlt}>same class</Badge>}
-                            {record.guideOverlap > 0 && <Badge color={COLORS.success}>{record.guideOverlap} guide overlap</Badge>}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <Badge color={COLORS.success}>{HISTORICAL_PROJECTS_SUMMARY.recordCount} imported</Badge>
+              <Badge color={COLORS.success}>{historicalContext.stats.sameSpecificEdit} same edit</Badge>
+              <Badge color={COLORS.accentAlt}>{historicalContext.stats.sameGene} gene matches</Badge>
+              <Badge color={COLORS.accent}>{historicalContext.stats.sameGeneAndSubtype} exact subtype</Badge>
+              <Badge color={COLORS.accentAlt}>{historicalContext.stats.compatibleKiFallbacks} KI fallback</Badge>
+              <Badge color={COLORS.success}>{historicalContext.stats.exactGuideReuse} guide reuses</Badge>
+            </div>
+          </div>
+
+          {!result && <div style={{ color: COLORS.muted, fontSize: 13 }}>Run a design to populate the historical brief.</div>}
+
+          {result && (
+            <>
+              <Grid>
+                <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: "rgba(7,17,28,0.38)" }}>
+                  <div style={{ color: COLORS.dim, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Precedent Strength</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: COLORS.text, marginBottom: 6 }}>{historicalContext.topMatches.length ? `${historicalContext.topMatches.length} matched records` : "No close match"}</div>
+                  <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
+                    {historicalContext.recommendations[0] || "Treat this as a novel design and rely on sequence-level review rather than precedent."}
+                  </div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: "rgba(7,17,28,0.38)" }}>
+                  <div style={{ color: COLORS.dim, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Guide Reuse</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: COLORS.text, marginBottom: 6 }}>{historicalContext.stats.exactGuideReuse}</div>
+                  <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
+                    {historicalContext.stats.exactGuideReuse ? "Existing guide overlap was found in the imported reference set." : "No exact guide reuse was found in the imported history."}
+                  </div>
+                </div>
+                <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: "rgba(7,17,28,0.38)" }}>
+                  <div style={{ color: COLORS.dim, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Legacy Sequences</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: COLORS.text, marginBottom: 6 }}>{historicalContext.recommendedGuides.length + historicalContext.recommendedDonors.length}</div>
+                  <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
+                    Historical guides and donors are kept behind an optional drawer so they do not crowd the design output.
+                  </div>
+                </div>
+              </Grid>
+
+              <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                {(historicalContext.recommendations.length ? historicalContext.recommendations : ["No close precedent was found for this exact combination. Review ordering assumptions manually."]).slice(0, 3).map((line, index) => (
+                  <div key={`${index}-${line}`} style={{ padding: "10px 12px", borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "rgba(15,28,46,0.72)", color: COLORS.text, fontSize: 13, lineHeight: 1.5 }}>
+                    {line}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+                <button type="button" onClick={() => setShowHistoricalMatches((current) => !current)} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                  {showHistoricalMatches ? "Hide precedent records" : `Show precedent records (${historicalContext.topMatches.length})`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowHistoricalSequences((current) => !current)}
+                  disabled={!historicalContext.recommendedGuides.length && !historicalContext.recommendedDonors.length}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: historicalContext.recommendedGuides.length || historicalContext.recommendedDonors.length ? "pointer" : "not-allowed", fontWeight: 700 }}
+                >
+                  {showHistoricalSequences ? "Hide legacy sequences" : `Show legacy sequences (${historicalContext.recommendedGuides.length + historicalContext.recommendedDonors.length})`}
+                </button>
+              </div>
+
+              {showHistoricalMatches && (
+                <div style={{ marginTop: 14, padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: "rgba(15,28,46,0.78)" }}>
+                  <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Top established matches</div>
+                  {!historicalContext.topMatches.length && <div style={{ color: COLORS.muted, fontSize: 13 }}>No comparable records found.</div>}
+                  {historicalContext.topMatches.length > 0 && (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {historicalContext.topMatches.map((record) => (
+                        <div key={record.projectId} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 6 }}>
+                            <div style={{ fontWeight: 700 }}>{record.projectId}</div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                              {record.sameSpecificEdit && <Badge color={COLORS.success}>same edit</Badge>}
+                              {record.sameSubtype && <Badge color={COLORS.accent}>same subtype</Badge>}
+                              {!record.sameSubtype && record.compatibleSubtype && <Badge color={COLORS.accentAlt}>generic KI fallback</Badge>}
+                              {record.sameGene && <Badge color={COLORS.success}>same gene</Badge>}
+                              {record.sameCellLine && <Badge color={COLORS.accent}>same line</Badge>}
+                              {record.guideOverlap > 0 && <Badge color={COLORS.success}>{record.guideOverlap} guide overlap</Badge>}
+                            </div>
+                          </div>
+                          <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
+                            {record.targetGene || "n/a"} | {record.modificationType || "n/a"} | parent {record.parentalLine || "n/a"} | established {record.establishedLine || "n/a"}
+                          </div>
+                          <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
+                            Donor: {record.donorType || "n/a"}{record.registrationDate ? ` | registered ${record.registrationDate}` : ""}
                           </div>
                         </div>
-                        <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
-                          {record.targetGene || "n/a"} | {record.modificationType || "n/a"} | parent {record.parentalLine || "n/a"} | established {record.establishedLine || "n/a"}
-                        </div>
-                        <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.6 }}>
-                          Donor: {record.donorType || "n/a"}{record.registrationDate ? ` | registered ${record.registrationDate}` : ""}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </Grid>
-          )}
-          {result && (historicalContext.recommendedGuides.length > 0 || historicalContext.recommendedDonors.length > 0) && (
-            <div style={{ ...CARD_STYLE, marginTop: 12, background: COLORS.panelAlt, padding: 14 }}>
-              <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Recommended historical sequences</div>
-              <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                These are pulled from matched established projects. Use them as reference candidates, not as automatic replacements for the current design.
-              </div>
-              {historicalContext.recommendedGuides.length > 0 && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Historical gRNAs</div>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {historicalContext.recommendedGuides.map((guide) => (
-                      <div key={`${guide.sourceProject}-${guide.sequence}`} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 4 }}>
-                          <div style={{ fontWeight: 700 }}>{guide.name}</div>
-                          <Badge color={COLORS.success}>{guide.matchLabel}</Badge>
-                        </div>
-                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{guide.sourceProject} | {guide.sourceLine}</div>
-                        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{guide.sequence}</div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
-              {historicalContext.recommendedDonors.length > 0 && (
-                <div>
-                  <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Historical donors</div>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    {historicalContext.recommendedDonors.map((donor) => (
-                      <div key={`${donor.sourceProject}-${donor.sequence}`} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 4 }}>
-                          <div style={{ fontWeight: 700 }}>{donor.name} ({donor.donorType})</div>
-                          <Badge color={COLORS.accentAlt}>{donor.matchLabel}</Badge>
-                        </div>
-                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{donor.sourceProject} | {donor.sourceLine}</div>
-                        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{donor.sequence}</div>
-                      </div>
-                    ))}
+
+              {showHistoricalSequences && (historicalContext.recommendedGuides.length > 0 || historicalContext.recommendedDonors.length > 0) && (
+                <div style={{ marginTop: 12, padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: "rgba(15,28,46,0.78)" }}>
+                  <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 10 }}>Legacy sequence drawer</div>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+                    These are reference-only sequences from historical projects and are intentionally hidden by default so the current design remains the primary focus.
                   </div>
+                  {historicalContext.recommendedGuides.length > 0 && (
+                    <div style={{ marginBottom: historicalContext.recommendedDonors.length ? 14 : 0 }}>
+                      <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Historical gRNAs</div>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {historicalContext.recommendedGuides.map((guide) => (
+                          <div key={`${guide.sourceProject}-${guide.sequence}`} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 4 }}>
+                              <div style={{ fontWeight: 700 }}>{guide.name}</div>
+                              <Badge color={COLORS.success}>{guide.matchLabel}</Badge>
+                            </div>
+                            <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{guide.sourceProject} | {guide.sourceLine}</div>
+                            <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{guide.sequence}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {historicalContext.recommendedDonors.length > 0 && (
+                    <div>
+                      <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Historical donors</div>
+                      <div style={{ display: "grid", gap: 8 }}>
+                        {historicalContext.recommendedDonors.map((donor) => (
+                          <div key={`${donor.sourceProject}-${donor.sequence}`} style={{ padding: 10, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: COLORS.panel }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 4 }}>
+                              <div style={{ fontWeight: 700 }}>{donor.name} ({donor.donorType})</div>
+                              <Badge color={COLORS.accentAlt}>{donor.matchLabel}</Badge>
+                            </div>
+                            <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{donor.sourceProject} | {donor.sourceLine}</div>
+                            <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>{donor.sequence}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
+            </>
           )}
         </div>
 
@@ -1390,6 +1606,26 @@ export default function App() {
             {copyState && <Badge color={COLORS.success}>{copyState}</Badge>}
           </div>
 
+          {result && (
+            <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}` }}>
+              <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Single-Design IDT Export</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
+                Export this design directly into the same IDT upload template format used in batch mode.
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                <button type="button" disabled={!singleIdtTemplateRows.crispr.length} onClick={() => downloadSingleIdtTemplate("crispr")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.crispr.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                  Download single IDT CRISPR template
+                </button>
+                <button type="button" disabled={!singleIdtTemplateRows.oligo.length} onClick={() => downloadSingleIdtTemplate("oligo")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.oligo.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                  Download single IDT primer template
+                </button>
+                <button type="button" disabled={!singleIdtTemplateRows.hdr.length} onClick={() => downloadSingleIdtTemplate("hdr")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.hdr.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                  Download single IDT HDR template
+                </button>
+              </div>
+            </div>
+          )}
+
           <div style={{ padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", minHeight: 380 }}>
             {!result && <div style={{ color: "#667085" }}>Run a design to populate the final report preview.</div>}
             {result && (
@@ -1399,7 +1635,7 @@ export default function App() {
                     {[
                       ["Group", meta.clientName || "n/a"],
                       ["IRIS ID", meta.irisId || "[to be assigned]"],
-                      ["Mutation / edit", meta.editSummary || formatDesignLabel(meta, result)],
+                      ["Mutation / edit", buildDisplayedEditLabel(meta, result)],
                       ["Cell line", meta.cellLine || "n/a"],
                     ].map(([label, value]) => (
                       <tr key={label}>
@@ -1662,7 +1898,7 @@ export default function App() {
                             <label>
                               <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cassette</div>
                               <select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>
-                                {cassetteOptions.map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}
+                                {(row.projectType === "nt" ? ntCassetteOptions : ctCassetteOptions).map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}
                               </select>
                             </label>
                             <label>
@@ -1703,21 +1939,82 @@ export default function App() {
             <button type="button" onClick={runBatch} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none" }}>
               Generate batch designs
             </button>
-            <button type="button" disabled={!batchOrderRows.length} onClick={downloadBatchOrderSheet} style={{ ...FIELD_STYLE, width: "auto", cursor: batchOrderRows.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-              Download IDT order sheet CSV
-            </button>
-            <button type="button" disabled={!batchOrderRows.length} onClick={copyBatchOrderSheet} style={{ ...FIELD_STYLE, width: "auto", cursor: batchOrderRows.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-              Copy order sheet
-            </button>
             {batchCopyState && <Badge color={COLORS.success}>{batchCopyState}</Badge>}
           </div>
           {batchError && <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{batchError}</div>}
 
           {batchSuccessfulResults.length > 0 && (
             <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", overflowX: "auto" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Order Sheet Preview</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>IDT Template Export</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                `Sequence To Order` is the field intended for Excel/IDT submission. For gRNAs, the spacer is exported without PAM. For SNP donors, the exported donor is the recommended order strand.
+                These downloads match the headers in your IDT upload templates:
+                `template-paste-entry-crispr.xlsx`, `template-paste-entry.xlsx`, and `template-paste-entry-hdr.xlsx`.
+              </div>
+              <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+                <Grid>
+                  <label>
+                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>CRISPR scale</div>
+                    <input value={idtDefaults.crisprScale} onChange={(event) => updateIdtDefault("crisprScale", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="25nm" />
+                  </label>
+                  <label>
+                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Primer scale</div>
+                    <input value={idtDefaults.oligoScale} onChange={(event) => updateIdtDefault("oligoScale", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="25nm" />
+                  </label>
+                  <label>
+                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Primer purification</div>
+                    <input value={idtDefaults.oligoPurification} onChange={(event) => updateIdtDefault("oligoPurification", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="STD" />
+                  </label>
+                  <label>
+                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>HDR scale</div>
+                    <input value={idtDefaults.hdrScale} onChange={(event) => updateIdtDefault("hdrScale", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="4nmU" />
+                  </label>
+                  <label>
+                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>HDR modification</div>
+                    <input value={idtDefaults.hdrModification} onChange={(event) => updateIdtDefault("hdrModification", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="None or phosphorothioate format" />
+                  </label>
+                </Grid>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <button type="button" disabled={!idtTemplateRows.crispr.length} onClick={() => downloadIdtTemplate("crispr")} style={{ ...FIELD_STYLE, width: "auto", cursor: idtTemplateRows.crispr.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                    Download IDT CRISPR template
+                  </button>
+                  <button type="button" disabled={!idtTemplateRows.oligo.length} onClick={() => downloadIdtTemplate("oligo")} style={{ ...FIELD_STYLE, width: "auto", cursor: idtTemplateRows.oligo.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                    Download IDT primer template
+                  </button>
+                  <button type="button" disabled={!idtTemplateRows.hdr.length} onClick={() => downloadIdtTemplate("hdr")} style={{ ...FIELD_STYLE, width: "auto", cursor: idtTemplateRows.hdr.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                    Download IDT HDR template
+                  </button>
+                </div>
+              </div>
+
+              {batchDonorRows.length > 0 && (
+                <>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Batch Donor Sequences</div>
+                  <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+                    This section lists the donor sequences explicitly before export. For SNP designs, the sequence shown here is the recommended order strand.
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16, minWidth: 980 }}>
+                    <thead>
+                      <tr>{["Slot", "Design", "Donor Name", "Sequence", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {batchDonorRows.map((row, rowIndex) => (
+                        <tr key={`${row.slot}-${row.name}-${rowIndex}`}>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.slot}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.designLabel}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.name}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace", wordBreak: "break-all" }}>{row.sequence}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.linkedGuide || "n/a"}</td>
+                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.notes || ""}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Combined Order Preview</div>
+              <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+                This is a review table only. The actual upload files are the separate IDT template downloads above. For gRNAs, the sequence exported to IDT is the spacer without PAM. For SNP donors, the exported donor is the recommended order strand.
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
                 <thead>

@@ -195,7 +195,7 @@ function armType(guide, mutationPos) {
   return guide.str === "+" ? (mutationPos > guide.cut ? "PROX" : "DIST") : (mutationPos < guide.cut ? "PROX" : "DIST");
 }
 
-function findSilent(seq, segs, guide) {
+function findSilent(seq, segs, guide, blockedPositions = new Set()) {
   let pamStart;
   if (guide.str === "+") pamStart = guide.ps + 20;
   else {
@@ -210,6 +210,7 @@ function findSilent(seq, segs, guide) {
   for (const pamIndex of pamIndexes) {
     const genomicPos = pamStart + pamIndex;
     if (genomicPos < 0 || genomicPos >= seq.length) continue;
+    if (blockedPositions.has(genomicPos)) continue;
     const aaNumber = g2aa(segs, genomicPos);
     if (!aaNumber) continue;
     const codonPos = c2g(segs, (aaNumber - 1) * 3);
@@ -242,6 +243,7 @@ function findSilent(seq, segs, guide) {
       genomicPos = found + 19 - seedIndex;
     }
     if (genomicPos === undefined || genomicPos < 0 || genomicPos >= seq.length) continue;
+    if (blockedPositions.has(genomicPos)) continue;
     const aaNumber = g2aa(segs, genomicPos);
     if (!aaNumber) continue;
     const codonPos = c2g(segs, (aaNumber - 1) * 3);
@@ -289,7 +291,20 @@ function mkODN(seq, segs, guide, mutationPositions, mutationBases, silentMutatio
   let donorEnd;
   if (guide.str === "+") { donorStart = guide.cut - 36; donorEnd = guide.cut + 91; }
   else { donorStart = guide.cut - 91; donorEnd = guide.cut + 36; }
-  if (donorStart < 0 || donorEnd > seq.length) return null;
+  const desiredLength = donorEnd - donorStart;
+  if (donorStart < 0) {
+    donorEnd = Math.min(seq.length, donorEnd - donorStart);
+    donorStart = 0;
+  }
+  if (donorEnd > seq.length) {
+    donorStart = Math.max(0, donorStart - (donorEnd - seq.length));
+    donorEnd = seq.length;
+  }
+  if (donorEnd - donorStart < desiredLength && seq.length >= desiredLength) {
+    donorStart = Math.max(0, donorEnd - desiredLength);
+    donorEnd = Math.min(seq.length, donorStart + desiredLength);
+  }
+  if (donorStart < 0 || donorEnd > seq.length || donorEnd - donorStart < desiredLength) return null;
 
   const payload = seq.slice(donorStart, donorEnd).split("");
   const wildType = seq.slice(donorStart, donorEnd);
@@ -567,14 +582,30 @@ function findKoDesignTarget(seq, segs, exons = []) {
   return candidates[0] || null;
 }
 
+function parsePointMutationInput(value) {
+  const normalized = String(value || "").trim().replace(/^p\./i, "").replace(/\s+/g, "").toUpperCase();
+  const canonical = normalized.match(/^([A-Z])(\d+)([A-Z])$/);
+  if (canonical) return { wtAA: canonical[1], aaNumber: parseInt(canonical[2], 10), mutAA: canonical[3] };
+
+  const reversed = normalized.match(/^(\d+)([A-Z])([A-Z])$/);
+  if (reversed) {
+    return {
+      err: `Use mutation format ${reversed[2]}${reversed[1]}${reversed[3]}, not ${normalized}. The app expects WT-position-mutant, for example G96S.`,
+    };
+  }
+
+  const delimited = normalized.match(/^([A-Z])[-_/]?(\d+)[-_/]?([A-Z])$/);
+  if (delimited) return { wtAA: delimited[1], aaNumber: parseInt(delimited[2], 10), mutAA: delimited[3] };
+
+  return { err: "Cannot parse mutation. Use WT-position-mutant format such as G96S or p.G96S." };
+}
+
 export function designPM(gb, mutationString) {
   const cds = getCDS(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
-  const mutation = mutationString.match(/([A-Z])(\d+)([A-Z])/i);
-  if (!mutation) return { err: "Cannot parse mutation. Use a format like L72S or R176C." };
-
-  const [, wtAA, aaNumberRaw, mutAA] = mutation;
-  const aaNumber = parseInt(aaNumberRaw, 10);
+  const mutation = parsePointMutationInput(mutationString);
+  if (mutation.err) return { err: mutation.err };
+  const { wtAA, aaNumber, mutAA } = mutation;
   const codonInfo = gCodon(cds.segs, gb.seq, aaNumber);
   if (!codonInfo) return { err: `Cannot map amino acid ${aaNumber} to the genomic sequence.` };
   if (codonInfo.aa !== wtAA.toUpperCase()) return { err: `Expected ${wtAA.toUpperCase()} at position ${aaNumber} but found ${codonInfo.aa} (${codonInfo.cod}).` };
@@ -598,10 +629,11 @@ export function designPM(gb, mutationString) {
   const mutationBases = bestChanges.map((change) => change.m);
   const selectedGuides = selectNearbyGuides(gb.seq, codonInfo.g, 10);
   if (!selectedGuides.length) return { err: "No gRNAs found with cut sites within 10 bp of the mutation site." };
+  const blockedPositions = new Set(mutationPositions);
 
   const result = { type: "pm", gene: cds.name, an: aaNumber, wA: wtAA.toUpperCase(), mA: mutAA.toUpperCase(), wC: codonInfo.cod, mC: bestMutantCodon, gp: codonInfo.g, ch: bestChanges, gs: [], os: [], ss: [], ps: [] };
   selectedGuides.forEach((guide, index) => {
-    const silent = findSilent(gb.seq, cds.segs, guide);
+    const silent = findSilent(gb.seq, cds.segs, guide, blockedPositions);
     const donor = mkODN(gb.seq, cds.segs, guide, mutationPositions, mutationBases, silent ? [silent] : []);
     const guideName = makeGuideName(cds.name, "pm", index, mutationString);
     result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: `Cut-to-edit distance ${Math.abs(guide.d)} bp` });
