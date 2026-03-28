@@ -62,6 +62,17 @@ const PM_GUIDE_COLORS = {
   site: "#E9D5FF",
   pam: "#FDE68A",
 };
+const PM_EDIT_COLORS = {
+  desired: "#FDE68A",
+  silent: "#FCA5A5",
+};
+const APP_FOOTER_LABEL = "Investor demo build • 28 Mar 2026";
+const SAMPLE_REQUEST_TEXT = [
+  "PSEN1 N32R BIHi005-A",
+  "ECSIT knockout BIHi005-A",
+  "INS C-terminal SD40-2xHA BIHi005-A",
+  "SORCS1 N-terminal N:EGFP-Linker BIHi005-A",
+].join("\n");
 
 function sanitizeSegment(value, fallback) {
   const clean = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\s+/g, " ").trim();
@@ -129,7 +140,7 @@ function buildDesignSummary(result) {
   result.gs.forEach((guide) => lines.push(`- ${guide.n}: ${guide.sp} ${guide.pm} | ${guide.str} strand | GC ${guide.gc}%`));
   if (result.ss?.length) {
     lines.push("");
-    lines.push("Silent mutations:");
+    lines.push(result.type === "pm" ? "Silent mutations:" : "Guide-blocking mutations:");
     result.ss.forEach((mutation) => lines.push(`- ${getGuideName(mutation.gi)}: ${mutation.lb} (${mutation.oc} -> ${mutation.nc}) | ${mutation.pur}`));
   }
   lines.push("");
@@ -611,6 +622,18 @@ function inferHistoricalSubtype(record) {
   return "other";
 }
 
+function simplifyTagName(tag) {
+  const raw = String(tag || "").replace(/^N:/, "");
+  if (/SD40/i.test(raw)) return "SD40";
+  if (/dTAG/i.test(raw)) return "dTAG";
+  if (/mAID/i.test(raw)) return "mAID";
+  if (/2xHA/i.test(raw) && !/SD40|dTAG|mAID/i.test(raw)) return "2xHA";
+  if (/EGFP/i.test(raw)) return "EGFP";
+  if (/mScarlet/i.test(raw)) return "mScarlet";
+  if (/mCherry/i.test(raw)) return "mCherry";
+  return raw;
+}
+
 function inferCurrentHistoricalSignature(result) {
   if (!result) return "";
   if (result.type === "pm") return `${result.wA}${result.an}${result.mA}`.toLowerCase();
@@ -765,6 +788,7 @@ function buildReviewItems(meta, result, fileName) {
 
   if (result.type === "pm") {
     if (!(result.ss || []).length) items.push({ level: "warning", text: "No silent guide-blocking mutation was introduced. Re-cut after HDR may remain possible." });
+    if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the mutation site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
     items.push({ level: "check", text: "Confirm the desired amino-acid change against the intended transcript and verify that the donor does not create unwanted amino-acid substitutions." });
   }
 
@@ -776,9 +800,16 @@ function buildReviewItems(meta, result, fileName) {
 
   if (result.type === "ct" || result.type === "nt") {
     const labels = new Set((result.donorAnnotations || []).map((annotation) => annotation.label));
-    if (!(result.ss || []).length) items.push({ level: "warning", text: "No silent guide-disrupting mutation was captured in the HDR donor arms. Re-cut of the edited allele is still possible." });
+    const guideProtection = Array.isArray(result.guideProtection) ? result.guideProtection : [];
+    const unprotectedGuides = guideProtection.filter((entry) => !entry.protected);
+    if (guideProtection.length && unprotectedGuides.length) {
+      items.push({ level: "warning", text: `${unprotectedGuides.length} of ${guideProtection.length} tag-insertion guide${guideProtection.length === 1 ? "" : "s"} remain unblocked in the donor design. Re-cut of the edited allele may still be possible.` });
+    } else if (!guideProtection.length && !(result.ss || []).length) {
+      items.push({ level: "warning", text: "No guide-disrupting mutation was captured in the HDR donor arms. Re-cut of the edited allele is still possible." });
+    }
     if (result.type === "nt" && !labels.has("Start")) items.push({ level: "warning", text: "N-terminal donor annotation does not include a start codon block. Verify start codon replacement before ordering." });
     if (result.type === "ct" && !labels.has("Stop")) items.push({ level: "warning", text: "C-terminal donor annotation does not include a terminal stop codon block. Verify stop codon placement before ordering." });
+    if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the insertion site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
     if ((result.donor || "").length > 2200) items.push({ level: "warning", text: "HDR donor is long for routine synthesis and cloning. Confirm assembly plan and QC strategy." });
     items.push({ level: "check", text: "Review donor frame across both homology junctions and confirm the expected translated product at the protein level." });
   }
@@ -824,6 +855,10 @@ function buildPmStrandModels(donor) {
   const length = donor.od?.length || 0;
   const orderedDiff = [...(donor.df || [])].sort((left, right) => left - right);
   const oppositeDiff = orderedDiff.map((index) => length - 1 - index).sort((left, right) => left - right);
+  const orderedDesired = [...(donor.desiredDiffIndexes || [])].sort((left, right) => left - right);
+  const oppositeDesired = orderedDesired.map((index) => length - 1 - index).sort((left, right) => left - right);
+  const orderedSilent = [...(donor.silentDiffIndexes || [])].sort((left, right) => left - right);
+  const oppositeSilent = orderedSilent.map((index) => length - 1 - index).sort((left, right) => left - right);
   const orderedLabel = donor.guideStrand === "+" ? "- strand donor" : "+ strand donor";
   const oppositeLabel = donor.guideStrand === "+" ? "+ strand donor" : "- strand donor";
   const genomicGuide = {
@@ -850,6 +885,8 @@ function buildPmStrandModels(donor) {
       wt: donor.wo,
       donor: donor.od,
       diffIndexes: orderedDiff,
+      desiredIndexes: orderedDesired,
+      silentIndexes: orderedSilent,
       regions: buildPmArmRegions(length, true),
       guide: mapGuide(donor.guideStrand === "+"),
     },
@@ -861,6 +898,8 @@ function buildPmStrandModels(donor) {
       wt: reverseComplement(donor.wo),
       donor: reverseComplement(donor.od),
       diffIndexes: oppositeDiff,
+      desiredIndexes: oppositeDesired,
+      silentIndexes: oppositeSilent,
       regions: buildPmArmRegions(length, false),
       guide: mapGuide(donor.guideStrand !== "+"),
     },
@@ -922,15 +961,19 @@ function buildAlignedRowHtml(label, { prefix = "", tokens = [], suffix = "" }, d
   `;
 }
 
-function buildPmAnnotatedSequenceHtml(label, sequence, diffIndexes, mode, regions, guide) {
+function buildPmAnnotatedSequenceHtml(label, sequence, diffIndexes, mode, regions, guide, desiredIndexes = [], silentIndexes = []) {
   const diffSet = new Set(diffIndexes);
+  const desiredSet = new Set(desiredIndexes);
+  const silentSet = new Set(silentIndexes);
   const sequenceHtml = (sequence || "").split("").map((base, index) => {
     const changed = diffSet.has(index);
+    const isDesired = desiredSet.has(index);
+    const isSilent = silentSet.has(index);
     const region = findPmRegion(index, regions);
     const inGuide = guide && index >= guide.siteStart && index < guide.siteEnd;
     const inPam = guide && index >= guide.pamStart && index < guide.pamEnd;
     const styles = [
-      `background:${inPam ? PM_GUIDE_COLORS.pam : changed && mode === "donor" ? "#FDE68A" : inGuide ? PM_GUIDE_COLORS.site : (region?.color || "transparent")}`,
+      `background:${inPam ? PM_GUIDE_COLORS.pam : isSilent && mode === "donor" ? PM_EDIT_COLORS.silent : isDesired && mode === "donor" ? PM_EDIT_COLORS.desired : changed && mode === "donor" ? PM_EDIT_COLORS.desired : inGuide ? PM_GUIDE_COLORS.site : (region?.color || "transparent")}`,
       `color:${changed && mode === "wt" ? "#CC0000" : "#111827"}`,
       `text-decoration:${changed && mode === "wt" ? "line-through" : "none"}`,
       `font-weight:${inGuide || changed ? 800 : 400}`,
@@ -957,9 +1000,11 @@ function buildPmStrandCardHtml(strand) {
         ${strand.regions.map((region) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${region.color};">${region.label} (${region.end - region.start} nt)</span>`).join("")}
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_GUIDE_COLORS.pam};">PAM</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_EDIT_COLORS.desired};">Desired edit</span>
+        ${strand.silentIndexes?.length ? `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#7F1D1D;background:${PM_EDIT_COLORS.silent};">Silent mutation</span>` : ""}
       </div>
-      ${buildPmAnnotatedSequenceHtml("WT", strand.wt, strand.diffIndexes, "wt", strand.regions, strand.guide)}
-      ${buildPmAnnotatedSequenceHtml("Donor", strand.donor, strand.diffIndexes, "donor", strand.regions, strand.guide)}
+      ${buildPmAnnotatedSequenceHtml("WT", strand.wt, strand.diffIndexes, "wt", strand.regions, strand.guide, strand.desiredIndexes, strand.silentIndexes)}
+      ${buildPmAnnotatedSequenceHtml("Donor", strand.donor, strand.diffIndexes, "donor", strand.regions, strand.guide, strand.desiredIndexes, strand.silentIndexes)}
     </div>
   `;
 }
@@ -967,9 +1012,11 @@ function buildPmStrandCardHtml(strand) {
 function buildPmDonorHtml(donor) {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
+  const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   return `
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
+    ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
     ${strands.map((strand) => buildPmStrandCardHtml(strand)).join("")}
     <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
       <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
@@ -982,11 +1029,11 @@ function buildPmDonorHtml(donor) {
 }
 
 function buildAnnotatedDonorHtml(sequence, annotations = []) {
-  const findAnnotation = (index) => annotations.find((item) => index >= item.start && index < item.end);
-  const legend = annotations.map((item) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.label} (${item.end - item.start} bp)</span>`).join("");
+  const findAnnotation = (index) => annotations.filter((item) => index >= item.start && index < item.end).sort((left, right) => (right.priority || 0) - (left.priority || 0))[0];
+  const legend = annotations.map((item) => `<span title="${item.title || item.label}" style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.badgeLabel || item.label} (${item.end - item.start} bp)</span>`).join("");
   const sequenceHtml = (sequence || "").split("").map((base, index) => {
     const annotation = findAnnotation(index);
-    return `<span style="color:${annotation?.color || "#111827"};font-weight:${annotation ? 800 : 400};">${base}</span>`;
+    return `<span title="${annotation?.title || annotation?.label || ""}" style="color:${annotation?.color || "#111827"};font-weight:${annotation ? 800 : 400};background:${annotation?.priority > 1 ? `${annotation.color}22` : "transparent"};">${base}</span>`;
   }).join("");
   return `
     <div style="margin:0 0 14px 0;">
@@ -1110,14 +1157,18 @@ function SequenceDiffRow({ label, sequence, diffIndexes, mode }) {
   );
 }
 
-function PmAnnotatedSequenceRow({ label, sequence, diffIndexes, mode, regions, guide }) {
+function PmAnnotatedSequenceRow({ label, sequence, diffIndexes, mode, regions, guide, desiredIndexes = [], silentIndexes = [] }) {
   const diffSet = new Set(diffIndexes);
+  const desiredSet = new Set(desiredIndexes);
+  const silentSet = new Set(silentIndexes);
   return (
     <div style={{ marginBottom: 8 }}>
       <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>{label}</div>
       <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
         {(sequence || "").split("").map((base, index) => {
           const changed = diffSet.has(index);
+          const isDesired = desiredSet.has(index);
+          const isSilent = silentSet.has(index);
           const region = findPmRegion(index, regions);
           const inGuide = guide && index >= guide.siteStart && index < guide.siteEnd;
           const inPam = guide && index >= guide.pamStart && index < guide.pamEnd;
@@ -1125,7 +1176,7 @@ function PmAnnotatedSequenceRow({ label, sequence, diffIndexes, mode, regions, g
             <span
               key={`${label}-${index}`}
               style={{
-                background: inPam ? PM_GUIDE_COLORS.pam : changed && mode === "donor" ? "#FDE68A" : inGuide ? PM_GUIDE_COLORS.site : (region?.color || "transparent"),
+                background: inPam ? PM_GUIDE_COLORS.pam : isSilent && mode === "donor" ? PM_EDIT_COLORS.silent : isDesired && mode === "donor" ? PM_EDIT_COLORS.desired : changed && mode === "donor" ? PM_EDIT_COLORS.desired : inGuide ? PM_GUIDE_COLORS.site : (region?.color || "transparent"),
                 color: changed && mode === "wt" ? "#CC0000" : "#111827",
                 textDecoration: changed && mode === "wt" ? "line-through" : "none",
                 fontWeight: inGuide || changed ? 800 : 400,
@@ -1180,6 +1231,11 @@ function PmDonorPreview({ donor }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
       <div style={{ color: "#555", fontSize: 12, marginBottom: 10 }}>Linked guide: {donor.guideName}</div>
+      {!!(donor.silentMutations || []).length && (
+        <div style={{ color: "#7F1D1D", fontSize: 12, marginBottom: 10 }}>
+          <strong>Silent mutation:</strong> {(donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join(" ; ")}
+        </div>
+      )}
       {strands.map((strand) => (
         <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
@@ -1191,9 +1247,11 @@ function PmDonorPreview({ donor }) {
             {strand.regions.map((region) => <span key={`${strand.key}-${region.label}-${region.start}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: region.color }}>{region.label} ({region.end - region.start} nt)</span>)}
             <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
             <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_EDIT_COLORS.desired }}>Desired edit</span>
+            {!!strand.silentIndexes?.length && <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#7F1D1D", background: PM_EDIT_COLORS.silent }}>Silent mutation</span>}
           </div>
-          <PmAnnotatedSequenceRow label="WT" sequence={strand.wt} diffIndexes={strand.diffIndexes} mode="wt" regions={strand.regions} guide={strand.guide} />
-          <PmAnnotatedSequenceRow label="Donor" sequence={strand.donor} diffIndexes={strand.diffIndexes} mode="donor" regions={strand.regions} guide={strand.guide} />
+          <PmAnnotatedSequenceRow label="WT" sequence={strand.wt} diffIndexes={strand.diffIndexes} mode="wt" regions={strand.regions} guide={strand.guide} desiredIndexes={strand.desiredIndexes} silentIndexes={strand.silentIndexes} />
+          <PmAnnotatedSequenceRow label="Donor" sequence={strand.donor} diffIndexes={strand.diffIndexes} mode="donor" regions={strand.regions} guide={strand.guide} desiredIndexes={strand.desiredIndexes} silentIndexes={strand.silentIndexes} />
         </div>
       ))}
       <div style={{ marginTop: 10, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
@@ -1208,16 +1266,17 @@ function PmDonorPreview({ donor }) {
 }
 
 function AnnotatedDonor({ sequence, annotations = [] }) {
-  const findAnnotation = (index) => annotations.find((item) => index >= item.start && index < item.end);
+  const findAnnotation = (index) => annotations.filter((item) => index >= item.start && index < item.end).sort((left, right) => (right.priority || 0) - (left.priority || 0))[0];
+  const safeSequence = sequence || "";
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-        {annotations.map((item) => <Badge key={`${item.label}-${item.start}`} color={item.color}>{item.label} ({item.end - item.start} bp)</Badge>)}
+        {annotations.map((item) => <span key={`${item.label}-${item.start}`} title={item.title || item.label}><Badge color={item.color}>{item.badgeLabel || item.label} ({item.end - item.start} bp)</Badge></span>)}
       </div>
       <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-        {sequence.split("").map((base, index) => {
+        {safeSequence.split("").map((base, index) => {
           const annotation = findAnnotation(index);
-          return <span key={`donor-${index}`} style={{ color: annotation?.color || "#111827", fontWeight: annotation ? 700 : 400 }}>{base}</span>;
+          return <span key={`donor-${index}`} title={annotation?.title || annotation?.label || ""} style={{ color: annotation?.color || "#111827", fontWeight: annotation ? 700 : 400, background: annotation?.priority > 1 ? `${annotation.color}22` : "transparent" }}>{base}</span>;
         })}
       </div>
     </div>
@@ -1406,7 +1465,7 @@ export default function App() {
     setBatchCopyState("");
     const activeRows = batchRows.filter((row) => row.gbRaw);
     if (!activeRows.length) {
-      setBatchError("Upload at least one GenBank file in the design table.");
+      setBatchError("Upload at least one GenBank file, either through the folder upload or directly on a design row.");
       return;
     }
     const nextResults = batchRows.map((row, index) => {
@@ -1477,6 +1536,14 @@ export default function App() {
     setBatchRows(parsedRows);
   };
 
+  const loadSampleRequests = () => {
+    setRequestText(SAMPLE_REQUEST_TEXT);
+    setBatchRows(parseRequestText(SAMPLE_REQUEST_TEXT, batchFolderLibrary));
+    setBatchResults([]);
+    setBatchError("");
+    setBatchCopyState("");
+  };
+
   const copyText = async (value, label) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -1540,44 +1607,57 @@ export default function App() {
                 <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 800 }}>AC</div>
                 <div>
                   <div style={{ fontSize: 24, fontWeight: 800 }}>ASSURED CRISPR Designer</div>
-                  <div style={{ color: COLORS.muted, fontSize: 14 }}>Final design document output for SNPs, knockouts, tags, and reporters.</div>
+                  <div style={{ color: COLORS.muted, fontSize: 14 }}>Design CRISPR edits and export ordering-ready reports.</div>
+                  <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 4 }}>By Narasimha Telugu</div>
                 </div>
-              </div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Badge>{Object.keys(CASSETTES).length} cassette options</Badge>
-                <Badge color={COLORS.success}>{HISTORICAL_PROJECTS_SUMMARY.recordCount} established references</Badge>
-                <Badge color={COLORS.accentAlt}>Report-style preview</Badge>
-                <Badge color={COLORS.success}>HTML export for Word</Badge>
               </div>
             </div>
             <div style={{ maxWidth: 360, color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
-              This version is focused on producing the final design document after the edit is designed, following the same structured format as your APOE strategy example.
+              A single workflow for CRISPR design, review, and ordering exports across SNP knock-ins, knockouts, N-terminal tags, and C-terminal tags.
             </div>
+          </div>
+        </div>
+
+        <div style={{ ...CARD_STYLE, marginBottom: 18, padding: 14, background: "rgba(15,28,46,0.82)" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            {[
+              ["1. Upload", "Add a GenBank folder once, or attach a file directly to a design row."],
+              ["2. Describe", "Paste simple request lines like GENE edit cell-line."],
+              ["3. Generate", "Review flagged rows only, then generate designs in one run."],
+              ["4. Export", "Download HTML reports and separate IDT order sheets."],
+            ].map(([title, text]) => (
+              <div key={title} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 12, background: COLORS.panelAlt }}>
+                <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.5, color: COLORS.accent, textTransform: "uppercase", marginBottom: 6 }}>{title}</div>
+                <div style={{ fontSize: 13, color: COLORS.muted, lineHeight: 1.5 }}>{text}</div>
+              </div>
+            ))}
           </div>
         </div>
 
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>1. Design Requests</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Paste one request per line, upload a GenBank folder once, then review only the parsed rows that need adjustment.
+            Paste one request per line, upload a GenBank folder once, and review only the rows that still need input.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
             <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
               <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
               <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
             </label>
+            <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Load sample requests</button>
             <button type="button" onClick={parseRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Parse requests</button>
-            <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Add blank row</button>
-            <Badge color={COLORS.accent}>{batchFolderEntries.length} folder files</Badge>
-            <Badge color={COLORS.success}>{batchRows.length} parsed rows</Badge>
-            <Badge color={COLORS.accentAlt}>{batchSuccessfulResults.length} successful</Badge>
-            <Badge>{batchOrderRows.length} order lines</Badge>
+            <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Add design</button>
           </div>
+          {batchFolderEntries.length > 0 && (
+            <div style={{ color: COLORS.success, fontSize: 12, marginBottom: 12 }}>
+              Folder ready: {batchFolderEntries.length} GenBank file{batchFolderEntries.length === 1 ? "" : "s"} loaded for automatic matching.
+            </div>
+          )}
 
           <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14, marginBottom: 14 }}>
             <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Paste requests</div>
             <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-              Use simple natural-language lines. The parser will infer KO, SNP, C-terminal, or N-terminal design types and match GenBank files by gene where possible.
+              Use short natural-language lines. The parser will infer KO, SNP, C-terminal, or N-terminal designs and match GenBank files by gene where possible.
             </div>
             <label style={{ display: "block" }}>
               <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Request lines</div>
@@ -1585,11 +1665,11 @@ export default function App() {
                 value={requestText}
                 onChange={(event) => setRequestText(event.target.value)}
                 style={{ ...FIELD_STYLE, minHeight: 126, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
-                placeholder={"PSEN1 G384A BIHi005-A\nSORCS1 knockout BIHi274-A\nAPP C-terminal SD40-2xHA HMGUi001-A\nSNCA N-terminal N:EGFP-Linker BIHi268-A"}
+                placeholder={SAMPLE_REQUEST_TEXT}
               />
             </label>
             <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
-              The parser works best with: `GENE edit cell-line`. If a line cannot infer gene, cell line, mutation, cassette, or GenBank file, the row below will be flagged for review.
+              Best format: `GENE edit cell-line`. If a line cannot infer gene, cell line, mutation, cassette, or GenBank file, that row will be flagged for review.
             </div>
           </div>
 
@@ -1597,6 +1677,7 @@ export default function App() {
             {batchRows.map((row, index) => {
               const slot = index + 1;
               const batchStatus = batchResults.find((entry) => entry.rowId === row.id);
+              const rowReady = !row.parseIssue && !!row.gbRaw;
               return (
                 <div key={row.id} style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
@@ -1604,6 +1685,7 @@ export default function App() {
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       {row.fileName && <Badge color={COLORS.success}>{row.fileName}</Badge>}
                       {row.parseIssue && <Badge color={COLORS.accentAlt}>{row.parseIssue}</Badge>}
+                      {!row.parseIssue && rowReady && !batchStatus && <Badge color={COLORS.accent}>Ready to generate</Badge>}
                       {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
                       {batchStatus?.status === "error" && <Badge color={COLORS.danger}>Error</Badge>}
                       {batchSuccessfulResults.length > 1 && batchStatus?.status === "success" && (
@@ -1663,7 +1745,7 @@ export default function App() {
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
             <button type="button" onClick={runBatch} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none" }}>
-              Generate project designs
+              Generate designs
             </button>
             {batchCopyState && <Badge color={COLORS.success}>{batchCopyState}</Badge>}
           </div>
@@ -1672,7 +1754,9 @@ export default function App() {
 
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>2. Final Report</SectionTitle>
-          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>This export is modeled on your APOE strategy document. Download the HTML file and open it in Word if you want to save it as a `.docx` document afterward.</div>
+          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+            Review the selected design, then export a Word-friendly HTML report for sharing, ordering, or archive.
+          </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
             <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report</button>
             <button type="button" disabled={batchSuccessfulResults.length < 2} onClick={downloadAllReports} style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length >= 2 ? "pointer" : "not-allowed", fontWeight: 700 }}>Download all HTML reports</button>
@@ -1701,7 +1785,17 @@ export default function App() {
           )}
 
           <div style={{ padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", minHeight: 380 }}>
-            {!selectedEntry?.result && <div style={{ color: "#667085" }}>Generate at least one successful project design to populate the final report preview.</div>}
+            {!selectedEntry?.result && (
+              <div style={{ color: "#667085", maxWidth: 640 }}>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#111827", marginBottom: 8 }}>No design report yet</div>
+                <div style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 10 }}>
+                  Use the Design Requests section to upload GenBank files, paste request lines, and generate designs. Once at least one design succeeds, the full report preview will appear here.
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                  Quick start: upload a GenBank folder, click <strong>Load sample requests</strong>, then click <strong>Generate designs</strong>.
+                </div>
+              </div>
+            )}
             {selectedEntry?.result && (
               <>
                 {batchSuccessfulResults.length > 1 && (
@@ -1732,14 +1826,22 @@ export default function App() {
                   </>
                 )}
                 {batchSuccessfulResults.length > 1 && (
-                  <label style={{ display: "block", marginBottom: 14 }}>
-                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Detailed report design</div>
-                    <select value={selectedEntry.rowId} onChange={(event) => setSelectedProjectId(event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                  <div style={{ marginBottom: 16, padding: 14, borderRadius: 12, background: "#ECFDF3", border: "1px solid #A7F3D0" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                      <div>
+                        <div style={{ color: "#047857", fontSize: 12, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 4 }}>Detailed Report</div>
+                        <div style={{ color: "#111827", fontSize: 14, fontWeight: 700 }}>Choose which generated design is shown in full below</div>
+                      </div>
+                      <div style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: 999, background: "#D1FAE5", color: "#065F46", fontSize: 12, fontWeight: 700 }}>
+                        Showing: {formatBatchDesignLabel({ ...selectedEntry.row, slot: selectedEntry.slot }, selectedEntry.result)}
+                      </div>
+                    </div>
+                    <select value={selectedEntry.rowId} onChange={(event) => setSelectedProjectId(event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#86EFAC", fontWeight: 700 }}>
                       {batchSuccessfulResults.map((entry) => (
                         <option key={entry.rowId} value={entry.rowId}>{formatBatchDesignLabel({ ...entry.row, slot: entry.slot }, entry.result)}</option>
                       ))}
                     </select>
-                  </label>
+                  </div>
                 )}
                 <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
                   <tbody>
@@ -1861,7 +1963,7 @@ export default function App() {
             Successful designs are flattened into IDT-ready order files for gRNAs, primers, and donors. The same export area works whether you designed one project or many.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-            <Badge color={COLORS.success}>{batchSuccessfulResults.length} successful projects</Badge>
+            <Badge color={COLORS.success}>{batchSuccessfulResults.length} successful designs</Badge>
             <Badge>{batchOrderRows.length} order lines</Badge>
             {batchCopyState && <Badge color={COLORS.success}>{batchCopyState}</Badge>}
           </div>
@@ -1963,6 +2065,10 @@ export default function App() {
               </table>
             </div>
           )}
+        </div>
+
+        <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 18, textAlign: "center" }}>
+          {APP_FOOTER_LABEL}
         </div>
       </div>
     </div>

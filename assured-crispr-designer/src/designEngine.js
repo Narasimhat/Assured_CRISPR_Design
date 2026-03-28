@@ -120,69 +120,77 @@ function armType(guide, mutationPos) {
   return guide.str === "+" ? (mutationPos > guide.cut ? "PROX" : "DIST") : (mutationPos < guide.cut ? "PROX" : "DIST");
 }
 
-function findSilent(model, guide, blockedPositions = new Set()) {
+function findSilent(model, guide, blockedPositions = new Set(), options = {}) {
+  const allowNonCoding = !!options.allowNonCoding;
   const seq = getGenomicSequence(model);
-  let pamStart;
-  if (guide.str === "+") pamStart = guide.ps + 20;
-  else {
-    const target = reverseComplement(guide.sp);
-    const found = seq.indexOf(target);
-    if (found < 0) return null;
-    pamStart = found - 3;
-  }
+  const pamStart = guide.str === "+" ? guide.ps + 20 : guide.ps;
   if (pamStart < 0 || pamStart + 3 > seq.length) return null;
 
+  const candidateSites = [];
+  const seenPositions = new Set();
+  const addCandidate = (genomicPos, label, kind, pamIndex = null) => {
+    if (!Number.isFinite(genomicPos) || genomicPos < 0 || genomicPos >= seq.length) return;
+    if (blockedPositions.has(genomicPos) || seenPositions.has(genomicPos)) return;
+    seenPositions.add(genomicPos);
+    candidateSites.push({ genomicPos, label, kind, pamIndex });
+  };
+
   const pamIndexes = guide.str === "+" ? [1, 2] : [0, 1];
-  for (const pamIndex of pamIndexes) {
-    const genomicPos = pamStart + pamIndex;
-    if (genomicPos < 0 || genomicPos >= seq.length) continue;
-    if (blockedPositions.has(genomicPos)) continue;
-    const aaNumber = genomicPosToAa(model, genomicPos);
-    if (!aaNumber) continue;
-    const codonInfo = getCodonAtAa(model, aaNumber, toAA);
-    if (!codonInfo) continue;
-    const codon = codonInfo.cod;
-    const codonIndex = codonInfo.genomicPositions.indexOf(genomicPos);
-    if (codonIndex < 0) continue;
-    const originalAA = toAA(codon);
-    for (const alt of ["A", "C", "G", "T"]) {
-      if (alt === codon[codonIndex]) continue;
-      const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
-      if (toAA(mutantCodon) !== originalAA) continue;
-      const mutantPam = seq.slice(pamStart, pamStart + 3).split("");
-      mutantPam[pamIndex] = alt;
-      const stillPam = guide.str === "+" ? mutantPam.slice(1).join("") === "GG" : reverseComplement(mutantPam.join("")).slice(1) === "GG";
-      if (!stillPam) {
-        const oldPam = guide.str === "+" ? seq.slice(pamStart, pamStart + 3) : reverseComplement(seq.slice(pamStart, pamStart + 3));
-        const newPam = guide.str === "+" ? mutantPam.join("") : reverseComplement(mutantPam.join(""));
-        return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: `PAM ${oldPam}->${newPam}` };
-      }
-    }
+  pamIndexes.forEach((pamIndex) => addCandidate(pamStart + pamIndex, "PAM", "pam", pamIndex));
+
+  for (let spacerIndex = 10; spacerIndex < 20; spacerIndex += 1) {
+    const genomicPos = guide.str === "+"
+      ? guide.ps + spacerIndex
+      : guide.ps + 3 + (19 - spacerIndex);
+    addCandidate(genomicPos, `Seed pos ${spacerIndex + 1}/20`, "seed");
   }
 
-  for (let seedIndex = 10; seedIndex < 20; seedIndex += 1) {
-    let genomicPos;
-    if (guide.str === "+") genomicPos = guide.ps + seedIndex;
-    else {
-      const target = reverseComplement(guide.sp);
-      const found = seq.indexOf(target);
-      if (found < 0) continue;
-      genomicPos = found + 19 - seedIndex;
-    }
-    if (genomicPos === undefined || genomicPos < 0 || genomicPos >= seq.length) continue;
-    if (blockedPositions.has(genomicPos)) continue;
+  for (let spacerIndex = 0; spacerIndex < 10; spacerIndex += 1) {
+    const genomicPos = guide.str === "+"
+      ? guide.ps + spacerIndex
+      : guide.ps + 3 + (19 - spacerIndex);
+    addCandidate(genomicPos, `Guide pos ${spacerIndex + 1}/20`, "guide");
+  }
+
+  for (const site of candidateSites) {
+    const { genomicPos, label, kind, pamIndex } = site;
     const aaNumber = genomicPosToAa(model, genomicPos);
-    if (!aaNumber) continue;
-    const codonInfo = getCodonAtAa(model, aaNumber, toAA);
-    if (!codonInfo) continue;
-    const codon = codonInfo.cod;
-    const codonIndex = codonInfo.genomicPositions.indexOf(genomicPos);
-    if (codonIndex < 0) continue;
-    const originalAA = toAA(codon);
+    const codonInfo = aaNumber ? getCodonAtAa(model, aaNumber, toAA) : null;
+    const codon = codonInfo?.cod || null;
+    const codonIndex = codonInfo ? codonInfo.genomicPositions.indexOf(genomicPos) : -1;
+    const originalAA = codon ? toAA(codon) : null;
+    const originalBase = seq[genomicPos];
     for (const alt of ["A", "C", "G", "T"]) {
-      if (alt === codon[codonIndex]) continue;
+      if (alt === originalBase) continue;
+
+      if (kind === "pam") {
+        const mutantPam = seq.slice(pamStart, pamStart + 3).split("");
+        mutantPam[pamIndex] = alt;
+        const stillPam = guide.str === "+"
+          ? mutantPam.slice(1).join("") === "GG"
+          : reverseComplement(mutantPam.join("")).slice(1) === "GG";
+        if (stillPam) continue;
+        const oldPam = guide.str === "+" ? seq.slice(pamStart, pamStart + 3) : reverseComplement(seq.slice(pamStart, pamStart + 3));
+        const newPam = guide.str === "+" ? mutantPam.join("") : reverseComplement(mutantPam.join(""));
+
+        if (!codonInfo || codonIndex < 0) {
+          if (!allowNonCoding) continue;
+          return { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `PAM ${oldPam}->${newPam} outside CDS`, mt: "noncoding" };
+        }
+
+        const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
+        if (toAA(mutantCodon) !== originalAA) continue;
+        return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: `PAM ${oldPam}->${newPam}`, mt: "silent" };
+      }
+
+      if (!codonInfo || codonIndex < 0) {
+        if (!allowNonCoding) continue;
+        return { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `${label} outside CDS`, mt: "noncoding" };
+      }
+
       const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
-      if (toAA(mutantCodon) === originalAA) return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: `Seed pos ${seedIndex + 1}/20` };
+      if (toAA(mutantCodon) !== originalAA) continue;
+      return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: label, mt: "silent" };
     }
   }
   return null;
@@ -226,12 +234,22 @@ function mkODN(model, guide, mutationPositions, mutationBases, silentMutations =
   const ssOdn = guide.str === "+" ? reverseComplement(payload.join("")) : payload.join("");
   const wtOdn = guide.str === "+" ? reverseComplement(wildType) : wildType;
   const { codingWt, codingDonor } = extractCodingDonorWindowFromModel(model, donorStart, donorEnd, payload);
+  const orderedIndex = (genomicPos) => {
+    const payloadIndex = genomicPos - donorStart;
+    if (payloadIndex < 0 || payloadIndex >= payload.length) return null;
+    return guide.str === "+" ? payload.length - 1 - payloadIndex : payloadIndex;
+  };
   const diff = [];
   for (let index = 0; index < 127; index += 1) if (ssOdn[index] !== wtOdn[index]) diff.push(index);
+  const desiredDiffIndexes = mutationPositions.map((pos) => orderedIndex(pos)).filter((index) => index !== null).sort((left, right) => left - right);
+  const silentDiffIndexes = silentMutations.map((mutation) => orderedIndex(mutation.gp)).filter((index) => index !== null).sort((left, right) => left - right);
   return {
     od: ssOdn,
     wo: wtOdn,
     df: diff,
+    desiredDiffIndexes,
+    silentDiffIndexes,
+    silentMutations,
     sl: guide.str === "+" ? "- strand target" : "+ strand target",
     codingWt,
     codingDonor,
@@ -252,6 +270,7 @@ const DONOR_COLORS = {
   REPORTER: "#fb7185",
   PEPTIDE: "#f97316",
   STOP: "#facc15",
+  SILENT: "#ef4444",
 };
 
 function cloneSegments(segments) {
@@ -363,17 +382,52 @@ function getInsertPreset(name, orientation) {
   return { seq: fallback.seq, segments: [{ label: name, role: "TAG", color: DONOR_COLORS.TAG, seq: fallback.seq }] };
 }
 
-function buildDonorAnnotations(h5Length, insertSegments, h3Length) {
+function buildDonorAnnotations(h5Length, insertSegments, h3Length, extraAnnotations = []) {
   const annotations = [];
   let cursor = 0;
-  annotations.push({ label: "5' HA", color: DONOR_COLORS.HA5, start: cursor, end: cursor + h5Length });
+  annotations.push({ label: "5' HA", color: DONOR_COLORS.HA5, start: cursor, end: cursor + h5Length, priority: 1 });
   cursor += h5Length;
   insertSegments.forEach((segment) => {
-    annotations.push({ label: segment.label, color: segment.color, start: cursor, end: cursor + segment.seq.length });
+    annotations.push({ label: segment.label, color: segment.color, start: cursor, end: cursor + segment.seq.length, priority: 1 });
     cursor += segment.seq.length;
   });
-  annotations.push({ label: "3' HA", color: DONOR_COLORS.HA3, start: cursor, end: cursor + h3Length });
-  return annotations;
+  annotations.push({ label: "3' HA", color: DONOR_COLORS.HA3, start: cursor, end: cursor + h3Length, priority: 1 });
+  return annotations.concat(extraAnnotations).sort((left, right) => {
+    if (left.start !== right.start) return left.start - right.start;
+    return (left.priority || 0) - (right.priority || 0);
+  });
+}
+
+function buildSilentAnnotations(silentMutations, toDonorIndex) {
+  return silentMutations
+    .map((mutation) => {
+      const donorIndex = toDonorIndex(mutation);
+      if (!Number.isFinite(donorIndex) || donorIndex < 0) return null;
+      const isNonCoding = mutation.mt === "noncoding";
+      const labelPrefix = isNonCoding ? "Guide block" : "Silent";
+      return {
+        label: `${labelPrefix} gRNA${mutation.gi || ""}`.trim(),
+        badgeLabel: `${labelPrefix} gRNA${mutation.gi || ""}`.trim(),
+        title: `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`,
+        color: DONOR_COLORS.SILENT,
+        start: donorIndex,
+        end: donorIndex + 1,
+        priority: 10,
+      };
+    })
+    .filter(Boolean);
+}
+
+function pickPrimerOutsideLeft(seq, boundary, primerLength = 24) {
+  const end = Math.max(0, Math.min(seq.length, boundary));
+  const start = Math.max(0, end - primerLength);
+  return seq.slice(start, end);
+}
+
+function pickPrimerOutsideRight(seq, boundary, primerLength = 24) {
+  const start = Math.max(0, Math.min(seq.length, boundary));
+  const end = Math.min(seq.length, start + primerLength);
+  return reverseComplement(seq.slice(start, end));
 }
 
 function selectKoGuidePair(guides, maxSpacing = 140) {
@@ -401,6 +455,40 @@ function selectKoGuidePair(guides, maxSpacing = 140) {
     return right.spacing - left.spacing;
   });
   return candidatePairs[0] || null;
+}
+
+function selectInsertGuidesWithFallback(model, targetPos) {
+  const windows = [10, 20, 30];
+  for (const window of windows) {
+    const guides = selectNearbyGuidesForModel(model, reverseComplement, targetPos, window);
+    if (!guides.length) continue;
+    return {
+      guides,
+      window,
+      tier: window === 10 ? "preferred" : window === 20 ? "fallback" : "distant fallback",
+    };
+  }
+  return null;
+}
+
+function buildInsertGuideNote(guide, anchorLabel, tier, window) {
+  const relativeLabel = guide.d < 0 ? "5-prime" : "3-prime";
+  const tierLabel = tier === "preferred" ? "preferred window" : tier === "fallback" ? "fallback window" : "distant fallback";
+  return `Cut ${Math.abs(guide.d)} bp ${relativeLabel} of ${anchorLabel} | ${tierLabel} <=${window} bp`;
+}
+
+function buildPointMutationGuideNote(guide, tier, window) {
+  const tierLabel = tier === "preferred" ? "preferred window" : tier === "fallback" ? "fallback window" : "distant fallback";
+  return `Cut-to-edit distance ${Math.abs(guide.d)} bp | ${tierLabel} <=${window} bp`;
+}
+
+function getGuideSpan(guide) {
+  return { start: guide.ps, end: guide.ps + 23 };
+}
+
+function guideOverlapsReplacement(guide, replaceStart, replaceEnd) {
+  const { start, end } = getGuideSpan(guide);
+  return start < replaceEnd && end > replaceStart;
 }
 
 function parsePointMutationInput(value) {
@@ -453,16 +541,17 @@ export function designPM(gb, mutationString) {
 
   const mutationPositions = bestChanges.map((change) => change.p);
   const mutationBases = bestChanges.map((change) => change.m);
-  const selectedGuides = selectNearbyGuidesForModel(gb, reverseComplement, codonInfo.g, 10);
-  if (!selectedGuides.length) return { err: "No gRNAs found with cut sites within 10 bp of the mutation site." };
+  const guideSelection = selectInsertGuidesWithFallback(gb, codonInfo.g);
+  if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the mutation site." };
+  const { guides: selectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
   const blockedPositions = new Set(mutationPositions);
 
-  const result = { type: "pm", gene: gb.gene, an: aaNumber, wA: wtAA.toUpperCase(), mA: mutAA.toUpperCase(), wC: codonInfo.cod, mC: bestMutantCodon, gp: codonInfo.g, ch: bestChanges, gs: [], os: [], ss: [], ps: [] };
+  const result = { type: "pm", gene: gb.gene, an: aaNumber, wA: wtAA.toUpperCase(), mA: mutAA.toUpperCase(), wC: codonInfo.cod, mC: bestMutantCodon, gp: codonInfo.g, ch: bestChanges, gs: [], os: [], ss: [], ps: [], guideWindow, guideTier };
   selectedGuides.forEach((guide, index) => {
     const silent = findSilent(gb, guide, blockedPositions);
     const donor = mkODN(gb, guide, mutationPositions, mutationBases, silent ? [silent] : []);
     const guideName = makeGuideName(gb.gene, "pm", index, mutationString);
-    result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: `Cut-to-edit distance ${Math.abs(guide.d)} bp` });
+    result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: buildPointMutationGuideNote(guide, guideTier, guideWindow) });
     if (donor) result.os.push({ ...donor, n: `ssODN${index + 1}`, gi: index, guideName, guideStrand: guide.str });
     if (silent) result.ss.push({ ...silent, gi: index + 1 });
   });
@@ -491,23 +580,58 @@ export function designCT(gb, tag, homologyArmLength) {
   const homology3End = Math.min(seq.length, stopStart + 3 + armLength);
   const homology5 = seq.slice(homology5Start, stopStart);
   const homology3 = seq.slice(stopStart + 3, homology3End);
-  const guides = selectNearbyGuidesForModel(gb, reverseComplement, stopStart, 10);
-  if (!guides.length) return { err: "No SpCas9 gRNAs found with cut sites within 10 bp of the stop codon." };
+  const guideSelection = selectInsertGuidesWithFallback(gb, stopStart);
+  if (!guideSelection) return { err: "No SpCas9 gRNAs found with cut sites within 30 bp of the stop codon." };
+  const { guides, window: guideWindow, tier: guideTier } = guideSelection;
 
   const silentMutations = [];
+  const blockedPositions = new Set();
   guides.slice(0, 2).forEach((guide, index) => {
-    const silent = findSilent(gb, guide);
-    if (silent && silent.gp >= homology5Start && silent.gp < stopStart) silentMutations.push({ ...silent, gi: index + 1 });
+    const silent = findSilent(gb, guide, blockedPositions, { allowNonCoding: true });
+    const inHomology5 = silent && silent.gp >= homology5Start && silent.gp < stopStart;
+    const inHomology3 = silent && silent.gp >= stopStart + 3 && silent.gp < homology3End;
+    if (inHomology5 || inHomology3) {
+      silentMutations.push({ ...silent, gi: index + 1 });
+      blockedPositions.add(silent.gp);
+    }
   });
   const homology5Array = homology5.split("");
+  const homology3Array = homology3.split("");
   silentMutations.forEach((mutation) => {
-    const donorIndex = mutation.gp - homology5Start;
-    if (donorIndex >= 0 && donorIndex < homology5Array.length) homology5Array[donorIndex] = mutation.nb;
+    const homology5Index = mutation.gp - homology5Start;
+    if (homology5Index >= 0 && homology5Index < homology5Array.length) {
+      homology5Array[homology5Index] = mutation.nb;
+      return;
+    }
+    const homology3Index = mutation.gp - (stopStart + 3);
+    if (homology3Index >= 0 && homology3Index < homology3Array.length) homology3Array[homology3Index] = mutation.nb;
   });
 
-  const donor = `${homology5Array.join("")}${preset.seq}${homology3}`;
-  const donorAnnotations = buildDonorAnnotations(homology5.length, preset.segments, homology3.length);
+  const donor = `${homology5Array.join("")}${preset.seq}${homology3Array.join("")}`;
+  const donorAnnotations = buildDonorAnnotations(
+    homology5.length,
+    preset.segments,
+    homology3.length,
+    buildSilentAnnotations(silentMutations, (mutation) => {
+      const homology5Index = mutation.gp - homology5Start;
+      if (homology5Index >= 0 && homology5Index < homology5.length) return homology5Index;
+      const homology3Index = mutation.gp - (stopStart + 3);
+      if (homology3Index >= 0 && homology3Index < homology3.length) return homology5.length + preset.seq.length + homology3Index;
+      return -1;
+    }),
+  );
   const lastAA = getCodonAtAa(gb, gb.proteinLength, toAA);
+  const guideProtection = guides.slice(0, 2).map((guide, index) => {
+    const guideIndex = index + 1;
+    const mutation = silentMutations.find((entry) => entry.gi === guideIndex) || null;
+    const byInsertion = guideOverlapsReplacement(guide, stopStart, stopStart + 3);
+    return {
+      guideIndex,
+      byMutation: !!mutation,
+      byInsertion,
+      protected: !!mutation || byInsertion,
+    };
+  });
   return {
     type: "ct",
     gene: gb.gene,
@@ -524,11 +648,14 @@ export function designCT(gb, tag, homologyArmLength) {
     dl: donor.length,
     donor,
     donorAnnotations,
-    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: `Cut ${Math.abs(guide.d)} bp ${guide.d < 0 ? "5-prime" : "3-prime"} of stop` })),
+    guideWindow: guideWindow,
+    guideTier,
+    guideProtection,
+    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: buildInsertGuideNote(guide, "stop", guideTier, guideWindow) })),
     ss: silentMutations,
     ps: [
-      { n: makePrimerName(gb.gene, "ct", "Fw", "", tag), s: seq.slice(Math.max(0, homology5Start - 50), Math.max(0, homology5Start - 50) + 24) },
-      { n: makePrimerName(gb.gene, "ct", "Rev", "", tag), s: reverseComplement(seq.slice(Math.min(seq.length - 24, homology3End + 25), Math.min(seq.length, homology3End + 49))) },
+      { n: makePrimerName(gb.gene, "ct", "Fw", "", tag), s: pickPrimerOutsideLeft(seq, homology5Start) },
+      { n: makePrimerName(gb.gene, "ct", "Rev", "", tag), s: pickPrimerOutsideRight(seq, homology3End) },
     ],
     amp: `WT ~${homology3End + 49 - homology5Start + 50} bp | KI ~${homology3End + 49 - homology5Start + 50 + preset.seq.length} bp`,
   };
@@ -586,13 +713,18 @@ export function designNT(gb, tag, homologyArmLength) {
   const homology3End = Math.min(seq.length, codingResume + armLength);
   const homology5 = seq.slice(homology5Start, insertionSite);
   const homology3 = seq.slice(codingResume, homology3End);
-  const guides = selectNearbyGuidesForModel(gb, reverseComplement, startCodonPos, 10);
-  if (!guides.length) return { err: "No gRNAs found with cut sites within 10 bp of the start codon." };
+  const guideSelection = selectInsertGuidesWithFallback(gb, startCodonPos);
+  if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the start codon." };
+  const { guides, window: guideWindow, tier: guideTier } = guideSelection;
 
   const silentMutations = [];
+  const blockedPositions = new Set();
   guides.slice(0, 2).forEach((guide, index) => {
-    const silent = findSilent(gb, guide);
-    if (silent && silent.gp >= homology5Start && silent.gp < homology3End) silentMutations.push({ ...silent, gi: index + 1 });
+    const silent = findSilent(gb, guide, blockedPositions, { allowNonCoding: true });
+    if (silent && silent.gp >= homology5Start && silent.gp < homology3End) {
+      silentMutations.push({ ...silent, gi: index + 1 });
+      blockedPositions.add(silent.gp);
+    }
   });
 
   const homology5Array = homology5.split("");
@@ -605,7 +737,29 @@ export function designNT(gb, tag, homologyArmLength) {
   });
 
   const donor = `${homology5Array.join("")}${preset.seq}${homology3Array.join("")}`;
-  const donorAnnotations = buildDonorAnnotations(homology5.length, preset.segments, homology3.length);
+  const donorAnnotations = buildDonorAnnotations(
+    homology5.length,
+    preset.segments,
+    homology3.length,
+    buildSilentAnnotations(silentMutations, (mutation) => {
+      const homology5Index = mutation.gp - homology5Start;
+      if (homology5Index >= 0 && homology5Index < homology5.length) return homology5Index;
+      const homology3Index = mutation.gp - codingResume;
+      if (homology3Index >= 0 && homology3Index < homology3.length) return homology5.length + preset.seq.length + homology3Index;
+      return -1;
+    }),
+  );
+  const guideProtection = guides.slice(0, 2).map((guide, index) => {
+    const guideIndex = index + 1;
+    const mutation = silentMutations.find((entry) => entry.gi === guideIndex) || null;
+    const byInsertion = guideOverlapsReplacement(guide, startCodonPos, startCodonPos + 3);
+    return {
+      guideIndex,
+      byMutation: !!mutation,
+      byInsertion,
+      protected: !!mutation || byInsertion,
+    };
+  });
   return {
     type: "nt",
     gene: gb.gene,
@@ -619,11 +773,14 @@ export function designNT(gb, tag, homologyArmLength) {
     dl: donor.length,
     donor,
     donorAnnotations,
-    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: `Cut ${Math.abs(guide.d)} bp from start codon replacement site` })),
+    guideWindow: guideWindow,
+    guideTier,
+    guideProtection,
+    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: buildInsertGuideNote(guide, "start codon replacement site", guideTier, guideWindow) })),
     ss: silentMutations,
     ps: [
-      { n: makePrimerName(gb.gene, "nt", "Fw", "", tag), s: seq.slice(Math.max(0, homology5Start - 50), Math.max(0, homology5Start - 50) + 24) },
-      { n: makePrimerName(gb.gene, "nt", "Rev", "", tag), s: reverseComplement(seq.slice(Math.min(seq.length - 24, homology3End + 25), Math.min(seq.length, homology3End + 49))) },
+      { n: makePrimerName(gb.gene, "nt", "Fw", "", tag), s: pickPrimerOutsideLeft(seq, homology5Start) },
+      { n: makePrimerName(gb.gene, "nt", "Rev", "", tag), s: pickPrimerOutsideRight(seq, homology3End) },
     ],
     amp: `WT ~${homology3End + 49 - homology5Start + 50} bp | KI ~${homology3End + 49 - homology5Start + 50 + preset.seq.length - 3} bp`,
   };
