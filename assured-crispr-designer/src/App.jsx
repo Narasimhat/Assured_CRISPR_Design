@@ -61,6 +61,7 @@ const PM_GUIDE_COLORS = {
   site: "#E9D5FF",
   pam: "#FDE68A",
 };
+const BATCH_SIZE_OPTIONS = [8, 16];
 
 function sanitizeSegment(value, fallback) {
   const clean = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\s+/g, " ").trim();
@@ -153,6 +154,196 @@ function buildSsOdnNotes(result) {
   const desired = result.ch.map((change, index) => `Desired edit ${index + 1}: genomic position ${change.p + 1}, ${change.w}->${change.m}`);
   const silent = (result.ss || []).map((entry) => `${getGuideName(entry.gi)}: ${entry.lb} (${entry.oc} -> ${entry.nc}) | ${entry.pur}`);
   return desired.concat(silent);
+}
+
+function createBatchRow(index) {
+  return {
+    id: `batch-${index + 1}`,
+    label: "",
+    projectType: "pm",
+    mutation: "",
+    tag: "SD40-2xHA",
+    homologyArm: "250",
+    gbRaw: "",
+    fileName: "",
+  };
+}
+
+function resizeBatchRows(rows, size) {
+  const next = rows.slice(0, size);
+  while (next.length < size) next.push(createBatchRow(next.length));
+  return next;
+}
+
+function formatBatchDesignLabel(row, result) {
+  if (row?.label?.trim()) return row.label.trim();
+  if (!result) return `Slot ${row?.slot || "?"}`;
+  if (result.type === "pm") return `${result.gene} ${result.wA}${result.an}${result.mA}`;
+  if (result.type === "ko") return `${result.gene} knockout`;
+  return `${result.gene} ${result.type === "ct" ? "C-terminal" : "N-terminal"} ${result.tag}`;
+}
+
+function buildSafeToken(value, fallback) {
+  const normalized = String(value || "").replace(/[^A-Za-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function buildPmDonorOrderName(result, donor, donorIndex) {
+  return `${buildSafeToken(result.gene, "GENE")}_${result.wA}${result.an}${result.mA}_${donor.n || `ssODN${donorIndex + 1}`}`;
+}
+
+function buildInsertDonorOrderName(result) {
+  const side = result.type === "ct" ? "CT" : "NT";
+  return `${buildSafeToken(result.gene, "GENE")}_${buildSafeToken(result.tag, "TAG")}_${side}_donor`;
+}
+
+function buildBatchOrderRows(entries) {
+  return entries.flatMap((entry) => {
+    if (entry.status !== "success" || !entry.result) return [];
+    const { row, result, slot } = entry;
+    const designType = getProjectTypeMeta(result.type).label;
+    const designLabel = formatBatchDesignLabel({ ...row, slot }, result);
+    const common = {
+      slot,
+      designLabel,
+      gene: result.gene,
+      designType,
+      referenceFile: row.fileName || "Uploaded GenBank",
+    };
+    const guides = (result.gs || []).map((guide) => ({
+      ...common,
+      itemType: "gRNA",
+      name: guide.n,
+      sequence: guide.sp,
+      spacer: guide.sp,
+      pam: guide.pm,
+      strand: guide.str,
+      length: guide.sp.length,
+      linkedGuide: "",
+      recommended: "Yes",
+      notes: guide.arm || guide.note || "",
+    }));
+    const donors = result.type === "pm"
+      ? (result.os || []).map((donor, donorIndex) => ({
+        ...common,
+        itemType: "Donor",
+        name: buildPmDonorOrderName(result, donor, donorIndex),
+        sequence: donor.od,
+        spacer: "",
+        pam: "",
+        strand: donor.sl || "",
+        length: donor.od?.length || 0,
+        linkedGuide: donor.guideName || "",
+        recommended: "Order this strand",
+        notes: donor.guideName ? `Reverse complement to ${donor.guideName}` : "Recommended donor strand",
+      }))
+      : (result.type === "ct" || result.type === "nt")
+        ? [{
+          ...common,
+          itemType: "Donor",
+          name: buildInsertDonorOrderName(result),
+          sequence: result.donor || "",
+          spacer: "",
+          pam: "",
+          strand: "",
+          length: result.donor?.length || 0,
+          linkedGuide: "",
+          recommended: "Yes",
+          notes: `${result.type === "ct" ? "C-terminal" : "N-terminal"} HDR donor`,
+        }]
+        : [];
+    const primers = (result.ps || []).map((primer) => ({
+      ...common,
+      itemType: "Primer",
+      name: primer.n,
+      sequence: primer.s,
+      spacer: "",
+      pam: "",
+      strand: "",
+      length: primer.s?.length || 0,
+      linkedGuide: "",
+      recommended: "Yes",
+      notes: "Validation primer",
+    }));
+    return guides.concat(donors, primers);
+  });
+}
+
+function escapeDelimitedValue(value) {
+  const stringValue = String(value ?? "");
+  if (/[",\n\t]/.test(stringValue)) return `"${stringValue.replace(/"/g, "\"\"")}"`;
+  return stringValue;
+}
+
+function buildBatchOrderDelimited(rows, delimiter = ",") {
+  const headers = ["Slot", "Design", "Gene", "Design Type", "Reference File", "Item Type", "Name", "Sequence To Order", "Spacer", "PAM", "Strand", "Length", "Linked Guide", "Recommended", "Notes"];
+  const lines = [headers.join(delimiter)];
+  rows.forEach((row) => {
+    lines.push([
+      row.slot,
+      row.designLabel,
+      row.gene,
+      row.designType,
+      row.referenceFile,
+      row.itemType,
+      row.name,
+      row.sequence,
+      row.spacer,
+      row.pam,
+      row.strand,
+      row.length,
+      row.linkedGuide,
+      row.recommended,
+      row.notes,
+    ].map(escapeDelimitedValue).join(delimiter));
+  });
+  return lines.join("\n");
+}
+
+function normalizeBatchProjectType(value) {
+  const compact = String(value || "").toLowerCase().replace(/[^a-z]/g, "");
+  if (compact === "pm" || compact === "snp" || compact === "pointmutation" || compact === "pointmutations") return "pm";
+  if (compact === "ko" || compact === "knockout" || compact === "knockouts") return "ko";
+  if (compact === "ct" || compact === "cterminal" || compact === "ctag" || compact === "cterminaltag") return "ct";
+  if (compact === "nt" || compact === "nterminal" || compact === "ntag" || compact === "nterminaltag") return "nt";
+  return "";
+}
+
+function normalizeFileLookupKey(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function buildFolderLibrary(entries) {
+  const byName = new Map();
+  const byStem = new Map();
+  entries.forEach((entry) => {
+    const fileKey = normalizeFileLookupKey(entry.fileName);
+    const stemKey = normalizeFileLookupKey(entry.fileName.replace(/\.[^.]+$/, ""));
+    if (fileKey && !byName.has(fileKey)) byName.set(fileKey, entry);
+    if (stemKey && !byStem.has(stemKey)) byStem.set(stemKey, entry);
+  });
+  return { byName, byStem };
+}
+
+function parseBatchDefinitionText(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const definitions = [];
+  lines.forEach((rawLine, index) => {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) return;
+    const cells = line.split(line.includes("\t") ? "\t" : ",").map((cell) => cell.trim());
+    const firstCell = cells[0]?.toLowerCase();
+    if (index === 0 && (firstCell === "file" || firstCell === "filename" || firstCell === "genbank")) return;
+    definitions.push({
+      lineNumber: index + 1,
+      fileToken: cells[0] || "",
+      projectType: normalizeBatchProjectType(cells[1] || ""),
+      modification: cells[2] || "",
+      homologyArm: cells[3] || "",
+      label: cells[4] || "",
+    });
+  });
+  return definitions;
 }
 
 function normalizeGeneToken(value) {
@@ -793,6 +984,13 @@ export default function App() {
   const [error, setError] = useState("");
   const [debug, setDebug] = useState("");
   const [copyState, setCopyState] = useState("");
+  const [batchSize, setBatchSize] = useState(8);
+  const [batchRows, setBatchRows] = useState(() => resizeBatchRows([], 8));
+  const [batchResults, setBatchResults] = useState([]);
+  const [batchError, setBatchError] = useState("");
+  const [batchCopyState, setBatchCopyState] = useState("");
+  const [batchFolderEntries, setBatchFolderEntries] = useState([]);
+  const [batchDefinitionText, setBatchDefinitionText] = useState("");
   const [meta, setMeta] = useState({
     irisId: "",
     clientId: "",
@@ -810,8 +1008,12 @@ export default function App() {
   const historicalContext = useMemo(() => buildHistoricalContext(meta, result, projectType), [meta, result, projectType]);
   const reviewItems = useMemo(() => buildReviewItems(meta, result, fileName), [meta, result, fileName]);
   const reportHtml = useMemo(() => buildReportHtml(meta, result, fileName, historicalContext, reviewItems), [meta, result, fileName, historicalContext, reviewItems]);
+  const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
+  const batchOrderRows = useMemo(() => buildBatchOrderRows(batchSuccessfulResults), [batchSuccessfulResults]);
+  const batchFolderLibrary = useMemo(() => buildFolderLibrary(batchFolderEntries), [batchFolderEntries]);
 
   const updateMeta = (key, value) => setMeta((current) => ({ ...current, [key]: value }));
+  const updateBatchRow = (index, key, value) => setBatchRows((current) => current.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
 
   const onFile = useCallback((event) => {
     const file = event.target.files?.[0];
@@ -828,6 +1030,47 @@ export default function App() {
     };
     reader.onerror = () => setError("Failed to read the GenBank file.");
     reader.readAsText(file);
+  }, []);
+
+  const onBatchFile = useCallback((index, event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (readerEvent) => {
+      const content = readerEvent.target?.result || "";
+      setBatchRows((current) => current.map((row, rowIndex) => (rowIndex === index ? {
+        ...row,
+        gbRaw: content,
+        fileName: file.name,
+        label: row.label || file.name.replace(/\.[^.]+$/, ""),
+      } : row)));
+    };
+    reader.onerror = () => setBatchError(`Failed to read ${file.name}.`);
+    reader.readAsText(file);
+  }, []);
+
+  const onBatchFolder = useCallback(async (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    try {
+      const entries = await Promise.all(files
+        .filter((file) => /\.(gb|gbk|genbank|txt)$/i.test(file.name))
+        .map((file) => new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (readerEvent) => resolve({
+            fileName: file.name,
+            relativePath: file.webkitRelativePath || file.name,
+            gbRaw: readerEvent.target?.result || "",
+          });
+          reader.onerror = () => reject(new Error(`Failed to read ${file.name}.`));
+          reader.readAsText(file);
+        })));
+      setBatchFolderEntries(entries);
+      setBatchError("");
+      setBatchCopyState("");
+    } catch (folderError) {
+      setBatchError(folderError?.message || "Folder import failed.");
+    }
   }, []);
 
   const run = () => {
@@ -849,12 +1092,89 @@ export default function App() {
     }
   };
 
+  const runBatch = () => {
+    setBatchError("");
+    setBatchResults([]);
+    setBatchCopyState("");
+    const activeRows = batchRows.filter((row) => row.gbRaw);
+    if (!activeRows.length) {
+      setBatchError("Upload at least one GenBank file in the batch table.");
+      return;
+    }
+    const nextResults = batchRows.map((row, index) => {
+      const slot = index + 1;
+      if (!row.gbRaw) return { slot, row, status: "empty" };
+      try {
+        const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm);
+        if (design.err) return { slot, row, status: "error", error: design.err, debug: design.dbg || "" };
+        return { slot, row, status: "success", result: design, debug: design.dbg || "" };
+      } catch (runError) {
+        return { slot, row, status: "error", error: runError?.message || "Design generation failed unexpectedly.", debug: "" };
+      }
+    });
+    setBatchResults(nextResults);
+    if (!nextResults.some((entry) => entry.status === "success")) setBatchError("No batch designs were generated successfully.");
+  };
+
+  const applyBatchDefinitions = () => {
+    setBatchError("");
+    setBatchResults([]);
+    setBatchCopyState("");
+    try {
+      const definitions = parseBatchDefinitionText(batchDefinitionText);
+      if (!definitions.length) {
+        setBatchError("Paste at least one batch definition line.");
+        return;
+      }
+      if (!batchFolderEntries.length) {
+        setBatchError("Upload a folder of GenBank files first.");
+        return;
+      }
+
+      const mappedRows = definitions.map((definition, index) => {
+        if (!definition.fileToken) throw new Error(`Line ${definition.lineNumber}: missing file name.`);
+        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be pm, ko, ct, or nt.`);
+        if (definition.projectType === "pm" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: point mutation designs need a mutation such as N32R.`);
+        if ((definition.projectType === "ct" || definition.projectType === "nt") && !definition.modification) throw new Error(`Line ${definition.lineNumber}: insert designs need a cassette name such as SD40-2xHA.`);
+        const lookupKey = normalizeFileLookupKey(definition.fileToken);
+        const fileEntry = batchFolderLibrary.byName.get(lookupKey) || batchFolderLibrary.byStem.get(lookupKey);
+        if (!fileEntry) throw new Error(`Line ${definition.lineNumber}: could not find GenBank file "${definition.fileToken}" in the uploaded folder.`);
+        return {
+          ...createBatchRow(index),
+          label: definition.label || fileEntry.fileName.replace(/\.[^.]+$/, ""),
+          projectType: definition.projectType,
+          mutation: definition.projectType === "pm" ? definition.modification : "",
+          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : "SD40-2xHA",
+          homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "250") : "250",
+          gbRaw: fileEntry.gbRaw,
+          fileName: fileEntry.fileName,
+        };
+      });
+
+      const targetSize = Math.max(batchSize, mappedRows.length);
+      setBatchSize(targetSize);
+      setBatchRows(resizeBatchRows(mappedRows, targetSize));
+    } catch (definitionError) {
+      setBatchError(definitionError?.message || "Failed to apply batch definitions.");
+    }
+  };
+
   const copyText = async (value, label) => {
     try {
       await navigator.clipboard.writeText(value);
       setCopyState(`${label} copied.`);
     } catch (copyError) {
       setCopyState(`Copy failed: ${copyError.message}`);
+    }
+  };
+
+  const copyBatchOrderSheet = async () => {
+    if (!batchOrderRows.length) return;
+    try {
+      await navigator.clipboard.writeText(buildBatchOrderDelimited(batchOrderRows, "\t"));
+      setBatchCopyState("Batch order sheet copied as tab-delimited text.");
+    } catch (copyError) {
+      setBatchCopyState(`Copy failed: ${copyError.message}`);
     }
   };
 
@@ -868,6 +1188,18 @@ export default function App() {
     link.click();
     URL.revokeObjectURL(url);
     setCopyState("HTML report downloaded.");
+  };
+
+  const downloadBatchOrderSheet = () => {
+    if (!batchOrderRows.length) return;
+    const blob = new Blob([buildBatchOrderDelimited(batchOrderRows)], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `idt_batch_order_${batchSuccessfulResults.length}_designs.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setBatchCopyState("Batch order sheet downloaded.");
   };
 
   const projectTypeMeta = getProjectTypeMeta(projectType);
@@ -1219,6 +1551,197 @@ export default function App() {
               </>
             )}
           </div>
+        </div>
+
+        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+          <SectionTitle>5. Batch Transfection Set</SectionTitle>
+          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+            Generate multiple designs in one pass for a transfection batch. Blank slots are ignored. Successful designs are flattened into an Excel-friendly order sheet with gRNAs, donors, and primers for IDT submission.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {BATCH_SIZE_OPTIONS.map((size) => (
+              <button
+                key={size}
+                type="button"
+                onClick={() => {
+                  setBatchSize(size);
+                  setBatchRows((current) => resizeBatchRows(current, size));
+                  setBatchResults([]);
+                  setBatchError("");
+                  setBatchCopyState("");
+                }}
+                style={{
+                  ...FIELD_STYLE,
+                  width: "auto",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  borderColor: batchSize === size ? COLORS.accent : COLORS.border,
+                  background: batchSize === size ? "rgba(45,212,191,0.10)" : COLORS.panelAlt,
+                }}
+              >
+                {size} designs
+              </button>
+            ))}
+            <Badge color={COLORS.success}>{batchRows.filter((row) => row.gbRaw).length} loaded</Badge>
+            <Badge color={COLORS.accentAlt}>{batchSuccessfulResults.length} successful</Badge>
+            <Badge>{batchOrderRows.length} order lines</Badge>
+            <Badge color={COLORS.accent}>{batchFolderEntries.length} folder files</Badge>
+          </div>
+
+          <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14, marginBottom: 14 }}>
+            <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Alternative: upload a folder and paste definitions</div>
+            <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
+              Use this when you already have a folder of GenBank files and want to define the requested modifications in one list instead of filling each slot manually.
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+              <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
+                <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
+                <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
+              </label>
+              <button type="button" onClick={applyBatchDefinitions} disabled={!batchDefinitionText.trim() || !batchFolderEntries.length} style={{ ...FIELD_STYLE, width: "auto", cursor: batchDefinitionText.trim() && batchFolderEntries.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                Apply folder definitions
+              </button>
+            </div>
+            <label style={{ display: "block" }}>
+              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Definition list</div>
+              <textarea
+                value={batchDefinitionText}
+                onChange={(event) => setBatchDefinitionText(event.target.value)}
+                style={{ ...FIELD_STYLE, minHeight: 126, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
+                placeholder={"file,design_type,modification_or_cassette,homology_arm,label\npsen1.gb,pm,N32R,,PSEN1 N32R\nmapt.gb,ko,,,\napp.gb,ct,SD40-2xHA,500,APP C-term KI\nsnca.gb,nt,N:EGFP-Linker,250,SNCA N-term EGFP"}
+              />
+            </label>
+            <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+              Columns: `file`, `design_type`, `modification_or_cassette`, `homology_arm`, `label`. Use the file name or the file stem in the first column. For `pm`, enter a mutation like `N32R`. For `ct` or `nt`, enter the cassette name. `ko` can leave modification blank.
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 12 }}>
+            {batchRows.map((row, index) => {
+              const slot = index + 1;
+              const batchStatus = batchResults.find((entry) => entry.slot === slot);
+              return (
+                <div key={row.id} style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+                    <div style={{ fontWeight: 700 }}>Design {slot}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {row.fileName && <Badge color={COLORS.success}>{row.fileName}</Badge>}
+                      {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
+                      {batchStatus?.status === "error" && <Badge color={COLORS.danger}>Error</Badge>}
+                    </div>
+                  </div>
+
+                  <Grid>
+                    <label>
+                      <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Batch label</div>
+                      <input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Transfection ${slot}`} />
+                    </label>
+                    <label>
+                      <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Design type</div>
+                      <select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={FIELD_STYLE}>
+                        {PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference GenBank</div>
+                      <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                        <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
+                        <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
+                        <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
+                      </label>
+                    </label>
+                    {row.projectType === "pm" ? (
+                      <label>
+                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Mutation</div>
+                        <input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="N32R" />
+                      </label>
+                    ) : (
+                      <>
+                        {(row.projectType === "ct" || row.projectType === "nt") && (
+                          <>
+                            <label>
+                              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cassette</div>
+                              <select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>
+                                {cassetteOptions.map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}
+                              </select>
+                            </label>
+                            <label>
+                              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Homology arm</div>
+                              <select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={FIELD_STYLE}>
+                                <option value="250">250 bp</option>
+                                <option value="500">500 bp</option>
+                                <option value="750">750 bp</option>
+                              </select>
+                            </label>
+                          </>
+                        )}
+                        {row.projectType === "ko" && (
+                          <div style={{ display: "flex", alignItems: "center", color: COLORS.muted, fontSize: 12 }}>
+                            KO uses the uploaded GenBank only. No mutation or donor cassette entry is needed.
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </Grid>
+
+                  {batchStatus?.status === "error" && (
+                    <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>
+                      {batchStatus.error}
+                    </div>
+                  )}
+                  {batchStatus?.status === "success" && (
+                    <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
+                      {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
+            <button type="button" onClick={runBatch} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none" }}>
+              Generate batch designs
+            </button>
+            <button type="button" disabled={!batchOrderRows.length} onClick={downloadBatchOrderSheet} style={{ ...FIELD_STYLE, width: "auto", cursor: batchOrderRows.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+              Download IDT order sheet CSV
+            </button>
+            <button type="button" disabled={!batchOrderRows.length} onClick={copyBatchOrderSheet} style={{ ...FIELD_STYLE, width: "auto", cursor: batchOrderRows.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+              Copy order sheet
+            </button>
+            {batchCopyState && <Badge color={COLORS.success}>{batchCopyState}</Badge>}
+          </div>
+          {batchError && <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{batchError}</div>}
+
+          {batchSuccessfulResults.length > 0 && (
+            <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", overflowX: "auto" }}>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Order Sheet Preview</div>
+              <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+                `Sequence To Order` is the field intended for Excel/IDT submission. For gRNAs, the spacer is exported without PAM. For SNP donors, the exported donor is the recommended order strand.
+              </div>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
+                <thead>
+                  <tr>{["Slot", "Design", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {batchOrderRows.map((row, rowIndex) => (
+                    <tr key={`${row.slot}-${row.itemType}-${row.name}-${rowIndex}`}>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.slot}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.designLabel}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.itemType}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.name}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace", wordBreak: "break-all" }}>{row.sequence}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace" }}>{row.pam || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.strand || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.length}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.linkedGuide || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.notes || ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
