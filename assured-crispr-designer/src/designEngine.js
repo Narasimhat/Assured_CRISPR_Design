@@ -44,6 +44,11 @@ export const CASSETTES = {
   "mAID-2xHA-P2A-mCherry": { seq: "GCTAAAGCCAAAAACAACCAGGGATCCGGAAAGGAGAAGAGTGCTTGTCCTAAAGATCCAGCCAAACCTCCGGCCAAGGCACAAGTTGTGGGATGGCCACCGGTGAGATCATACCGGAAGAACGTGATGGTTTCCTGCCAAAAATCAAGCGGTGGCCCGGAGGCGGCGGCGTTCGTGAAGGTATCAATGGACGGAGCACCGTACTTGAGGAAAATCGATTTGAGGATGTATAAAGGCGGCTACCCCTACGACGTGCCCGACTACGCCGGCTATCCGTATGATGTCCCGGACTATGCAGCAACAAACTTCTCTCTGCTGAAACAAGCCGGAGATGTCGAAGAGAATCCTGGACCGGTGAGCAAGGGCGAGGAGGATAACATGGCCATCATCAAGGAGTTCATGCGCTTCAAGGTGCACATGGAGGGCTCCGTGAACGGCCACGAGTTCGAGATCGAGGGCGAGGGCGAGGGCCGCCCCTACGAGGGCACCCAGACCGCCAAGCTGAAGGTGACCAAGGGTGGCCCCCTGCCCTTCGCCTGGGACATCCTGTCCCCTCAGTTCATGTACGGCTCCAAGGCCTACGTGAAGCACCCCGCCGACATCCCCGACTACTTGAAGCTGTCCTTCCCCGAGGGCTTCAAGTGGGAGCGCGTGATGAACTTCGAGGACGGCGGCGTGGTGACCGTGACCCAGGACTCCTCCCTGCAGGACGGCGAGTTCATCTACAAGGTGAAGCTGCGCGGCACCAACTTCCCCTCCGACGGCCCCGTAATGCAGAAGAAAACCATGGGCTGGGAGGCCTCCTCCGAGCGGATGTACCCCGAGGACGGCGCCCTGAAGGGCGAGATCAAGCAGAGGCTGAAGCTGAAGGACGGCGGCCACTACGACGCTGAGGTCAAGACCACCTACAAGGCCAAGAAGCCCGTGCAGCTGCCCGGCGCCTACAACGTCAACATCAAGTTGGACATCACCTCCCACAACGAGGACTACACCATCGTGGAACAGTACGAACGCGCCGAGGGCCGCCACTCCACCGGCGGCATGGACGAGCTGTACAAGTAATAATAA", len: 1068, pos: "C-term" }
 };
 
+export const INTERNAL_TAGS = {
+  SPOT: { seq: "GACCGCGTGCGCGCCGTGAGCCATTGGAGCAGC", len: 33, aa: "DRVRAVSHWSS" },
+  alphaBtx: { seq: "CGATACTATGAAAGCAGTCTAGAGCCTTACCCAGAC", len: 36, aa: "RYYESSLEPYPD" },
+};
+
 const toAA = (codon) => CODON_TABLE[codon] || "?";
 const reverseComplement = (sequence) => sequence.split("").reverse().map((base) => DNA_COMPLEMENT[base] || "N").join("");
 
@@ -270,6 +275,8 @@ const DONOR_COLORS = {
   REPORTER: "#fb7185",
   PEPTIDE: "#f97316",
   STOP: "#facc15",
+  GUIDE: "#c084fc",
+  PAM: "#fbbf24",
   SILENT: "#ef4444",
 };
 
@@ -418,6 +425,57 @@ function buildSilentAnnotations(silentMutations, toDonorIndex) {
     .filter(Boolean);
 }
 
+function buildIndexedAnnotations(indexes, details) {
+  const ordered = [...new Set((indexes || []).filter((index) => Number.isFinite(index) && index >= 0))].sort((left, right) => left - right);
+  if (!ordered.length) return [];
+  const ranges = [];
+  let start = ordered[0];
+  let previous = ordered[0];
+  for (let index = 1; index < ordered.length; index += 1) {
+    const current = ordered[index];
+    if (current === previous + 1) {
+      previous = current;
+      continue;
+    }
+    ranges.push({ start, end: previous + 1 });
+    start = current;
+    previous = current;
+  }
+  ranges.push({ start, end: previous + 1 });
+  return ranges.map((range) => ({ ...details, start: range.start, end: range.end }));
+}
+
+function buildGuideAnnotationsFromIndexes(guide, guideIndex, siteIndexes, pamIndexes) {
+  return [
+    ...buildIndexedAnnotations(siteIndexes, {
+      label: `gRNA${guideIndex} site`,
+      badgeLabel: `gRNA${guideIndex} site`,
+      title: `${guide.sp}`,
+      color: DONOR_COLORS.GUIDE,
+      priority: 6,
+    }),
+    ...buildIndexedAnnotations(pamIndexes, {
+      label: `gRNA${guideIndex} PAM`,
+      badgeLabel: `gRNA${guideIndex} PAM`,
+      title: `${guide.pam}`,
+      color: DONOR_COLORS.PAM,
+      priority: 7,
+    }),
+  ];
+}
+
+function buildGuideAnnotationsForMappedDonor(guide, guideIndex, toDonorIndex) {
+  const sitePositions = guide.str === "+"
+    ? Array.from({ length: 20 }, (_, index) => guide.ps + index)
+    : Array.from({ length: 20 }, (_, index) => guide.ps + 3 + index);
+  const pamPositions = guide.str === "+"
+    ? [guide.ps + 20, guide.ps + 21, guide.ps + 22]
+    : [guide.ps, guide.ps + 1, guide.ps + 2];
+  const siteIndexes = sitePositions.map((position) => toDonorIndex(position)).filter((index) => Number.isFinite(index) && index >= 0);
+  const pamIndexes = pamPositions.map((position) => toDonorIndex(position)).filter((index) => Number.isFinite(index) && index >= 0);
+  return buildGuideAnnotationsFromIndexes(guide, guideIndex, siteIndexes, pamIndexes);
+}
+
 function pickPrimerOutsideLeft(seq, boundary, primerLength = 24) {
   const end = Math.max(0, Math.min(seq.length, boundary));
   const start = Math.max(0, end - primerLength);
@@ -509,6 +567,182 @@ function parsePointMutationInput(value) {
   return { err: "Cannot parse mutation. Use WT-position-mutant format such as G96S or p.G96S." };
 }
 
+function parseInternalSiteInput(value) {
+  const normalized = String(value || "").trim().replace(/^after\s+/i, "").replace(/\s+/g, "").toUpperCase();
+  const withResidue = normalized.match(/^([A-Z])(\d+)$/);
+  if (withResidue) return { wtAA: withResidue[1], aaNumber: parseInt(withResidue[2], 10) };
+  const numeric = normalized.match(/^(\d+)$/);
+  if (numeric) return { wtAA: "", aaNumber: parseInt(numeric[1], 10) };
+  return { err: "Use an internal insertion site such as P155 or 155." };
+}
+
+function mkInternalOdn(model, guide, insertionPos, insertSequence, silentMutations = []) {
+  const seq = getGenomicSequence(model);
+  let donorStart;
+  let donorEnd;
+  if (guide.str === "+") { donorStart = guide.cut - 36; donorEnd = guide.cut + 91; }
+  else { donorStart = guide.cut - 91; donorEnd = guide.cut + 36; }
+  const desiredLength = donorEnd - donorStart;
+  if (donorStart < 0) {
+    donorEnd = Math.min(seq.length, donorEnd - donorStart);
+    donorStart = 0;
+  }
+  if (donorEnd > seq.length) {
+    donorStart = Math.max(0, donorStart - (donorEnd - seq.length));
+    donorEnd = seq.length;
+  }
+  if (donorEnd - donorStart < desiredLength && seq.length >= desiredLength) {
+    donorStart = Math.max(0, donorEnd - desiredLength);
+    donorEnd = Math.min(seq.length, donorStart + desiredLength);
+  }
+  if (donorStart < 0 || donorEnd > seq.length || donorEnd - donorStart < desiredLength) return null;
+
+  const wtWindow = seq.slice(donorStart, donorEnd);
+  const payload = wtWindow.split("");
+  const insertIndex = insertionPos - donorStart;
+  if (insertIndex < 0 || insertIndex > payload.length) return null;
+  payload.splice(insertIndex, 0, ...insertSequence.split(""));
+
+  silentMutations.forEach((mutation) => {
+    let donorIndex = mutation.gp - donorStart;
+    if (mutation.gp >= insertionPos) donorIndex += insertSequence.length;
+    if (donorIndex >= 0 && donorIndex < payload.length) payload[donorIndex] = mutation.nb;
+  });
+
+  const donorSense = payload.join("");
+  const orderSequence = guide.str === "+" ? reverseComplement(donorSense) : donorSense;
+  const wtOrder = guide.str === "+" ? reverseComplement(wtWindow) : wtWindow;
+  const orderedInsertStart = guide.str === "+" ? donorSense.length - (insertIndex + insertSequence.length) : insertIndex;
+  const orderedInsertEnd = orderedInsertStart + insertSequence.length;
+  const silentIndexes = silentMutations
+    .map((mutation) => {
+      let donorIndex = mutation.gp - donorStart;
+      if (mutation.gp >= insertionPos) donorIndex += insertSequence.length;
+      return guide.str === "+" ? donorSense.length - 1 - donorIndex : donorIndex;
+    })
+    .filter((index) => Number.isFinite(index))
+    .sort((left, right) => left - right);
+  const sitePositions = guide.str === "+"
+    ? Array.from({ length: 20 }, (_, index) => guide.ps + index)
+    : Array.from({ length: 20 }, (_, index) => guide.ps + 3 + index);
+  const pamPositions = guide.str === "+"
+    ? [guide.ps + 20, guide.ps + 21, guide.ps + 22]
+    : [guide.ps, guide.ps + 1, guide.ps + 2];
+  const toOrderedIndex = (genomicPos) => {
+    let donorIndex = genomicPos - donorStart;
+    if (genomicPos >= insertionPos) donorIndex += insertSequence.length;
+    if (donorIndex < 0 || donorIndex >= donorSense.length) return -1;
+    return guide.str === "+" ? donorSense.length - 1 - donorIndex : donorIndex;
+  };
+
+  return {
+    od: orderSequence,
+    wo: wtOrder,
+    sl: guide.str === "+" ? "- strand target" : "+ strand target",
+    donorSenseLength: donorSense.length,
+    insertSequence,
+    insertStart: orderedInsertStart,
+    insertEnd: orderedInsertEnd,
+    silentIndexes,
+    guideSiteIndexes: sitePositions.map((position) => toOrderedIndex(position)).filter((index) => index >= 0),
+    guidePamIndexes: pamPositions.map((position) => toOrderedIndex(position)).filter((index) => index >= 0),
+    silentMutations,
+  };
+}
+
+function buildInternalProteinPreview(model, aaNumber, insertAa) {
+  const wtProtein = [];
+  for (let index = 1; index <= model.proteinLength; index += 1) {
+    const codonInfo = getCodonAtAa(model, index, toAA);
+    wtProtein.push(codonInfo?.aa || "?");
+  }
+  const donorProtein = wtProtein.slice(0, aaNumber).concat(insertAa.split(""), wtProtein.slice(aaNumber));
+  const prefix = Math.max(0, aaNumber - 8);
+  const suffix = Math.min(wtProtein.length, aaNumber + 8);
+  return {
+    wtPrefix: wtProtein.slice(prefix, aaNumber).join(""),
+    wtAnchor: wtProtein[aaNumber - 1] || "?",
+    wtSuffix: wtProtein.slice(aaNumber, suffix).join(""),
+    donorPrefix: donorProtein.slice(prefix, aaNumber).join(""),
+    insertAa,
+    donorSuffix: donorProtein.slice(aaNumber + insertAa.length, aaNumber + insertAa.length + (suffix - aaNumber)).join(""),
+  };
+}
+
+function buildInternalCodingPreview(model, aaNumber, insertSequence, insertAa) {
+  const prefixStart = Math.max(1, aaNumber - 7);
+  const suffixEnd = Math.min(model.proteinLength, aaNumber + 8);
+  const prefixEntries = [];
+  const suffixEntries = [];
+  for (let index = prefixStart; index <= aaNumber; index += 1) {
+    const codonInfo = getCodonAtAa(model, index, toAA);
+    if (codonInfo) prefixEntries.push({ codon: codonInfo.cod, aa: codonInfo.aa === "*" ? "Stop" : codonInfo.aa });
+  }
+  for (let index = aaNumber + 1; index <= suffixEnd; index += 1) {
+    const codonInfo = getCodonAtAa(model, index, toAA);
+    if (codonInfo) suffixEntries.push({ codon: codonInfo.cod, aa: codonInfo.aa === "*" ? "Stop" : codonInfo.aa });
+  }
+  const insertCodons = [];
+  const upperInsert = String(insertSequence || "").toUpperCase();
+  for (let index = 0; index < upperInsert.length; index += 3) insertCodons.push(upperInsert.slice(index, index + 3));
+  return {
+    note: `Insert ${insertAa} after residue ${aaNumber}.`,
+    wtCodons: prefixEntries.map((entry) => entry.codon).concat(suffixEntries.map((entry) => entry.codon)),
+    donorCodons: prefixEntries.map((entry) => entry.codon).concat(insertCodons, suffixEntries.map((entry) => entry.codon)),
+    wtAas: prefixEntries.map((entry) => entry.aa).concat(suffixEntries.map((entry) => entry.aa)),
+    donorAas: prefixEntries.map((entry) => entry.aa).concat(insertAa.split(""), suffixEntries.map((entry) => entry.aa)),
+    insertCodonStart: prefixEntries.length,
+    insertCodonLength: insertCodons.length,
+    insertAaStart: prefixEntries.length,
+    insertAaLength: insertAa.length,
+  };
+}
+
+function translateDnaToAaTokens(sequence) {
+  const tokens = [];
+  const upper = String(sequence || "").toUpperCase();
+  const limit = Math.floor(upper.length / 3) * 3;
+  for (let index = 0; index < limit; index += 3) {
+    const aa = toAA(upper.slice(index, index + 3));
+    tokens.push(aa === "*" ? "Stop" : aa);
+  }
+  return tokens;
+}
+
+function buildKnockinProteinPreview(model, orientation, insertSequence) {
+  const wtTokens = [];
+  for (let index = 1; index <= model.proteinLength; index += 1) {
+    const codonInfo = getCodonAtAa(model, index, toAA);
+    wtTokens.push(codonInfo?.aa || "?");
+  }
+  const insertTokens = translateDnaToAaTokens(insertSequence);
+  if (orientation === "ct") {
+    const tailLength = Math.min(12, wtTokens.length);
+    const wtTail = wtTokens.slice(wtTokens.length - tailLength);
+    return {
+      mode: "ct",
+      note: "Original protein tail is shown on top. The edited protein appends the translated knock-in before the terminal stop.",
+      wtLabel: "WT protein tail",
+      donorLabel: "Edited protein tail",
+      wtTokens: wtTail,
+      donorTokens: wtTail.concat(insertTokens),
+      insertStart: wtTail.length,
+      insertLength: insertTokens.length,
+    };
+  }
+  const headLength = Math.min(12, wtTokens.length);
+  return {
+    mode: "nt",
+    note: "Original protein start is shown on top. The edited protein begins with the translated knock-in and then resumes the native coding sequence.",
+    wtLabel: "WT protein start",
+    donorLabel: "Edited protein start",
+    wtTokens: wtTokens.slice(0, headLength),
+    donorTokens: insertTokens.concat(wtTokens.slice(1, Math.min(wtTokens.length, 1 + headLength))),
+    insertStart: 0,
+    insertLength: insertTokens.length,
+  };
+}
+
 export function designPM(gb, mutationString) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
@@ -564,6 +798,93 @@ export function designPM(gb, mutationString) {
   return result;
 }
 
+export function designIT(gb, siteString, tag) {
+  const cds = getCdsFromModel(gb);
+  if (!cds) return { err: "No CDS annotation found in GenBank file." };
+  const site = parseInternalSiteInput(siteString);
+  if (site.err) return { err: site.err };
+  const { wtAA, aaNumber } = site;
+  if (!aaNumber || aaNumber < 1 || aaNumber >= gb.proteinLength) return { err: "Internal insertion site must be within the coding sequence and before the final amino acid." };
+  const codonInfo = getCodonAtAa(gb, aaNumber, toAA);
+  if (!codonInfo) return { err: `Cannot map amino acid ${aaNumber} to the coding sequence.` };
+  if (wtAA && codonInfo.aa !== wtAA) return { err: `Expected ${wtAA} at position ${aaNumber} but found ${codonInfo.aa} (${codonInfo.cod}).` };
+  const nextCodonInfo = getCodonAtAa(gb, aaNumber + 1, toAA);
+  const preset = INTERNAL_TAGS[tag];
+  if (!preset) return { err: `Internal tag "${tag}" is not available.` };
+
+  const insertionPos = codingPosToGenomic(gb, aaNumber * 3);
+  if (insertionPos === null || insertionPos === undefined) return { err: `Cannot map insertion point after amino acid ${aaNumber}.` };
+
+  const guideSelection = selectInsertGuidesWithFallback(gb, insertionPos);
+  if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the internal insertion site." };
+  const { guides, window: guideWindow, tier: guideTier } = guideSelection;
+
+  const blockedPositions = new Set();
+  const donors = [];
+  const allBlockingMutations = [];
+  guides.slice(0, 2).forEach((guide, index) => {
+    const blocking = findSilent(gb, guide, blockedPositions, { allowNonCoding: true });
+    if (blocking) blockedPositions.add(blocking.gp);
+    const donor = mkInternalOdn(gb, guide, insertionPos, preset.seq, blocking ? [{ ...blocking, gi: index + 1 }] : []);
+    const guideName = makeGuideName(gb.gene, "it", index, `AFTER_${wtAA || ""}${aaNumber}`, tag);
+    if (donor) {
+      const annotationBase = [
+        { label: "5' arm", color: DONOR_COLORS.HA5, start: 0, end: donor.insertStart, priority: 1, badgeLabel: "5' arm" },
+        { label: tag, color: DONOR_COLORS.TAG, start: donor.insertStart, end: donor.insertEnd, priority: 1, badgeLabel: tag, title: `${tag} insert` },
+        { label: "3' arm", color: DONOR_COLORS.HA3, start: donor.insertEnd, end: donor.od.length, priority: 1, badgeLabel: "3' arm" },
+      ];
+      const blockingAnnotations = buildSilentAnnotations(blocking ? [{ ...blocking, gi: index + 1 }] : [], (mutation) => donor.silentIndexes[0] ?? -1);
+      const guideAnnotations = buildGuideAnnotationsFromIndexes(guide, index + 1, donor.guideSiteIndexes, donor.guidePamIndexes);
+      donors.push({
+        ...donor,
+        n: `ssODN${index + 1}`,
+        gi: index,
+        guideName,
+        guideStrand: guide.str,
+        donorAnnotations: annotationBase.concat(guideAnnotations, blockingAnnotations),
+      });
+    }
+    if (blocking) allBlockingMutations.push({ ...blocking, gi: index + 1 });
+  });
+
+  const proteinPreview = buildInternalProteinPreview(gb, aaNumber, preset.aa);
+  const codingPreview = buildInternalCodingPreview(gb, aaNumber, preset.seq, preset.aa);
+  const seq = getGenomicSequence(gb);
+  const primerStart = Math.max(0, insertionPos - 200);
+  return {
+    type: "it",
+    gene: gb.gene,
+    prot: gb.proteinLength,
+    an: aaNumber,
+    wA: codonInfo.aa,
+    nextAA: nextCodonInfo?.aa || "?",
+    tag,
+    td: `${tag} (${preset.seq.length} bp)`,
+    il: preset.seq.length,
+    gp: insertionPos,
+    guideWindow,
+    guideTier,
+    proteinPreview,
+    codingPreview,
+    gs: guides.slice(0, 2).map((guide, index) => ({
+      n: makeGuideName(gb.gene, "it", index, `AFTER_${wtAA || ""}${aaNumber}`, tag),
+      sp: guide.sp,
+      pm: guide.pam,
+      str: guide.str,
+      gc: guide.gc,
+      d: guide.d,
+      arm: `Cut-to-insert distance ${Math.abs(guide.d)} bp | ${guideTier === "preferred" ? "preferred window" : guideTier === "fallback" ? "fallback window" : "distant fallback"} <=${guideWindow} bp`,
+    })),
+    os: donors,
+    ss: allBlockingMutations,
+    ps: [
+      { n: makePrimerName(gb.gene, "it", "Fw", `AFTER_${wtAA || ""}${aaNumber}`, tag), s: seq.slice(primerStart, primerStart + 24) },
+      { n: makePrimerName(gb.gene, "it", "Rev", `AFTER_${wtAA || ""}${aaNumber}`, tag), s: reverseComplement(seq.slice(Math.min(seq.length - 24, insertionPos + 200), Math.min(seq.length, insertionPos + 224))) },
+    ],
+    amp: `~${Math.min(seq.length, insertionPos + 224) - primerStart} bp`,
+  };
+}
+
 export function designCT(gb, tag, homologyArmLength) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
@@ -608,17 +929,20 @@ export function designCT(gb, tag, homologyArmLength) {
   });
 
   const donor = `${homology5Array.join("")}${preset.seq}${homology3Array.join("")}`;
+  const toCtDonorIndex = (genomicPos) => {
+    const homology5Index = genomicPos - homology5Start;
+    if (homology5Index >= 0 && homology5Index < homology5.length) return homology5Index;
+    const homology3Index = genomicPos - (stopStart + 3);
+    if (homology3Index >= 0 && homology3Index < homology3.length) return homology5.length + preset.seq.length + homology3Index;
+    return -1;
+  };
   const donorAnnotations = buildDonorAnnotations(
     homology5.length,
     preset.segments,
     homology3.length,
-    buildSilentAnnotations(silentMutations, (mutation) => {
-      const homology5Index = mutation.gp - homology5Start;
-      if (homology5Index >= 0 && homology5Index < homology5.length) return homology5Index;
-      const homology3Index = mutation.gp - (stopStart + 3);
-      if (homology3Index >= 0 && homology3Index < homology3.length) return homology5.length + preset.seq.length + homology3Index;
-      return -1;
-    }),
+    buildSilentAnnotations(silentMutations, toCtDonorIndex).concat(
+      guides.slice(0, 2).flatMap((guide, index) => buildGuideAnnotationsForMappedDonor(guide, index + 1, toCtDonorIndex)),
+    ),
   );
   const lastAA = getCodonAtAa(gb, gb.proteinLength, toAA);
   const guideProtection = guides.slice(0, 2).map((guide, index) => {
@@ -648,6 +972,7 @@ export function designCT(gb, tag, homologyArmLength) {
     dl: donor.length,
     donor,
     donorAnnotations,
+    proteinPreview: buildKnockinProteinPreview(gb, "ct", preset.seq),
     guideWindow: guideWindow,
     guideTier,
     guideProtection,
@@ -737,17 +1062,20 @@ export function designNT(gb, tag, homologyArmLength) {
   });
 
   const donor = `${homology5Array.join("")}${preset.seq}${homology3Array.join("")}`;
+  const toNtDonorIndex = (genomicPos) => {
+    const homology5Index = genomicPos - homology5Start;
+    if (homology5Index >= 0 && homology5Index < homology5.length) return homology5Index;
+    const homology3Index = genomicPos - codingResume;
+    if (homology3Index >= 0 && homology3Index < homology3.length) return homology5.length + preset.seq.length + homology3Index;
+    return -1;
+  };
   const donorAnnotations = buildDonorAnnotations(
     homology5.length,
     preset.segments,
     homology3.length,
-    buildSilentAnnotations(silentMutations, (mutation) => {
-      const homology5Index = mutation.gp - homology5Start;
-      if (homology5Index >= 0 && homology5Index < homology5.length) return homology5Index;
-      const homology3Index = mutation.gp - codingResume;
-      if (homology3Index >= 0 && homology3Index < homology3.length) return homology5.length + preset.seq.length + homology3Index;
-      return -1;
-    }),
+    buildSilentAnnotations(silentMutations, toNtDonorIndex).concat(
+      guides.slice(0, 2).flatMap((guide, index) => buildGuideAnnotationsForMappedDonor(guide, index + 1, toNtDonorIndex)),
+    ),
   );
   const guideProtection = guides.slice(0, 2).map((guide, index) => {
     const guideIndex = index + 1;
@@ -773,6 +1101,7 @@ export function designNT(gb, tag, homologyArmLength) {
     dl: donor.length,
     donor,
     donorAnnotations,
+    proteinPreview: buildKnockinProteinPreview(gb, "nt", preset.seq),
     guideWindow: guideWindow,
     guideTier,
     guideProtection,
@@ -796,6 +1125,9 @@ export function runDesignFromTranscriptModel(projectType, model, mutation, tag, 
   if (projectType === "pm") {
     if (!mutation) return { err: "Enter a mutation such as L72S." };
     designResult = designPM(model, mutation);
+  } else if (projectType === "it") {
+    if (!mutation) return { err: "Enter an internal insertion site such as P155." };
+    designResult = designIT(model, mutation, tag);
   } else if (projectType === "ct") designResult = designCT(model, tag, homologyArmLength);
   else if (projectType === "nt") designResult = designNT(model, tag, homologyArmLength);
   else designResult = designKO(model);

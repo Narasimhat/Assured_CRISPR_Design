@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
-import { CASSETTES, runDesign } from "./designEngine";
+import { CASSETTES, INTERNAL_TAGS, runDesign } from "./designEngine";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
 const COLORS = {
@@ -20,6 +20,7 @@ const COLORS = {
 const PROJECT_TYPES = [
   { id: "pm", label: "Point mutation", short: "SNP / amino-acid change" },
   { id: "ko", label: "Knockout", short: "Frameshift knockout" },
+  { id: "it", label: "Internal in-frame tag", short: "ssODN insert within CDS" },
   { id: "ct", label: "C-terminal tag / reporter", short: "HDR insert at stop" },
   { id: "nt", label: "N-terminal tag / reporter", short: "HDR insert at ATG" },
 ];
@@ -70,6 +71,7 @@ const APP_FOOTER_LABEL = "Investor demo build • 28 Mar 2026";
 const SAMPLE_REQUEST_TEXT = [
   "PSEN1 N32R BIHi005-A",
   "ECSIT knockout BIHi005-A",
+  "SCN5A internal SPOT after P155 BIHi005-A",
   "INS C-terminal SD40-2xHA BIHi005-A",
   "SORCS1 N-terminal N:EGFP-Linker BIHi005-A",
 ].join("\n");
@@ -108,6 +110,7 @@ function formatDesignLabel(meta, result) {
   if (!result) return "";
   if (result.type === "pm") return `${result.gene} p.${result.wA}${result.an}${result.mA}`;
   if (result.type === "ko") return `${result.gene} knockout`;
+  if (result.type === "it") return `${result.gene} internal ${result.tag} after ${result.wA}${result.an}`;
   return `${result.gene} ${result.type === "ct" ? "C-terminal" : "N-terminal"} ${result.tag}`;
 }
 
@@ -134,7 +137,9 @@ function buildDesignSummary(result) {
     if (result.strat) lines.push(`Strategy: ${result.strat}`);
     return lines.join("\n");
   }
+  if (result.type === "it") lines.push(`Insert after ${result.wA}${result.an}, before ${result.nextAA}${result.an + 1}`);
   if (result.type === "ct" || result.type === "nt") lines.push(`Donor length: ${result.dl} bp`);
+  if (result.type === "it") lines.push(`Insert length: ${result.il} bp`);
   lines.push("");
   lines.push("gRNAs:");
   result.gs.forEach((guide) => lines.push(`- ${guide.n}: ${guide.sp} ${guide.pm} | ${guide.str} strand | GC ${guide.gc}%`));
@@ -220,6 +225,7 @@ function formatBatchDesignLabel(row, result) {
   if (!result) return `Slot ${row?.slot || "?"}`;
   if (result.type === "pm") return `${result.gene} ${result.wA}${result.an}${result.mA}`;
   if (result.type === "ko") return `${result.gene} knockout`;
+  if (result.type === "it") return `${result.gene} internal ${result.tag} after ${result.wA}${result.an}`;
   return `${result.gene} ${result.type === "ct" ? "C-terminal" : "N-terminal"} ${result.tag}`;
 }
 
@@ -235,6 +241,10 @@ function buildPmDonorOrderName(result, donor, donorIndex) {
 function buildInsertDonorOrderName(result) {
   const side = result.type === "ct" ? "CT" : "NT";
   return `${buildSafeToken(result.gene, "GENE")}_${buildSafeToken(result.tag, "TAG")}_${side}_donor`;
+}
+
+function buildInternalDonorOrderName(result, donor, donorIndex) {
+  return `${buildSafeToken(result.gene, "GENE")}_${result.wA}${result.an}_${buildSafeToken(result.tag, "TAG")}_${donor.n || `ssODN${donorIndex + 1}`}`;
 }
 
 function buildBatchOrderRows(entries) {
@@ -277,6 +287,20 @@ function buildBatchOrderRows(entries) {
         recommended: "Order this strand",
         notes: donor.guideName ? `Reverse complement to ${donor.guideName}` : "Recommended donor strand",
       }))
+      : result.type === "it"
+        ? (result.os || []).map((donor, donorIndex) => ({
+          ...common,
+          itemType: "Donor",
+          name: buildInternalDonorOrderName(result, donor, donorIndex),
+          sequence: donor.od,
+          spacer: "",
+          pam: "",
+          strand: donor.sl || "",
+          length: donor.od?.length || 0,
+          linkedGuide: donor.guideName || "",
+          recommended: "Order this strand",
+          notes: donor.guideName ? `Guide-linked internal ssODN, reverse complement to ${donor.guideName}` : "Guide-linked internal ssODN donor",
+        }))
       : (result.type === "ct" || result.type === "nt")
         ? [{
           ...common,
@@ -344,6 +368,7 @@ function normalizeBatchProjectType(value) {
   const compact = String(value || "").toLowerCase().replace(/[^a-z]/g, "");
   if (compact === "pm" || compact === "snp" || compact === "pointmutation" || compact === "pointmutations") return "pm";
   if (compact === "ko" || compact === "knockout" || compact === "knockouts") return "ko";
+  if (compact === "it" || compact === "internal" || compact === "internaltag" || compact === "internalinframetag" || compact === "inframe" || compact === "inframetag" || compact === "internalknockin") return "it";
   if (compact === "ct" || compact === "cterminal" || compact === "ctag" || compact === "cterminaltag") return "ct";
   if (compact === "nt" || compact === "nterminal" || compact === "ntag" || compact === "nterminaltag") return "nt";
   return "";
@@ -379,11 +404,24 @@ function detectMutationToken(text) {
   return match ? `${match[1].toUpperCase()}${match[2]}${match[3].toUpperCase()}` : "";
 }
 
-function detectProjectTypeFromText(text, mutation, cassetteKey) {
+function detectInternalSiteToken(text) {
+  const raw = String(text || "");
+  const afterMatch = raw.match(/\bafter\s+([A-Za-z]\d+|\d+)\b/i);
+  if (afterMatch) return afterMatch[1].toUpperCase();
+  if (/\b(internal|in-frame|inframe)\b/i.test(raw)) {
+    const inlineMatch = raw.match(/\b([A-Za-z]\d+|\d+)\b/i);
+    if (inlineMatch) return inlineMatch[1].toUpperCase();
+  }
+  return "";
+}
+
+function detectProjectTypeFromText(text, mutation, internalSite, cassetteKey) {
   const lower = String(text || "").toLowerCase();
   if (/\b(ko|knockout)\b/.test(lower)) return "ko";
+  if (/\b(internal|in-frame|inframe)\b/.test(lower)) return "it";
   if (/\b(c[\s-]?term(?:inal)?|ct)\b/.test(lower)) return "ct";
   if (/\b(n[\s-]?term(?:inal)?|nt)\b/.test(lower)) return "nt";
+  if (internalSite && cassetteKey && INTERNAL_TAGS[cassetteKey]) return "it";
   if (cassetteKey?.startsWith("N:")) return "nt";
   if (cassetteKey) return "ct";
   if (mutation) return "pm";
@@ -392,6 +430,13 @@ function detectProjectTypeFromText(text, mutation, cassetteKey) {
 
 function detectCassetteKey(text, targetType = "") {
   const normalizedLine = String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (!targetType || targetType === "it") {
+    const internalKeys = Object.keys(INTERNAL_TAGS).sort((a, b) => b.length - a.length);
+    for (const key of internalKeys) {
+      const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (normalizedLine.includes(normalizedKey)) return key;
+    }
+  }
   const keys = Object.keys(CASSETTES).sort((a, b) => b.length - a.length);
   for (const key of keys) {
     const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -410,7 +455,7 @@ function detectGeneToken(text, cellLine, mutation, cassetteKey) {
   const tokens = raw.split(/\s+/).filter(Boolean);
   const stopTokens = new Set([
     "ko", "knockout", "ct", "nt", "cterminal", "nterminal", "c-terminal", "n-terminal",
-    "c", "n", "term", "terminal", "in", "with",
+    "c", "n", "term", "terminal", "in", "with", "internal", "inframe", "after",
   ]);
   const mutationLower = mutation.toLowerCase();
   const cellLineLower = String(cellLine || "").toLowerCase();
@@ -432,8 +477,9 @@ function parseRequestLine(line, index, folderLibrary) {
   if (!trimmed) return null;
   const initialCassette = detectCassetteKey(trimmed);
   const mutation = detectMutationToken(trimmed);
-  const projectType = detectProjectTypeFromText(trimmed, mutation, initialCassette);
-  const cassetteKey = detectCassetteKey(trimmed, projectType) || (projectType === "ct" || projectType === "nt" ? initialCassette : "");
+  const internalSite = detectInternalSiteToken(trimmed);
+  const projectType = detectProjectTypeFromText(trimmed, mutation, internalSite, initialCassette);
+  const cassetteKey = detectCassetteKey(trimmed, projectType) || ((projectType === "ct" || projectType === "nt" || projectType === "it") ? initialCassette : "");
   const cellLine = detectCellLineToken(trimmed);
   const gene = detectGeneToken(trimmed, cellLine, mutation, cassetteKey);
   const geneMatch = folderLibrary.byGene.get(gene);
@@ -445,8 +491,12 @@ function parseRequestLine(line, index, folderLibrary) {
     gene,
     cellLine,
     projectType,
-    mutation: projectType === "pm" ? mutation : "",
-    tag: projectType === "ct" || projectType === "nt" ? (cassetteKey || (projectType === "nt" ? "N:EGFP-Linker" : "SD40-2xHA")) : "SD40-2xHA",
+    mutation: projectType === "pm" ? mutation : projectType === "it" ? internalSite : "",
+    tag: projectType === "ct" || projectType === "nt"
+      ? (cassetteKey || (projectType === "nt" ? "N:EGFP-Linker" : "SD40-2xHA"))
+      : projectType === "it"
+        ? (cassetteKey || "SPOT")
+        : "SD40-2xHA",
     homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
     gbRaw: fileEntry?.gbRaw || "",
     fileName: fileEntry?.fileName || "",
@@ -468,10 +518,20 @@ function summarizeRowParseIssue(row, fileEntryOverride = null) {
   if (!row?.gene) issues.push("gene");
   if (!row?.cellLine) issues.push("cell line");
   if (row?.projectType === "pm" && !row?.mutation) issues.push("mutation");
+  if (row?.projectType === "it" && !row?.mutation) issues.push("in-frame insert site");
+  if (row?.projectType === "it" && !row?.tag) issues.push("internal tag");
   if ((row?.projectType === "ct" || row?.projectType === "nt") && !row?.tag) issues.push("cassette");
   const hasFile = Boolean(fileEntryOverride || row?.gbRaw || row?.fileName);
   if (!hasFile) issues.push("GenBank");
   return issues.length ? `Needs ${issues.join(", ")}` : "";
+}
+
+function parseInternalDefinitionSpec(value) {
+  const text = String(value || "").trim();
+  return {
+    site: detectInternalSiteToken(text),
+    tag: detectCassetteKey(text, "it"),
+  };
 }
 
 function parseBatchDefinitionText(text) {
@@ -654,7 +714,7 @@ function inferRecordSpecificMatch(record, targetSubtype, signature) {
 
 function inferCurrentDonorType(result) {
   if (!result) return "none";
-  if (result.type === "pm") return "ssODN";
+  if (result.type === "pm" || result.type === "it") return "ssODN";
   if (result.type === "ko") return "none";
   return "donor";
 }
@@ -790,6 +850,14 @@ function buildReviewItems(meta, result, fileName) {
     if (!(result.ss || []).length) items.push({ level: "warning", text: "No silent guide-blocking mutation was introduced. Re-cut after HDR may remain possible." });
     if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the mutation site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
     items.push({ level: "check", text: "Confirm the desired amino-acid change against the intended transcript and verify that the donor does not create unwanted amino-acid substitutions." });
+  }
+
+  if (result.type === "it") {
+    if (!(result.os || []).length) items.push({ level: "warning", text: "No guide-linked internal ssODN donor could be rendered. Review the insertion-site window and sequence bounds before ordering." });
+    if (!(result.ss || []).length) items.push({ level: "warning", text: "No guide-blocking mutation was introduced in the internal ssODN donors. Re-cut after HDR may remain possible." });
+    if ((result.os || []).length !== (result.gs || []).length) items.push({ level: "warning", text: "A donor was not generated for every selected guide. Review guide-linked donor coverage before ordering." });
+    if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the internal insertion site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
+    items.push({ level: "check", text: "Confirm that the internal tag remains in frame with the surrounding CDS and verify that the inserted peptide does not disrupt known functional motifs." });
   }
 
   if (result.type === "ko") {
@@ -1028,9 +1096,163 @@ function buildPmDonorHtml(donor) {
   `;
 }
 
+function buildKnockinProteinRowHtml(label, tokens = [], insertStart = 0, insertLength = 0, highlightInsert = false) {
+  const insertEnd = insertStart + insertLength;
+  return `
+    <div style="margin:0 0 8px 0;">
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">${label}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;">
+        ${tokens.map((token, index) => `<span style="display:inline-block;min-width:${token === "Stop" ? "5ch" : "2ch"};margin-right:6px;text-align:center;color:#111827;${highlightInsert && index >= insertStart && index < insertEnd ? "background:#FDE68A;font-weight:800;border-radius:3px;padding:0 2px;" : ""}">${token}</span>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function buildKnockinProteinHtml(preview, title = "Protein Translation View") {
+  if (!preview) return "";
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">${title}</div>
+      <p style="font-size:12px;color:#555;margin:0 0 10px 0;">${preview.note}</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:#FDE68A;">Inserted tag / reporter</span>
+      </div>
+      ${buildKnockinProteinRowHtml(preview.wtLabel, preview.wtTokens)}
+      ${buildKnockinProteinRowHtml(preview.donorLabel, preview.donorTokens, preview.insertStart, preview.insertLength, true)}
+    </div>
+  `;
+}
+
+function buildInternalProteinHtml(result) {
+  const preview = result?.codingPreview;
+  if (!preview) return "";
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
+      <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Insert ${result.tag} after ${result.wA}${result.an}, before ${result.nextAA}${result.an + 1}.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:#FDE68A;">Inserted tag codons / amino acids</span>
+      </div>
+      ${buildAlignedRowHtml("WT codons", { tokens: preview.wtCodons }, [], "wt")}
+      ${buildAlignedRowHtml("Donor codons", { tokens: preview.donorCodons }, Array.from({ length: preview.insertCodonLength }, (_, index) => preview.insertCodonStart + index), "donor")}
+      ${buildAlignedRowHtml("WT amino acids", { tokens: preview.wtAas }, [], "wt")}
+      ${buildAlignedRowHtml("Donor amino acids", { tokens: preview.donorAas }, Array.from({ length: preview.insertAaLength }, (_, index) => preview.insertAaStart + index), "donor")}
+    </div>
+  `;
+}
+
+function mirrorAnnotations(annotations = [], sequenceLength = 0) {
+  return (annotations || []).map((item) => ({
+    ...item,
+    start: Math.max(0, sequenceLength - item.end),
+    end: Math.max(0, sequenceLength - item.start),
+  }));
+}
+
+function buildInternalStrandModels(donor) {
+  const ordered = donor.od || "";
+  const opposite = reverseComplement(ordered);
+  const insertLength = Math.max(0, (donor.insertEnd || 0) - (donor.insertStart || 0));
+  const orderedGuideSite = donor.guideSiteIndexes || [];
+  const orderedGuidePam = donor.guidePamIndexes || [];
+  const orderedSilent = donor.silentIndexes || [];
+  const projectWtIndexes = (indexes, wtLength) => indexes
+    .map((index) => {
+      if (index < (donor.insertStart || 0)) return index;
+      if (index >= (donor.insertEnd || 0)) return index - insertLength;
+      return null;
+    })
+    .filter((index) => index !== null && index >= 0 && index < wtLength);
+  const orderedWt = donor.wo || "";
+  const oppositeWt = reverseComplement(orderedWt);
+  const reverseIndexes = (indexes, length) => (indexes || []).map((index) => length - 1 - index).sort((left, right) => left - right);
+  const orderedLabel = donor.guideStrand === "+" ? "- strand donor" : "+ strand donor";
+  const oppositeLabel = donor.guideStrand === "+" ? "+ strand donor" : "- strand donor";
+  return [
+    {
+      key: "ordered",
+      title: orderedLabel,
+      recommended: true,
+      note: `Recommended to order. This strand is reverse complement to ${donor.guideName}. Cut site lies between the 91 bp and 36 bp arms.`,
+      wt: orderedWt,
+      donor: ordered,
+      annotations: donor.donorAnnotations || [],
+      guideSiteIndexes: orderedGuideSite,
+      guidePamIndexes: orderedGuidePam,
+      silentIndexes: orderedSilent,
+      wtGuideSiteIndexes: projectWtIndexes(orderedGuideSite, orderedWt.length),
+      wtGuidePamIndexes: projectWtIndexes(orderedGuidePam, orderedWt.length),
+    },
+    {
+      key: "opposite",
+      title: oppositeLabel,
+      recommended: false,
+      note: "Opposite donor strand for reference. Cut site lies between the 36 bp and 91 bp arms on this view.",
+      wt: oppositeWt,
+      donor: opposite,
+      annotations: mirrorAnnotations(donor.donorAnnotations || [], ordered.length),
+      guideSiteIndexes: reverseIndexes(orderedGuideSite, ordered.length),
+      guidePamIndexes: reverseIndexes(orderedGuidePam, ordered.length),
+      silentIndexes: reverseIndexes(orderedSilent, ordered.length),
+      wtGuideSiteIndexes: reverseIndexes(projectWtIndexes(orderedGuideSite, orderedWt.length), orderedWt.length),
+      wtGuidePamIndexes: reverseIndexes(projectWtIndexes(orderedGuidePam, orderedWt.length), orderedWt.length),
+    },
+  ];
+}
+
+function buildInternalSequenceHtml(label, sequence, guideSiteIndexes = [], guidePamIndexes = [], silentIndexes = [], annotations = [], mode = "donor") {
+  const guideSet = new Set(guideSiteIndexes);
+  const pamSet = new Set(guidePamIndexes);
+  const silentSet = new Set(silentIndexes);
+  const findAnnotation = (index) => annotations.filter((item) => index >= item.start && index < item.end).sort((left, right) => (right.priority || 0) - (left.priority || 0))[0];
+  const sequenceHtml = (sequence || "").split("").map((base, index) => {
+    const annotation = mode === "donor" ? findAnnotation(index) : null;
+    const styles = [
+      `background:${pamSet.has(index) ? PM_GUIDE_COLORS.pam : silentSet.has(index) && mode === "donor" ? PM_EDIT_COLORS.silent : guideSet.has(index) ? PM_GUIDE_COLORS.site : annotation?.priority > 1 ? `${annotation.color}22` : "transparent"}`,
+      `color:${annotation?.color && mode === "donor" && !guideSet.has(index) && !pamSet.has(index) && !silentSet.has(index) ? annotation.color : "#111827"}`,
+      `font-weight:${guideSet.has(index) || pamSet.has(index) || silentSet.has(index) || annotation ? 800 : 400}`,
+    ].join(";");
+    return `<span title="${annotation?.title || annotation?.label || ""}" style="${styles}">${base}</span>`;
+  }).join("");
+  return `
+    <div style="margin:0 0 8px 0;">
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">${label}</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;">${sequenceHtml}</div>
+    </div>
+  `;
+}
+
+function buildInternalDonorHtml(donor) {
+  const blockingSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
+  const strands = buildInternalStrandModels(donor);
+  return `
+    <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
+    <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
+    ${blockingSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Guide-blocking mutation:</strong><br/>${blockingSummary}</p>` : ""}
+    ${strands.map((strand) => `
+      <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
+          <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
+          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? "#047857" : "#475467"};background:${strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? "Order this strand" : "Reference strand"}</span>
+        </div>
+        <p style="font-size:12px;color:#555;margin:0 0 10px 0;">${strand.note}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
+          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_GUIDE_COLORS.pam};">PAM</span>
+          ${strand.silentIndexes?.length ? `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#7F1D1D;background:${PM_EDIT_COLORS.silent};">Silent mutation</span>` : ""}
+          ${[...new Map((strand.annotations || []).map((item) => [`${item.badgeLabel || item.label}|${item.color}`, item])).values()].map((item) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.badgeLabel || item.label}</span>`).join("")}
+        </div>
+        ${buildInternalSequenceHtml("WT context", strand.wt, strand.wtGuideSiteIndexes, strand.wtGuidePamIndexes, [], [], "wt")}
+        ${buildInternalSequenceHtml("Donor ssODN", strand.donor, strand.guideSiteIndexes, strand.guidePamIndexes, strand.silentIndexes, strand.annotations, "donor")}
+      </div>
+    `).join("")}
+  `;
+}
+
 function buildAnnotatedDonorHtml(sequence, annotations = []) {
   const findAnnotation = (index) => annotations.filter((item) => index >= item.start && index < item.end).sort((left, right) => (right.priority || 0) - (left.priority || 0))[0];
-  const legend = annotations.map((item) => `<span title="${item.title || item.label}" style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.badgeLabel || item.label} (${item.end - item.start} bp)</span>`).join("");
+  const legendItems = [...new Map(annotations.map((item) => [`${item.badgeLabel || item.label}|${item.color}`, item])).values()];
+  const legend = legendItems.map((item) => `<span title="${item.title || item.label}" style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.badgeLabel || item.label}</span>`).join("");
   const sequenceHtml = (sequence || "").split("").map((base, index) => {
     const annotation = findAnnotation(index);
     return `<span title="${annotation?.title || annotation?.label || ""}" style="color:${annotation?.color || "#111827"};font-weight:${annotation ? 800 : 400};background:${annotation?.priority > 1 ? `${annotation.color}22` : "transparent"};">${base}</span>`;
@@ -1076,9 +1298,12 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems)
     ? ((result.os || []).length
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
-    : result.type === "ko"
+      : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption.</p>`
-      : buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || []);
+      : result.type === "it"
+        ? `${buildInternalProteinHtml(result)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+      : `${buildKnockinProteinHtml(result.proteinPreview)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
+  const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>
 <html>
 <head>
@@ -1106,8 +1331,8 @@ p{font-size:13px;line-height:1.45}
   <h2>3. Validation Primers</h2>
   <table>${tableHtml([["Name", "Sequence"]], true)}${tableHtml(primerRows)}</table>
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
-  <h2>4. ${sectionTitle}</h2>
-  <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : "HDR donor sequence is listed in full below."}</p>
+  <h2>4. ${resolvedSectionTitle}</h2>
+  <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
   ${historicalContext?.topMatches?.length ? `<h2>5. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
@@ -1180,6 +1405,36 @@ function PmAnnotatedSequenceRow({ label, sequence, diffIndexes, mode, regions, g
                 color: changed && mode === "wt" ? "#CC0000" : "#111827",
                 textDecoration: changed && mode === "wt" ? "line-through" : "none",
                 fontWeight: inGuide || changed ? 800 : 400,
+              }}
+            >
+              {base}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function InternalSequenceRow({ label, sequence, guideSiteIndexes = [], guidePamIndexes = [], silentIndexes = [], annotations = [], mode = "donor" }) {
+  const guideSet = new Set(guideSiteIndexes);
+  const pamSet = new Set(guidePamIndexes);
+  const silentSet = new Set(silentIndexes);
+  const findAnnotation = (index) => annotations.filter((item) => index >= item.start && index < item.end).sort((left, right) => (right.priority || 0) - (left.priority || 0))[0];
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+        {(sequence || "").split("").map((base, index) => {
+          const annotation = mode === "donor" ? findAnnotation(index) : null;
+          return (
+            <span
+              key={`${label}-${index}`}
+              title={annotation?.title || annotation?.label || ""}
+              style={{
+                background: pamSet.has(index) ? PM_GUIDE_COLORS.pam : silentSet.has(index) && mode === "donor" ? PM_EDIT_COLORS.silent : guideSet.has(index) ? PM_GUIDE_COLORS.site : annotation?.priority > 1 ? `${annotation.color}22` : "transparent",
+                color: annotation?.color && mode === "donor" && !guideSet.has(index) && !pamSet.has(index) && !silentSet.has(index) ? annotation.color : "#111827",
+                fontWeight: guideSet.has(index) || pamSet.has(index) || silentSet.has(index) || annotation ? 800 : 400,
               }}
             >
               {base}
@@ -1265,13 +1520,102 @@ function PmDonorPreview({ donor }) {
   );
 }
 
+function InternalProteinPreviewCard({ result }) {
+  const preview = result?.codingPreview;
+  if (!preview) return null;
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
+      <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>Insert {result.tag} after {result.wA}{result.an}, before {result.nextAA}{result.an + 1}.</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag codons / amino acids</span>
+      </div>
+      <AlignedTokenRow label="WT codons" tokens={preview.wtCodons} />
+      <AlignedTokenRow label="Donor codons" tokens={preview.donorCodons} diffIndexes={Array.from({ length: preview.insertCodonLength }, (_, index) => preview.insertCodonStart + index)} mode="donor" />
+      <AlignedTokenRow label="WT amino acids" tokens={preview.wtAas} />
+      <AlignedTokenRow label="Donor amino acids" tokens={preview.donorAas} diffIndexes={Array.from({ length: preview.insertAaLength }, (_, index) => preview.insertAaStart + index)} mode="donor" />
+    </div>
+  );
+}
+
+function InternalDonorPreview({ donor }) {
+  const strands = buildInternalStrandModels(donor);
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
+      <div style={{ color: "#555", fontSize: 12, marginBottom: 10 }}>Linked guide: {donor.guideName}</div>
+      {!!(donor.silentMutations || []).length && (
+        <div style={{ color: "#7F1D1D", fontSize: 12, marginBottom: 10 }}>
+          <strong>Guide-blocking mutation:</strong> {(donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join(" ; ")}
+        </div>
+      )}
+      {strands.map((strand) => (
+        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, color: "#1f2937" }}>{strand.title}</div>
+            <Badge color={strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? "Order This Strand" : "Reference Strand"}</Badge>
+          </div>
+          <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
+            {!!strand.silentIndexes?.length && <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#7F1D1D", background: PM_EDIT_COLORS.silent }}>Silent mutation</span>}
+            {[...new Map((strand.annotations || []).map((item) => [`${item.badgeLabel || item.label}|${item.color}`, item])).values()].map((item) => <Badge key={`${item.badgeLabel || item.label}-${item.color}`} color={item.color}>{item.badgeLabel || item.label}</Badge>)}
+          </div>
+          <InternalSequenceRow label="WT context" sequence={strand.wt} guideSiteIndexes={strand.wtGuideSiteIndexes} guidePamIndexes={strand.wtGuidePamIndexes} mode="wt" />
+          <InternalSequenceRow label="Donor ssODN" sequence={strand.donor} guideSiteIndexes={strand.guideSiteIndexes} guidePamIndexes={strand.guidePamIndexes} silentIndexes={strand.silentIndexes} annotations={strand.annotations} mode="donor" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function KnockinProteinPreviewCard({ preview }) {
+  if (!preview) return null;
+  const insertEnd = preview.insertStart + preview.insertLength;
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Protein translation view</div>
+      <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{preview.note}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag / reporter</span>
+      </div>
+      <AlignedTokenRow label={preview.wtLabel} tokens={preview.wtTokens} />
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>{preview.donorLabel}</div>
+        <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+          {preview.donorTokens.map((token, index) => (
+            <span
+              key={`${preview.donorLabel}-${token}-${index}`}
+              style={{
+                display: "inline-block",
+                minWidth: token === "Stop" ? "5ch" : "2ch",
+                marginRight: 6,
+                textAlign: "center",
+                color: "#111827",
+                background: index >= preview.insertStart && index < insertEnd ? "#FDE68A" : "transparent",
+                fontWeight: index >= preview.insertStart && index < insertEnd ? 800 : 400,
+                borderRadius: index >= preview.insertStart && index < insertEnd ? 3 : 0,
+                padding: index >= preview.insertStart && index < insertEnd ? "0 2px" : 0,
+              }}
+            >
+              {token}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AnnotatedDonor({ sequence, annotations = [] }) {
   const findAnnotation = (index) => annotations.filter((item) => index >= item.start && index < item.end).sort((left, right) => (right.priority || 0) - (left.priority || 0))[0];
   const safeSequence = sequence || "";
+  const legendItems = [...new Map(annotations.map((item) => [`${item.badgeLabel || item.label}|${item.color}`, item])).values()];
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-        {annotations.map((item) => <span key={`${item.label}-${item.start}`} title={item.title || item.label}><Badge color={item.color}>{item.badgeLabel || item.label} ({item.end - item.start} bp)</Badge></span>)}
+        {legendItems.map((item) => <span key={`${item.badgeLabel || item.label}-${item.color}`} title={item.title || item.label}><Badge color={item.color}>{item.badgeLabel || item.label}</Badge></span>)}
       </div>
       <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.7, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
         {safeSequence.split("").map((base, index) => {
@@ -1303,6 +1647,7 @@ export default function App() {
 
   const ctCassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
   const ntCassetteOptions = useMemo(() => Object.keys(CASSETTES), []);
+  const internalTagOptions = useMemo(() => Object.keys(INTERNAL_TAGS), []);
   const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
   const selectedEntry = useMemo(
     () => batchSuccessfulResults.find((entry) => entry.rowId === selectedProjectId) || batchSuccessfulResults[0] || null,
@@ -1369,6 +1714,16 @@ export default function App() {
     setBatchRows((current) => current.map((row, rowIndex) => {
       if (rowIndex !== index) return row;
       const nextRow = { ...row, [key]: value };
+      if (key === "projectType") {
+        if (value === "it") {
+          nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
+          nextRow.mutation = row.mutation && /^[A-Z]?\d+$/i.test(row.mutation) ? row.mutation : "";
+        } else if (value === "ct") {
+          nextRow.tag = CASSETTES[row.tag] && !row.tag.startsWith("N:") ? row.tag : "SD40-2xHA";
+        } else if (value === "nt") {
+          nextRow.tag = CASSETTES[row.tag] ? row.tag : "N:EGFP-Linker";
+        }
+      }
       if (key === "gene" && !nextRow.fileName && batchFolderLibrary.byGene.has(normalizeGeneToken(value))) {
         const match = batchFolderLibrary.byGene.get(normalizeGeneToken(value));
         nextRow.gbRaw = match.gbRaw;
@@ -1500,18 +1855,22 @@ export default function App() {
 
       const mappedRows = definitions.map((definition, index) => {
         if (!definition.fileToken) throw new Error(`Line ${definition.lineNumber}: missing file name.`);
-        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be pm, ko, ct, or nt.`);
+        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be pm, ko, it, ct, or nt.`);
         if (definition.projectType === "pm" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: point mutation designs need a mutation such as N32R.`);
+        if (definition.projectType === "it" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: internal in-frame tag designs need a site and tag such as "after P155 SPOT".`);
         if ((definition.projectType === "ct" || definition.projectType === "nt") && !definition.modification) throw new Error(`Line ${definition.lineNumber}: insert designs need a cassette name such as SD40-2xHA.`);
         const lookupKey = normalizeFileLookupKey(definition.fileToken);
         const fileEntry = batchFolderLibrary.byName.get(lookupKey) || batchFolderLibrary.byStem.get(lookupKey);
         if (!fileEntry) throw new Error(`Line ${definition.lineNumber}: could not find GenBank file "${definition.fileToken}" in the uploaded folder.`);
+        const internalSpec = definition.projectType === "it" ? parseInternalDefinitionSpec(definition.modification) : { site: "", tag: "" };
+        if (definition.projectType === "it" && !internalSpec.site) throw new Error(`Line ${definition.lineNumber}: internal in-frame tag designs need a site such as P155.`);
+        if (definition.projectType === "it" && !internalSpec.tag) throw new Error(`Line ${definition.lineNumber}: internal in-frame tag designs need a supported tag such as SPOT or alphaBtx.`);
         return {
           ...createBatchRow(index),
           label: definition.label || fileEntry.fileName.replace(/\.[^.]+$/, ""),
           projectType: definition.projectType,
-          mutation: definition.projectType === "pm" ? definition.modification : "",
-          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : "SD40-2xHA",
+          mutation: definition.projectType === "pm" ? definition.modification : definition.projectType === "it" ? internalSpec.site : "",
+          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : "SD40-2xHA",
           homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "250") : "250",
           gbRaw: fileEntry.gbRaw,
           fileName: fileEntry.fileName,
@@ -1613,7 +1972,7 @@ export default function App() {
               </div>
             </div>
             <div style={{ maxWidth: 360, color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
-              A single workflow for CRISPR design, review, and ordering exports across SNP knock-ins, knockouts, N-terminal tags, and C-terminal tags.
+              A single workflow for CRISPR design, review, and ordering exports across SNP knock-ins, knockouts, internal in-frame tags, N-terminal tags, and C-terminal tags.
             </div>
           </div>
         </div>
@@ -1657,7 +2016,7 @@ export default function App() {
           <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14, marginBottom: 14 }}>
             <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Paste requests</div>
             <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-              Use short natural-language lines. The parser will infer KO, SNP, C-terminal, or N-terminal designs and match GenBank files by gene where possible.
+              Use short natural-language lines. The parser will infer KO, SNP, internal in-frame tags, C-terminal, or N-terminal designs and match GenBank files by gene where possible.
             </div>
             <label style={{ display: "block" }}>
               <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Request lines</div>
@@ -1669,7 +2028,7 @@ export default function App() {
               />
             </label>
             <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
-              Best format: `GENE edit cell-line`. If a line cannot infer gene, cell line, mutation, cassette, or GenBank file, that row will be flagged for review.
+              Best format: `GENE edit cell-line`. For internal tags, use lines like `SCN5A internal SPOT after P155 BIHi005-A`. If a line cannot infer gene, cell line, mutation/site, tag, or GenBank file, that row will be flagged for review.
             </div>
           </div>
 
@@ -1720,6 +2079,12 @@ export default function App() {
                   </label>
 
                   {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Mutation</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
+                  {row.projectType === "it" && (
+                    <Grid>
+                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Internal tag</div><select value={INTERNAL_TAGS[row.tag] ? row.tag : "SPOT"} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>{internalTagOptions.map((option) => <option key={option} value={option}>{option} ({INTERNAL_TAGS[option].len} bp)</option>)}</select></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Insert after residue</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="P155" /></label>
+                    </Grid>
+                  )}
                   {(row.projectType === "ct" || row.projectType === "nt") && (
                     <Grid>
                       <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cassette</div><select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>{(row.projectType === "nt" ? ntCassetteOptions : ctCassetteOptions).map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}</select></label>
@@ -1735,7 +2100,7 @@ export default function App() {
                   )}
                   {batchStatus?.status === "success" && (
                     <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
-                      {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
+                      {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" || batchStatus.result.type === "it" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
                     </div>
                   )}
                 </div>
@@ -1901,14 +2266,25 @@ export default function App() {
                 </table>
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {selectedEntry.result.amp || "n/a"}</div>
 
-                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : "Donor Design"}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
                 {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} />)}
                 {selectedEntry.result.type === "ko" && (
                   <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5 }}>
                     No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption.
                   </div>
                 )}
-                {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && <AnnotatedDonor sequence={selectedEntry.result.donor} annotations={selectedEntry.result.donorAnnotations} />}
+                {selectedEntry.result.type === "it" && (
+                  <>
+                    <InternalProteinPreviewCard result={selectedEntry.result} />
+                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} />)}
+                  </>
+                )}
+                {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (
+                  <>
+                    <KnockinProteinPreviewCard preview={selectedEntry.result.proteinPreview} />
+                    <AnnotatedDonor sequence={selectedEntry.result.donor} annotations={selectedEntry.result.donorAnnotations} />
+                  </>
+                )}
                 {buildSsOdnNotes(selectedEntry.result).map((line) => <div key={line} style={{ color: "#CC0000", fontWeight: 700, marginTop: 6 }}>{line}</div>)}
 
                 {historicalContext.topMatches.length > 0 && (
