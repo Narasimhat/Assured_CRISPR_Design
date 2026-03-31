@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import * as XLSX from "xlsx";
 import { CASSETTES, INTERNAL_TAGS, runDesign } from "./designEngine";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
@@ -630,14 +629,24 @@ function buildIdtTemplateRows(orderRows, defaults) {
   };
 }
 
-function downloadXlsxTemplate(headers, rows, fileName) {
+let xlsxModulePromise = null;
+
+async function loadXlsx() {
+  if (!xlsxModulePromise) {
+    xlsxModulePromise = import("xlsx");
+  }
+  return xlsxModulePromise;
+}
+
+async function downloadXlsxTemplate(headers, rows, fileName) {
+  const XLSX = await loadXlsx();
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows.map((row) => headers.map((header) => row[header] ?? ""))]);
   XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
   XLSX.writeFile(workbook, fileName);
 }
 
-function downloadIdtWorkbook(kind, templateRows, filePrefix = "") {
+async function downloadIdtWorkbook(kind, templateRows, filePrefix = "") {
   const config = {
     crispr: {
       headers: ["Name", "Sequence", "Scale"],
@@ -656,11 +665,11 @@ function downloadIdtWorkbook(kind, templateRows, filePrefix = "") {
     },
   }[kind];
   if (!config?.rows?.length) return null;
-  downloadXlsxTemplate(config.headers, config.rows, config.fileName);
+  await downloadXlsxTemplate(config.headers, config.rows, config.fileName);
   return config.fileName;
 }
 
-function buildIdtWorkbookFile(kind, templateRows, filePrefix = "") {
+async function buildIdtWorkbookFile(kind, templateRows, filePrefix = "") {
   const config = {
     crispr: {
       headers: ["Name", "Sequence", "Scale"],
@@ -679,6 +688,7 @@ function buildIdtWorkbookFile(kind, templateRows, filePrefix = "") {
     },
   }[kind];
   if (!config?.rows?.length) return null;
+  const XLSX = await loadXlsx();
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.aoa_to_sheet([config.headers, ...config.rows.map((row) => config.headers.map((header) => row[header] ?? ""))]);
   XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
@@ -1999,7 +2009,7 @@ export default function App() {
       await writeTextToDirectory(dataHandle, entry.row.fileName || `${filePrefix}reference.gb`, entry.row.gbRaw);
     }
     for (const kind of ["crispr", "oligo", "hdr"]) {
-      const workbookFile = buildIdtWorkbookFile(kind, entryTemplateRows, filePrefix);
+      const workbookFile = await buildIdtWorkbookFile(kind, entryTemplateRows, filePrefix);
       if (workbookFile) await writeBlobToDirectory(summaryHandle, workbookFile.fileName, workbookFile.blob);
     }
     return folderNameForEntry;
@@ -2209,15 +2219,15 @@ export default function App() {
     setCopyState(`Started download for ${batchSuccessfulResults.length} HTML reports.`);
   };
 
-  const downloadIdtTemplate = (kind) => {
-    const fileName = downloadIdtWorkbook(kind, idtTemplateRows);
+  const downloadIdtTemplate = async (kind) => {
+    const fileName = await downloadIdtWorkbook(kind, idtTemplateRows);
     if (!fileName) return;
     setBatchCopyState(`Downloaded ${fileName}.`);
   };
 
-  const downloadSingleIdtTemplate = (kind) => {
+  const downloadSingleIdtTemplate = async (kind) => {
     const filePrefix = `${buildSafeToken(selectedEntry?.result?.gene, "GENE")}_`;
-    const fileName = downloadIdtWorkbook(kind, singleIdtTemplateRows, filePrefix);
+    const fileName = await downloadIdtWorkbook(kind, singleIdtTemplateRows, filePrefix);
     if (!fileName) return;
     setCopyState(`Downloaded ${fileName}.`);
   };
