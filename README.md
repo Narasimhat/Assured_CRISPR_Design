@@ -33,6 +33,27 @@ The app is built from:
 
 - [`assured-crispr-designer`](./assured-crispr-designer)
 
+## Vercel deployment
+
+The repo is also prepared for Vercel deployment through [`vercel.json`](./vercel.json).
+
+Recommended setup:
+
+1. Create a Vercel account and import this GitHub repository.
+2. Let Vercel use the repository root.
+3. It will pick up:
+   - `installCommand`: `cd assured-crispr-designer && npm install`
+   - `buildCommand`: `cd assured-crispr-designer && npm run build`
+   - `outputDirectory`: `assured-crispr-designer/dist`
+4. Deploy.
+
+That gives you:
+
+- cleaner production hosting than GitHub Pages
+- custom domain support
+- preview deployments on future pushes
+- a better path toward auth, analytics, and saved projects
+
 ## Recommended product path
 
 For broader sharing and commercialization, prefer a hosted deployment over local terminal use:

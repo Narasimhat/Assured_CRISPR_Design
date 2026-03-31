@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd assured-crispr-designer && npm install",
+  "buildCommand": "cd assured-crispr-designer && npm run build",
+  "outputDirectory": "assured-crispr-designer/dist"
+}
