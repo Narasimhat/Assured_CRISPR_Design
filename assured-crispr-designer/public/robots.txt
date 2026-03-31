@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://assured-crispr-design.vercel.app/sitemap.xml
