@@ -66,8 +66,9 @@ const PM_EDIT_COLORS = {
   desired: "#FDE68A",
   silent: "#FCA5A5",
 };
-const APP_FOOTER_LABEL = "Investor demo build • 28 Mar 2026";
+const APP_FOOTER_LABEL = "Hosted build • 31 Mar 2026";
 const APP_DRAFT_STORAGE_KEY = "assured-crispr-designer:draft:v1";
+const REPO_URL = "https://github.com/Narasimhat/Assured_CRISPR_Design";
 const SAMPLE_REQUEST_TEXT = [
   "PSEN1 N32R BIHi005-A",
   "ECSIT knockout BIHi005-A",
@@ -1802,6 +1803,7 @@ export default function App() {
   const singleIdtTemplateRows = useMemo(() => buildIdtTemplateRows(singleOrderRows, idtDefaults), [singleOrderRows, idtDefaults]);
   const idtTemplateRows = useMemo(() => buildIdtTemplateRows(batchOrderRows, idtDefaults), [batchOrderRows, idtDefaults]);
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
+  const currentHost = typeof window !== "undefined" ? window.location.host : "local";
 
   useEffect(() => {
     const draft = loadDraftState();
@@ -2278,7 +2280,46 @@ export default function App() {
               <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.6 }}>
                 Instead of stitching together guide design, donor review, protein interpretation, and order sheets manually, the app packages them into one consistent output.
               </div>
+              <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
+                <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700 }}>Hosted workflow highlights</div>
+                {["Browser-based workflow", "Batch designs in one run", "Export-ready reports and IDT sheets"].map((item) => (
+                  <div key={item} style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
+                    - {item}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+                <button
+                  type="button"
+                  onClick={loadSampleRequests}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}
+                >
+                  Try sample workflow
+                </button>
+                <a
+                  href={REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
+                >
+                  View repository
+                </a>
+              </div>
             </div>
+          </div>
+        </div>
+
+        <div style={{ ...CARD_STYLE, marginBottom: 18, padding: 12, background: "rgba(15,28,46,0.68)" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {[
+              "Built for genome engineering workflows",
+              "Supports KO, SNP, internal, N-terminal, and C-terminal designs",
+              "Hosted browser experience with order-ready exports",
+            ].map((item) => (
+              <div key={item} style={{ padding: "8px 12px", borderRadius: 999, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt, color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
+                {item}
+              </div>
+            ))}
           </div>
         </div>
 
@@ -2386,6 +2427,12 @@ export default function App() {
           <SectionTitle>1. Design Requests</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Paste one request per line, upload a GenBank folder once, and review only the rows that still need input.
+          </div>
+          <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "rgba(20,36,59,0.78)" }}>
+            <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>New to the app?</div>
+            <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.6 }}>
+              Load sample requests to populate representative SNP, knockout, internal in-frame tag, and terminal tag projects, then click <strong>Generate designs</strong>.
+            </div>
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
             <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
@@ -2856,8 +2903,9 @@ export default function App() {
           )}
         </div>
 
-        <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 18, textAlign: "center" }}>
-          {APP_FOOTER_LABEL}
+        <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 18, textAlign: "center", lineHeight: 1.6 }}>
+          <div>{APP_FOOTER_LABEL}</div>
+          <div>Current host: {currentHost}</div>
         </div>
       </div>
     </div>
