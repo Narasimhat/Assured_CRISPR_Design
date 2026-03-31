@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "import-history": "python scripts/import_historical_projects.py"
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^18.3.1",
