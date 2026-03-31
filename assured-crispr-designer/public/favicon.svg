@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ASSURED CRISPR Designer">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#10223a" />
+      <stop offset="100%" stop-color="#07111c" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2dd4bf" />
+      <stop offset="100%" stop-color="#67e8f9" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)" />
+  <path d="M34 39c9-10 18-15 30-15 11 0 22 4 30 13" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linecap="round" />
+  <path d="M34 89c9 10 18 15 30 15 11 0 22-4 30-13" fill="none" stroke="url(#accent)" stroke-width="8" stroke-linecap="round" />
+  <path d="M46 46h36" stroke="#e5eef7" stroke-width="8" stroke-linecap="round" />
+  <path d="M46 82h36" stroke="#e5eef7" stroke-width="8" stroke-linecap="round" />
+  <circle cx="46" cy="46" r="5" fill="#fb7185" />
+  <circle cx="82" cy="82" r="5" fill="#fb7185" />
+</svg>

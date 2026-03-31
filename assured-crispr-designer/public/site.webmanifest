@@ -1,0 +1,15 @@
+{
+  "name": "ASSURED CRISPR Designer",
+  "short_name": "ASSURED",
+  "description": "Generate CRISPR edit designs and export ordering-ready reports.",
+  "display": "standalone",
+  "background_color": "#07111c",
+  "theme_color": "#07111c",
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
