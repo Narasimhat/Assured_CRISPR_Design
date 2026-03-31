@@ -1741,6 +1741,7 @@ export default function App() {
   const [workspaceHandle, setWorkspaceHandle] = useState(null);
   const [workspaceFolders, setWorkspaceFolders] = useState([]);
   const [selectedWorkspaceFolders, setSelectedWorkspaceFolders] = useState([]);
+  const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
   const [draftHydrated, setDraftHydrated] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
@@ -2223,20 +2224,50 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top, #16314d 0%, ${COLORS.bg} 42%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "28px 18px 40px" }}>
-        <div style={{ ...CARD_STYLE, marginBottom: 18, background: "linear-gradient(135deg, rgba(45,212,191,0.14), rgba(245,158,11,0.10))" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 16, alignItems: "flex-start" }}>
-            <div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
-                <div style={{ width: 34, height: 34, borderRadius: 10, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 800 }}>AC</div>
+        <div style={{ ...CARD_STYLE, marginBottom: 18, background: "linear-gradient(135deg, rgba(45,212,191,0.16), rgba(245,158,11,0.12) 54%, rgba(15,28,46,0.92))", padding: 22 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 24, alignItems: "flex-start" }}>
+            <div style={{ flex: "1 1 620px", minWidth: 280 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900 }}>AC</div>
                 <div>
-                  <div style={{ fontSize: 24, fontWeight: 800 }}>ASSURED CRISPR Designer</div>
-                  <div style={{ color: COLORS.muted, fontSize: 14 }}>Design CRISPR edits and export ordering-ready reports.</div>
+                  <div style={{ fontSize: 27, fontWeight: 800, lineHeight: 1.1 }}>ASSURED CRISPR Designer</div>
                   <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 4 }}>By Narasimha Telugu</div>
                 </div>
               </div>
+              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.15, maxWidth: 760, marginBottom: 10 }}>
+                Design CRISPR edits, review donor architecture, and export ordering-ready reports from one browser workflow.
+              </div>
+              <div style={{ color: COLORS.muted, fontSize: 14, lineHeight: 1.65, maxWidth: 760, marginBottom: 16 }}>
+                Built for SNP knock-ins, knockouts, internal in-frame tags, N-terminal tags, and C-terminal tags. The app turns a request plus GenBank reference into a scientist-readable report and separated IDT ordering sheets.
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {["Batch design in one run", "Annotated donor and protein views", "Separate IDT export sheets", "Scientist-friendly review report"].map((item) => (
+                  <div key={item} style={{ padding: "8px 12px", borderRadius: 999, border: `1px solid ${COLORS.border}`, background: "rgba(15,28,46,0.75)", color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
+                    {item}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 800, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none" }}>
+                  Load sample requests
+                </button>
+                <button
+                  type="button"
+                  onClick={() => document.getElementById("design-requests")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}
+                >
+                  Jump to design requests
+                </button>
+              </div>
             </div>
-            <div style={{ maxWidth: 360, color: COLORS.muted, fontSize: 13, lineHeight: 1.5 }}>
-              A single workflow for CRISPR design, review, and ordering exports across SNP knock-ins, knockouts, internal in-frame tags, N-terminal tags, and C-terminal tags.
+            <div style={{ flex: "0 1 320px", minWidth: 260, ...CARD_STYLE, padding: 16, background: "rgba(15,28,46,0.72)" }}>
+              <div style={{ color: COLORS.accent, fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Why it matters</div>
+              <div style={{ color: COLORS.text, fontSize: 16, fontWeight: 700, lineHeight: 1.4, marginBottom: 10 }}>
+                Faster path from edit request to order-ready design package.
+              </div>
+              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.6 }}>
+                Instead of stitching together guide design, donor review, protein interpretation, and order sheets manually, the app packages them into one consistent output.
+              </div>
             </div>
           </div>
         </div>
@@ -2244,10 +2275,10 @@ export default function App() {
         <div style={{ ...CARD_STYLE, marginBottom: 18, padding: 14, background: "rgba(15,28,46,0.82)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             {[
-              ["1. Link", "Choose the yearly project root and import the projects you want to design."],
-              ["2. Upload", "Add a GenBank folder once, or attach a file directly to a design row."],
-              ["3. Generate", "Review flagged rows only, then generate designs in one run."],
-              ["4. Export", "Download HTML reports and separate IDT order sheets."],
+              ["1. Upload", "Upload a GenBank folder once, or attach a GenBank file directly to a design row."],
+              ["2. Describe", "Paste natural-language edit requests instead of filling every field manually."],
+              ["3. Generate", "Review only flagged rows, then generate designs in one run."],
+              ["4. Export", "Download HTML reports plus separate CRISPR, donor, and primer IDT sheets."],
             ].map(([title, text]) => (
               <div key={title} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 12, background: COLORS.panelAlt }}>
                 <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.5, color: COLORS.accent, textTransform: "uppercase", marginBottom: 6 }}>{title}</div>
@@ -2256,81 +2287,92 @@ export default function App() {
             ))}
           </div>
           <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
-            Drafts now persist across browser refresh. Re-link the project root after refresh if you want to import project folders again.
+            Drafts persist across browser refresh, so current design work stays in the browser session.
           </div>
         </div>
 
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
-          <SectionTitle>0. Project Workspace</SectionTitle>
-          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Choose the yearly project root, select the project folders you want, then import them as design rows. When a design is ready, save the report and order files directly into that project folder.
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-            <button type="button" onClick={pickWorkspaceFolder} disabled={!supportsWorkspaceAccess} style={{ ...FIELD_STYLE, width: "auto", cursor: supportsWorkspaceAccess ? "pointer" : "not-allowed", fontWeight: 700 }}>
-              Choose project root
-            </button>
-            <button type="button" onClick={importWorkspaceProjects} disabled={!workspaceFolders.length} style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceFolders.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-              Import project folders as rows
-            </button>
-            <button
-              type="button"
-              onClick={saveSelectedToWorkspace}
-              disabled={!workspaceHandle || !selectedEntry?.result}
-              style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceHandle && selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}
-            >
-              Save selected report + order files to project folder
-            </button>
-            <button
-              type="button"
-              onClick={saveAllToWorkspace}
-              disabled={!workspaceHandle || !batchSuccessfulResults.length}
-              style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceHandle && batchSuccessfulResults.length ? "pointer" : "not-allowed", fontWeight: 700 }}
-            >
-              Save all reports + order files to project folders
-            </button>
-          </div>
-          {workspaceFolders.length > 0 && (
-            <div style={{ marginBottom: 12, maxWidth: 860 }}>
-              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Project folders to import</div>
-              <div style={{ ...FIELD_STYLE, background: COLORS.panelAlt, padding: 12, maxHeight: 220, overflowY: "auto" }}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-                  <button type="button" onClick={() => setSelectedWorkspaceFolders(workspaceFolders.map((entry) => entry.name))} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
-                    Select all
-                  </button>
-                  <button type="button" onClick={() => setSelectedWorkspaceFolders([])} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
-                    Clear selection
-                  </button>
-                </div>
-                <div style={{ display: "grid", gap: 8 }}>
-                  {workspaceFolders.map((entry) => (
-                    <label key={entry.name} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedWorkspaceFolders.includes(entry.name)}
-                        onChange={(event) => {
-                          const checked = event.target.checked;
-                          setSelectedWorkspaceFolders((current) => checked ? [...current, entry.name] : current.filter((name) => name !== entry.name));
-                        }}
-                        style={{ marginTop: 2 }}
-                      />
-                      <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.4 }}>{entry.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
-                If nothing is checked, all detected project folders will be imported.
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>Optional workspace integration</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>
+                Use this only if you want to import local project folders and save generated files back into those folders.
               </div>
             </div>
-          )}
-          <div style={{ color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
-            Linked root: {workspaceHandle?.name || "none"}
-            {!supportsWorkspaceAccess && " | Direct project-folder access is unavailable in this browser."}
+            <button type="button" onClick={() => setShowWorkspaceTools((current) => !current)} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+              {showWorkspaceTools ? "Hide workspace tools" : "Show workspace tools"}
+            </button>
           </div>
-          {workspaceStatus && <div style={{ marginTop: 12, color: COLORS.success, fontSize: 12 }}>{workspaceStatus}</div>}
+          {showWorkspaceTools && (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14, marginBottom: 12 }}>
+                <button type="button" onClick={pickWorkspaceFolder} disabled={!supportsWorkspaceAccess} style={{ ...FIELD_STYLE, width: "auto", cursor: supportsWorkspaceAccess ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                  Choose project root
+                </button>
+                <button type="button" onClick={importWorkspaceProjects} disabled={!workspaceFolders.length} style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceFolders.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+                  Import project folders as rows
+                </button>
+                <button
+                  type="button"
+                  onClick={saveSelectedToWorkspace}
+                  disabled={!workspaceHandle || !selectedEntry?.result}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceHandle && selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}
+                >
+                  Save selected report + order files to project folder
+                </button>
+                <button
+                  type="button"
+                  onClick={saveAllToWorkspace}
+                  disabled={!workspaceHandle || !batchSuccessfulResults.length}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceHandle && batchSuccessfulResults.length ? "pointer" : "not-allowed", fontWeight: 700 }}
+                >
+                  Save all reports + order files to project folders
+                </button>
+              </div>
+              {workspaceFolders.length > 0 && (
+                <div style={{ marginBottom: 12, maxWidth: 860 }}>
+                  <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Project folders to import</div>
+                  <div style={{ ...FIELD_STYLE, background: COLORS.panelAlt, padding: 12, maxHeight: 220, overflowY: "auto" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                      <button type="button" onClick={() => setSelectedWorkspaceFolders(workspaceFolders.map((entry) => entry.name))} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                        Select all
+                      </button>
+                      <button type="button" onClick={() => setSelectedWorkspaceFolders([])} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                        Clear selection
+                      </button>
+                    </div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {workspaceFolders.map((entry) => (
+                        <label key={entry.name} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedWorkspaceFolders.includes(entry.name)}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setSelectedWorkspaceFolders((current) => checked ? [...current, entry.name] : current.filter((name) => name !== entry.name));
+                            }}
+                            style={{ marginTop: 2 }}
+                          />
+                          <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.4 }}>{entry.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                    If nothing is checked, all detected project folders will be imported.
+                  </div>
+                </div>
+              )}
+              <div style={{ color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                Linked root: {workspaceHandle?.name || "none"}
+                {!supportsWorkspaceAccess && " | Direct project-folder access is unavailable in this browser."}
+              </div>
+              {workspaceStatus && <div style={{ marginTop: 12, color: COLORS.success, fontSize: 12 }}>{workspaceStatus}</div>}
+            </>
+          )}
         </div>
 
-        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+        <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>1. Design Requests</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Paste one request per line, upload a GenBank folder once, and review only the rows that still need input.
