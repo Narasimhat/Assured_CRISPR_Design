@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { CASSETTES, INTERNAL_TAGS, runDesign } from "./designEngine";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
+import { buildHorizonTagKiStandaloneHtml, HORIZON_TAG_KI_REFERENCE_INNER_HTML, HORIZON_TAG_KI_REFERENCE_TITLE } from "./content/horizonTagKiReference";
 
 const COLORS = {
   bg: "#07111c",
@@ -1340,6 +1341,7 @@ p{font-size:13px;line-height:1.45}
   ${buildReviewListHtml(reviewItems)}
   <h2>${historicalContext?.topMatches?.length ? "7" : "6"}. Additional Info</h2>
   <p>${buildDesignSummary(result).replace(/\n/g, "<br/>")}</p>
+  ${result.type === "ct" || result.type === "nt" ? `<h2>Appendix: ${HORIZON_TAG_KI_REFERENCE_TITLE}</h2>${HORIZON_TAG_KI_REFERENCE_INNER_HTML}` : ""}
 </body>
 </html>`;
 }
@@ -1924,6 +1926,18 @@ export default function App() {
     setCopyState("HTML report downloaded.");
   };
 
+  const downloadHorizonTagKiInfo = () => {
+    const html = buildHorizonTagKiStandaloneHtml();
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "horizon_tag-KI_info.html";
+    link.click();
+    URL.revokeObjectURL(url);
+    setCopyState("Horizon tag KI reference (HTML) downloaded — open in Word to save as .docx.");
+  };
+
   const downloadAllReports = () => {
     if (!batchSuccessfulResults.length) return;
     batchSuccessfulResults.forEach((entry, index) => {
@@ -2120,10 +2134,12 @@ export default function App() {
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Review the selected design, then export a Word-friendly HTML report for sharing, ordering, or archive.
+            Review the selected design, then export a Word-friendly HTML report for sharing, ordering, or archive. C-terminal and N-terminal HDR designs include an appendix with the Horizon tag KI documentation checklist.
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
             <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report</button>
+            <button type="button" onClick={downloadHorizonTagKiInfo} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Download horizon_tag-KI_info (HTML)</button>
+            <a href={`${import.meta.env.BASE_URL}horizon_tag-KI_info.html`} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: COLORS.accent, fontWeight: 600 }}>Open checklist in new tab</a>
             <button type="button" disabled={batchSuccessfulResults.length < 2} onClick={downloadAllReports} style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length >= 2 ? "pointer" : "not-allowed", fontWeight: 700 }}>Download all HTML reports</button>
             <button type="button" disabled={!selectedEntry?.result} onClick={() => copyText(buildDesignSummary(selectedEntry.result), "Design summary")} style={{ ...FIELD_STYLE, width: "auto", cursor: selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}>Copy design summary</button>
             {copyState && <Badge color={COLORS.success}>{copyState}</Badge>}

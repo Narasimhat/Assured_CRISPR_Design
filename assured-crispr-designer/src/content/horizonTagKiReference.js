@@ -1,0 +1,95 @@
+/**
+ * Horizon-style tag knock-in reference — HTML body fragment and full document
+ * for Word (open HTML → Save As .docx) or printing, aligned with gene-editing project reports.
+ */
+
+export const HORIZON_TAG_KI_REFERENCE_TITLE = "Horizon tag knock-in — design & documentation checklist";
+
+/** Inner HTML only (no html/head/body wrapper). */
+export const HORIZON_TAG_KI_REFERENCE_INNER_HTML = `
+<div style="font-size:13px;line-height:1.55;color:#333;">
+  <p style="margin:0 0 12px 0;color:#555;">
+    This appendix summarizes conventional tag / reporter HDR knock-in documentation practice
+    (including workflows similar to Horizon Pathfinder–style tag KI). Use it alongside the
+    sequences and primers in the main report. Replace bracketed fields where your institution
+    requires traceability (e.g. IRIS ID, GenBank accession).
+  </p>
+
+  <h3 style="color:#2E75B6;margin:16px 0 8px 0;font-size:15px;">1. Project identity &amp; references</h3>
+  <ul style="padding-left:20px;margin:0 0 14px 0;">
+    <li>Official gene symbol, transcript / ENST (or RefSeq) used for amino-acid numbering.</li>
+    <li>Parental cell line, intended clonal line name, and internal project / IRIS identifier.</li>
+    <li>GenBank or assembly coordinates for the exact reference sequence used in this design package.</li>
+    <li>Cassette name and supplier or synthesis order reference for the tag / reporter block.</li>
+  </ul>
+
+  <h3 style="color:#2E75B6;margin:16px 0 8px 0;font-size:15px;">2. Knock-in architecture (C-terminal vs N-terminal)</h3>
+  <ul style="padding-left:20px;margin:0 0 14px 0;">
+    <li><strong>C-terminal KI:</strong> confirm native stop codon removal / replacement; confirm new stop in donor;
+        frame across 5′ HA → linker/tag → 3′ HA.</li>
+    <li><strong>N-terminal KI:</strong> confirm ATG + Kozak context (if applicable); preserve reading frame after insert;
+        confirm no unintended ATGs upstream of the intended start.</li>
+    <li>Document linkers, epitope tags (e.g. 2×HA), self-cleaving peptides (P2A/T2A), and fluorophores order.</li>
+    <li>State whether the final allele is fusion protein versus IRES / promoter-based reporter (if different cassette class).</li>
+  </ul>
+
+  <h3 style="color:#2E75B6;margin:16px 0 8px 0;font-size:15px;">3. Homology-directed repair (HDR) donor</h3>
+  <ul style="padding-left:20px;margin:0 0 14px 0;">
+    <li>Homology arm lengths (e.g. 250–800 bp per arm) matched to the uploaded reference locus.</li>
+    <li>Total donor length vs synthesis / cloning limits; fragmentation or vector strategy if &gt; ~2–3 kb.</li>
+    <li>Strand convention for ordering (confirm order strand vs genomic / donor documentation).</li>
+    <li>Silent mutations in homology arms to disrupt PAMs / seed matches after successful HDR (when included).</li>
+  </ul>
+
+  <h3 style="color:#2E75B6;margin:16px 0 8px 0;font-size:15px;">4. gRNA &amp; cutting strategy</h3>
+  <ul style="padding-left:20px;margin:0 0 14px 0;">
+    <li>SpCas9 (or other nuclease) format: RNP timing, concentration, and delivery method.</li>
+    <li>Cut site position relative to insertion junction; confirm micro-homology / MMEJ risk if critical.</li>
+    <li>Second gRNA or nickase strategy only if your protocol requires it (document rationale).</li>
+  </ul>
+
+  <h3 style="color:#2E75B6;margin:16px 0 8px 0;font-size:15px;">5. Ordering &amp; traceability bundle</h3>
+  <ul style="padding-left:20px;margin:0 0 14px 0;">
+    <li>gRNA list (spacer, optional full sgRNA) aligned to vendor column map.</li>
+    <li>HDR donor: sequence checksum, yield / purification, and delivered format (ssDNA / dsDNA / plasmid).</li>
+    <li>Genotyping primers and predicted WT vs KI amplicon sizes (see main report tables).</li>
+    <li>Archive vendor quotations (PDF) with the design package; for Word documentation, convert or transcribe quote line items into an HTML report (same styling as your strategy documents) or paste tables into the main report.</li>
+    <li>Optional: NGS panel / locus walk for clonal confirmation.</li>
+  </ul>
+
+  <h3 style="color:#2E75B6;margin:16px 0 8px 0;font-size:15px;">6. Experimental validation checklist</h3>
+  <ul style="padding-left:20px;margin:0 0 14px 0;">
+    <li>PCR across 5′ and 3′ junctions; Sanger traces archived with base calling.</li>
+    <li>Western / tag antibody / fluorescent protein confirmation as appropriate.</li>
+    <li>Off-target assessment per institutional SOP (if required).</li>
+    <li>Biosafety and GMO documentation, if applicable.</li>
+  </ul>
+
+  <p style="margin:14px 0 0 0;font-size:12px;color:#667085;font-style:italic;">
+    Disclaimer: This checklist is a project-documentation aid. It does not replace manufacturer
+    instructions, regulatory filing requirements, or peer-reviewed protocols for your exact cell model.
+  </p>
+</div>
+`;
+
+const REPORT_STYLES = `body{font-family:Calibri,Arial,sans-serif;margin:24px;color:#333}
+h1{font-size:22px;margin:18px 0 8px 0;color:#1f2937}
+h2{font-size:18px;margin:20px 0 10px 0;color:#1f2937}
+p.sub{color:#555;font-size:13px}`;
+
+/** Full standalone HTML document (open in Word → Save As .docx). */
+export function buildHorizonTagKiStandaloneHtml() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>${HORIZON_TAG_KI_REFERENCE_TITLE}</title>
+<style>${REPORT_STYLES}</style>
+</head>
+<body>
+  <h1>${HORIZON_TAG_KI_REFERENCE_TITLE}</h1>
+  <p class="sub">Standalone reference for tag / reporter HDR knock-in projects — same content as the appendix in ASSURED CRISPR Designer HTML reports. File name convention: <code>horizon_tag-KI_info.html</code> (open in Microsoft Word to save as <code>.docx</code>).</p>
+  ${HORIZON_TAG_KI_REFERENCE_INNER_HTML}
+</body>
+</html>`;
+}
