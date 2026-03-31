@@ -68,6 +68,7 @@ const PM_EDIT_COLORS = {
   silent: "#FCA5A5",
 };
 const APP_FOOTER_LABEL = "Investor demo build • 28 Mar 2026";
+const APP_DRAFT_STORAGE_KEY = "assured-crispr-designer:draft:v1";
 const SAMPLE_REQUEST_TEXT = [
   "PSEN1 N32R BIHi005-A",
   "ECSIT knockout BIHi005-A",
@@ -90,6 +91,26 @@ function buildProjectFolderName(meta) {
   const edit = sanitizeSegment(meta.editSummary, "Genome edit");
   const cellLine = sanitizeSegment(meta.cellLine, "CELL-LINE");
   return `${gene} ${edit} in ${cellLine}`;
+}
+
+function buildWorkspaceProjectFolderName(row, result = null) {
+  const explicit = sanitizeSegment(String(row?.projectFolderName || ""), "");
+  if (explicit) return explicit;
+  const irisId = sanitizeSegment(String(row?.irisId || ""), "");
+  const parentId = sanitizeSegment(String(row?.clientId || ""), "");
+  const requestedEdit = sanitizeSegment(String(row?.editSummary || row?.label || ""), "");
+  if (irisId && requestedEdit) return `${irisId}${parentId ? ` (${parentId})` : ""} - ${requestedEdit}`;
+  return buildProjectFolderName(buildRowMeta(row, result));
+}
+
+function extractIrisIdFromFolderName(name) {
+  const match = String(name || "").match(/^(\d{3,})\b/);
+  return match ? match[1] : "";
+}
+
+function extractParentIdFromFolderName(name) {
+  const match = String(name || "").match(/^\d{3,}\s+\((\d{3,})\)/);
+  return match ? match[1] : "";
 }
 
 function buildRowMeta(row, result = null) {
@@ -200,10 +221,12 @@ function createBatchRow(index) {
     id: `batch-${index + 1}`,
     label: "",
     irisId: "",
+    clientId: "",
     clientName: "",
     gene: "",
     cellLine: "",
     editSummary: "",
+    projectFolderName: "",
     notes: "",
     projectType: "pm",
     mutation: "",
@@ -513,6 +536,44 @@ function parseRequestText(text, folderLibrary) {
     .filter(Boolean);
 }
 
+function parseWorkspaceProjectFolderEntries(entries, folderLibrary) {
+  return entries.map((entry, index) => {
+    const title = String(entry.name || "").replace(/^\d{3,}(?:\s+\(\d{3,}\))?\s*-\s*/, "").trim();
+    const parsed = parseRequestLine(title, index, folderLibrary) || createBatchRow(index);
+    const nextRow = {
+      ...parsed,
+      irisId: entry.irisId || parsed.irisId,
+      clientId: entry.parentId || parsed.clientId || "",
+      label: title || parsed.label,
+      editSummary: title || parsed.editSummary,
+      projectFolderName: entry.name,
+    };
+    return {
+      ...nextRow,
+      parseIssue: summarizeRowParseIssue(nextRow),
+    };
+  });
+}
+
+function loadDraftState() {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(APP_DRAFT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraftState(draft) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(APP_DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {
+    // Ignore local storage failures.
+  }
+}
+
 function summarizeRowParseIssue(row, fileEntryOverride = null) {
   const issues = [];
   if (!row?.gene) issues.push("gene");
@@ -597,6 +658,49 @@ function downloadIdtWorkbook(kind, templateRows, filePrefix = "") {
   if (!config?.rows?.length) return null;
   downloadXlsxTemplate(config.headers, config.rows, config.fileName);
   return config.fileName;
+}
+
+function buildIdtWorkbookFile(kind, templateRows, filePrefix = "") {
+  const config = {
+    crispr: {
+      headers: ["Name", "Sequence", "Scale"],
+      rows: templateRows.crispr,
+      fileName: `${filePrefix}template-paste-entry-crispr.xlsx`,
+    },
+    oligo: {
+      headers: ["Name", "Sequence", "Scale", "Purification"],
+      rows: templateRows.oligo,
+      fileName: `${filePrefix}template-paste-entry.xlsx`,
+    },
+    hdr: {
+      headers: ["Name", "Sequence", "Scale", "Modification"],
+      rows: templateRows.hdr,
+      fileName: `${filePrefix}template-paste-entry-hdr.xlsx`,
+    },
+  }[kind];
+  if (!config?.rows?.length) return null;
+  const workbook = XLSX.utils.book_new();
+  const worksheet = XLSX.utils.aoa_to_sheet([config.headers, ...config.rows.map((row) => config.headers.map((header) => row[header] ?? ""))]);
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+  const blob = new Blob(
+    [XLSX.write(workbook, { bookType: "xlsx", type: "array" })],
+    { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+  );
+  return { fileName: config.fileName, blob };
+}
+
+async function writeTextToDirectory(directoryHandle, fileName, content) {
+  const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(content);
+  await writable.close();
+}
+
+async function writeBlobToDirectory(directoryHandle, fileName, blob) {
+  const fileHandle = await directoryHandle.getFileHandle(fileName, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(blob);
+  await writable.close();
 }
 
 function normalizeGeneToken(value) {
@@ -1633,6 +1737,11 @@ export default function App() {
   const [batchResults, setBatchResults] = useState([]);
   const [batchError, setBatchError] = useState("");
   const [batchCopyState, setBatchCopyState] = useState("");
+  const [workspaceStatus, setWorkspaceStatus] = useState("");
+  const [workspaceHandle, setWorkspaceHandle] = useState(null);
+  const [workspaceFolders, setWorkspaceFolders] = useState([]);
+  const [selectedWorkspaceFolders, setSelectedWorkspaceFolders] = useState([]);
+  const [draftHydrated, setDraftHydrated] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
   const [requestText, setRequestText] = useState("");
@@ -1648,6 +1757,7 @@ export default function App() {
   const ctCassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
   const ntCassetteOptions = useMemo(() => Object.keys(CASSETTES), []);
   const internalTagOptions = useMemo(() => Object.keys(INTERNAL_TAGS), []);
+  const supportsWorkspaceAccess = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
   const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
   const selectedEntry = useMemo(
     () => batchSuccessfulResults.find((entry) => entry.rowId === selectedProjectId) || batchSuccessfulResults[0] || null,
@@ -1683,6 +1793,36 @@ export default function App() {
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
 
   useEffect(() => {
+    const draft = loadDraftState();
+    if (draft) {
+      if (Array.isArray(draft.batchRows) && draft.batchRows.length) setBatchRows(draft.batchRows);
+      if (Array.isArray(draft.batchResults)) setBatchResults(draft.batchResults);
+      if (typeof draft.selectedProjectId === "string") setSelectedProjectId(draft.selectedProjectId);
+      if (Array.isArray(draft.batchFolderEntries)) setBatchFolderEntries(draft.batchFolderEntries);
+      if (typeof draft.requestText === "string") setRequestText(draft.requestText);
+      if (typeof draft.batchDefinitionText === "string") setBatchDefinitionText(draft.batchDefinitionText);
+      if (draft.idtDefaults && typeof draft.idtDefaults === "object") setIdtDefaults((current) => ({ ...current, ...draft.idtDefaults }));
+      if (Array.isArray(draft.selectedWorkspaceFolders)) setSelectedWorkspaceFolders(draft.selectedWorkspaceFolders);
+      setWorkspaceStatus("Draft restored after refresh. Re-link the project root to import project folders again.");
+    }
+    setDraftHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!draftHydrated) return;
+    saveDraftState({
+      batchRows,
+      batchResults,
+      selectedProjectId,
+      batchFolderEntries,
+      requestText,
+      batchDefinitionText,
+      idtDefaults,
+      selectedWorkspaceFolders,
+    });
+  }, [batchDefinitionText, batchFolderEntries, batchResults, batchRows, draftHydrated, idtDefaults, requestText, selectedProjectId, selectedWorkspaceFolders]);
+
+  useEffect(() => {
     if (!batchSuccessfulResults.length) {
       if (selectedProjectId) setSelectedProjectId("");
       return;
@@ -1691,6 +1831,43 @@ export default function App() {
       setSelectedProjectId(batchSuccessfulResults[0].rowId);
     }
   }, [batchSuccessfulResults, selectedProjectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadWorkspaceFolders = async () => {
+      if (!workspaceHandle) {
+        setWorkspaceFolders([]);
+        return;
+      }
+      try {
+        const nextFolders = [];
+        for await (const entry of workspaceHandle.values()) {
+          if (entry.kind !== "directory") continue;
+          if (entry.name === "Template" || entry.name === "Orders") continue;
+          nextFolders.push({
+            name: entry.name,
+            irisId: extractIrisIdFromFolderName(entry.name),
+            parentId: extractParentIdFromFolderName(entry.name),
+          });
+        }
+        nextFolders.sort((left, right) => left.name.localeCompare(right.name));
+        if (!cancelled) {
+          setWorkspaceFolders(nextFolders);
+          setSelectedWorkspaceFolders((current) => current.filter((name) => nextFolders.some((entry) => entry.name === name)));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setWorkspaceFolders([]);
+          setSelectedWorkspaceFolders([]);
+          setWorkspaceStatus(error?.message || "Failed to read project folders from the selected root.");
+        }
+      }
+    };
+    loadWorkspaceFolders();
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceHandle]);
 
   useEffect(() => {
     if (!batchFolderEntries.length) return;
@@ -1761,6 +1938,93 @@ export default function App() {
     setBatchResults([]);
   };
   const updateIdtDefault = (key, value) => setIdtDefaults((current) => ({ ...current, [key]: value }));
+
+  const pickWorkspaceFolder = useCallback(async () => {
+    if (!supportsWorkspaceAccess) {
+      setWorkspaceStatus("This browser does not support direct project-folder access. Use Chrome or Edge.");
+      return;
+    }
+    try {
+      const handle = await window.showDirectoryPicker();
+      setWorkspaceHandle(handle);
+      setWorkspaceStatus(`Project root linked: ${handle.name}`);
+    } catch (error) {
+      if (error?.name !== "AbortError") setWorkspaceStatus(error?.message || "Failed to open project root picker.");
+    }
+  }, [supportsWorkspaceAccess]);
+
+  const importWorkspaceProjects = useCallback(() => {
+    if (!workspaceFolders.length) {
+      setWorkspaceStatus("No project folders were detected in the linked project root.");
+      return;
+    }
+    const targetFolders = selectedWorkspaceFolders.length
+      ? workspaceFolders.filter((entry) => selectedWorkspaceFolders.includes(entry.name))
+      : workspaceFolders;
+    if (!targetFolders.length) {
+      setWorkspaceStatus("Select at least one project folder to import.");
+      return;
+    }
+    const importedRows = parseWorkspaceProjectFolderEntries(targetFolders, batchFolderLibrary);
+    setBatchRows(resizeBatchRows(importedRows, Math.max(1, importedRows.length)));
+    setBatchResults([]);
+    setBatchError("");
+    setBatchCopyState("");
+    setWorkspaceStatus(`Imported ${importedRows.length} project folder${importedRows.length === 1 ? "" : "s"} into design rows.`);
+  }, [batchFolderLibrary, selectedWorkspaceFolders, workspaceFolders]);
+
+  const saveEntryToWorkspace = useCallback(async (entry) => {
+    if (!workspaceHandle) throw new Error("Choose the project root first.");
+    if (!entry?.result) throw new Error("Generate a design first.");
+    const folderNameForEntry = buildWorkspaceProjectFolderName(entry.row, entry.result);
+    const destinationHandle = await workspaceHandle.getDirectoryHandle(folderNameForEntry, { create: true });
+    const projectPlanHandle = await destinationHandle.getDirectoryHandle("Project plan", { create: true });
+    const summaryHandle = await destinationHandle.getDirectoryHandle("Summary", { create: true });
+    const dataHandle = await destinationHandle.getDirectoryHandle("Data", { create: true });
+
+    const entryMeta = buildRowMeta(entry.row, entry.result);
+    const entryHistorical = buildHistoricalContext(entryMeta, entry.result, entry.row?.projectType);
+    const entryReview = buildReviewItems(entryMeta, entry.result, entry.row?.fileName);
+    const entryHtml = buildReportHtml(entryMeta, entry.result, entry.row?.fileName, entryHistorical, entryReview);
+    const entrySummary = buildDesignSummary(entry.result);
+    const entryOrderRows = buildBatchOrderRows([{ slot: entry.slot, row: entry.row, status: "success", result: entry.result }]);
+    const entryTemplateRows = buildIdtTemplateRows(entryOrderRows, idtDefaults);
+    const filePrefix = `${buildSafeToken(folderNameForEntry, "project")}_`;
+
+    await writeTextToDirectory(projectPlanHandle, `${filePrefix}design_report.html`, entryHtml);
+    await writeTextToDirectory(projectPlanHandle, `${filePrefix}design_summary.txt`, entrySummary);
+    await writeTextToDirectory(summaryHandle, `${filePrefix}order_preview.csv`, buildBatchOrderDelimited(entryOrderRows));
+    if (entry.row?.gbRaw) {
+      await writeTextToDirectory(dataHandle, entry.row.fileName || `${filePrefix}reference.gb`, entry.row.gbRaw);
+    }
+    for (const kind of ["crispr", "oligo", "hdr"]) {
+      const workbookFile = buildIdtWorkbookFile(kind, entryTemplateRows, filePrefix);
+      if (workbookFile) await writeBlobToDirectory(summaryHandle, workbookFile.fileName, workbookFile.blob);
+    }
+    return folderNameForEntry;
+  }, [idtDefaults, workspaceHandle]);
+
+  const saveSelectedToWorkspace = useCallback(async () => {
+    try {
+      const savedFolder = await saveEntryToWorkspace(selectedEntry);
+      setWorkspaceStatus(`Saved selected report and order files into ${savedFolder}.`);
+    } catch (error) {
+      setWorkspaceStatus(error?.message || "Failed to save the selected project files.");
+    }
+  }, [saveEntryToWorkspace, selectedEntry]);
+
+  const saveAllToWorkspace = useCallback(async () => {
+    if (!batchSuccessfulResults.length) {
+      setWorkspaceStatus("Generate at least one design first.");
+      return;
+    }
+    try {
+      for (const entry of batchSuccessfulResults) await saveEntryToWorkspace(entry);
+      setWorkspaceStatus(`Saved ${batchSuccessfulResults.length} project package${batchSuccessfulResults.length === 1 ? "" : "s"} into the linked project folders.`);
+    } catch (error) {
+      setWorkspaceStatus(error?.message || "Failed to save one or more project packages.");
+    }
+  }, [batchSuccessfulResults, saveEntryToWorkspace]);
 
   const onBatchFile = useCallback((index, event) => {
     const file = event.target.files?.[0];
@@ -1980,8 +2244,8 @@ export default function App() {
         <div style={{ ...CARD_STYLE, marginBottom: 18, padding: 14, background: "rgba(15,28,46,0.82)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             {[
-              ["1. Upload", "Add a GenBank folder once, or attach a file directly to a design row."],
-              ["2. Describe", "Paste simple request lines like GENE edit cell-line."],
+              ["1. Link", "Choose the yearly project root and import the projects you want to design."],
+              ["2. Upload", "Add a GenBank folder once, or attach a file directly to a design row."],
               ["3. Generate", "Review flagged rows only, then generate designs in one run."],
               ["4. Export", "Download HTML reports and separate IDT order sheets."],
             ].map(([title, text]) => (
@@ -1991,6 +2255,79 @@ export default function App() {
               </div>
             ))}
           </div>
+          <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
+            Drafts now persist across browser refresh. Re-link the project root after refresh if you want to import project folders again.
+          </div>
+        </div>
+
+        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+          <SectionTitle>0. Project Workspace</SectionTitle>
+          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+            Choose the yearly project root, select the project folders you want, then import them as design rows. When a design is ready, save the report and order files directly into that project folder.
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            <button type="button" onClick={pickWorkspaceFolder} disabled={!supportsWorkspaceAccess} style={{ ...FIELD_STYLE, width: "auto", cursor: supportsWorkspaceAccess ? "pointer" : "not-allowed", fontWeight: 700 }}>
+              Choose project root
+            </button>
+            <button type="button" onClick={importWorkspaceProjects} disabled={!workspaceFolders.length} style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceFolders.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
+              Import project folders as rows
+            </button>
+            <button
+              type="button"
+              onClick={saveSelectedToWorkspace}
+              disabled={!workspaceHandle || !selectedEntry?.result}
+              style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceHandle && selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}
+            >
+              Save selected report + order files to project folder
+            </button>
+            <button
+              type="button"
+              onClick={saveAllToWorkspace}
+              disabled={!workspaceHandle || !batchSuccessfulResults.length}
+              style={{ ...FIELD_STYLE, width: "auto", cursor: workspaceHandle && batchSuccessfulResults.length ? "pointer" : "not-allowed", fontWeight: 700 }}
+            >
+              Save all reports + order files to project folders
+            </button>
+          </div>
+          {workspaceFolders.length > 0 && (
+            <div style={{ marginBottom: 12, maxWidth: 860 }}>
+              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Project folders to import</div>
+              <div style={{ ...FIELD_STYLE, background: COLORS.panelAlt, padding: 12, maxHeight: 220, overflowY: "auto" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+                  <button type="button" onClick={() => setSelectedWorkspaceFolders(workspaceFolders.map((entry) => entry.name))} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                    Select all
+                  </button>
+                  <button type="button" onClick={() => setSelectedWorkspaceFolders([])} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                    Clear selection
+                  </button>
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {workspaceFolders.map((entry) => (
+                    <label key={entry.name} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={selectedWorkspaceFolders.includes(entry.name)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setSelectedWorkspaceFolders((current) => checked ? [...current, entry.name] : current.filter((name) => name !== entry.name));
+                        }}
+                        style={{ marginTop: 2 }}
+                      />
+                      <span style={{ color: COLORS.text, fontSize: 13, lineHeight: 1.4 }}>{entry.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                If nothing is checked, all detected project folders will be imported.
+              </div>
+            </div>
+          )}
+          <div style={{ color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+            Linked root: {workspaceHandle?.name || "none"}
+            {!supportsWorkspaceAccess && " | Direct project-folder access is unavailable in this browser."}
+          </div>
+          {workspaceStatus && <div style={{ marginTop: 12, color: COLORS.success, fontSize: 12 }}>{workspaceStatus}</div>}
         </div>
 
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
@@ -2120,11 +2457,35 @@ export default function App() {
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Review the selected design, then export a Word-friendly HTML report for sharing, ordering, or archive.
+            Review the selected design, then either save it into the linked project folder or download the HTML/browser export fallback.
+          </div>
+          {workspaceHandle && selectedEntry?.result && (
+            <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: "#ECFDF3", border: "1px solid #A7F3D0" }}>
+              <div style={{ color: "#047857", fontSize: 12, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 6 }}>Recommended Save Path</div>
+              <div style={{ color: "#111827", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
+                Save the selected report and IDT order files into the linked project folder. The HTML report is the editable version; open it in Word if you want to revise it, then export PDF from Word only for a final fixed copy.
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                <button type="button" onClick={saveSelectedToWorkspace} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "#D1FAE5", border: "1px solid #86EFAC", color: "#065F46" }}>
+                  Save selected report + order files to project folder
+                </button>
+                <button
+                  type="button"
+                  onClick={saveAllToWorkspace}
+                  disabled={!batchSuccessfulResults.length}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", border: "1px solid #86EFAC", color: "#065F46" }}
+                >
+                  Save all reports + order files to project folders
+                </button>
+              </div>
+            </div>
+          )}
+          <div style={{ color: COLORS.dim, fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>
+            Browser Download Fallback
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-            <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report</button>
-            <button type="button" disabled={batchSuccessfulResults.length < 2} onClick={downloadAllReports} style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length >= 2 ? "pointer" : "not-allowed", fontWeight: 700 }}>Download all HTML reports</button>
+            <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report to browser Downloads</button>
+            <button type="button" disabled={batchSuccessfulResults.length < 2} onClick={downloadAllReports} style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length >= 2 ? "pointer" : "not-allowed", fontWeight: 700 }}>Download all HTML reports to browser Downloads</button>
             <button type="button" disabled={!selectedEntry?.result} onClick={() => copyText(buildDesignSummary(selectedEntry.result), "Design summary")} style={{ ...FIELD_STYLE, width: "auto", cursor: selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}>Copy design summary</button>
             {copyState && <Badge color={COLORS.success}>{copyState}</Badge>}
           </div>
