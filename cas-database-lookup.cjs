@@ -182,9 +182,9 @@ async function lookupCasDatabase({ gene, organismId }) {
         tier: tier.id,
         tierLabel: tier.label,
         totalTargets: rankedTargets.length,
-        targets: rankedTargets.slice(0, 8).map(summarizeTarget),
+        targets: rankedTargets.slice(0, 3).map(summarizeTarget),
         note: tier.id === "strict"
-          ? "Results meet the default recommended Cas-Database knockout filters."
+          ? "Showing the top 3 guides from the default recommended Cas-Database knockout filters."
           : `Results required the ${tier.label.toLowerCase()} because the stricter filters returned no targets.`,
       };
     }

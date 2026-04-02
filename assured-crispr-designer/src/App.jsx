@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CASSETTES, INTERNAL_TAGS, runDesign } from "./designEngine";
+import { CASSETTES, INTERNAL_TAGS, REPORTERS, getCassetteSequenceLength, parseGB, runDesign } from "./designEngine";
+import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
 const COLORS = {
@@ -75,7 +76,6 @@ const PM_EDIT_COLORS = {
   silent: "#FCA5A5",
 };
 const APP_FOOTER_LABEL = "Hosted build • 31 Mar 2026";
-const APP_DRAFT_STORAGE_KEY = "assured-crispr-designer:draft:v1";
 const REPO_URL = "https://github.com/Narasimhat/Assured_CRISPR_Design";
 const SAMPLE_REQUEST_TEXT = [
   "PSEN1 N32R BIHi005-A",
@@ -85,6 +85,236 @@ const SAMPLE_REQUEST_TEXT = [
   "SORCS1 N-terminal N:EGFP-Linker BIHi005-A",
 ].join("\n");
 
+const CASSETTE_ALIASES = {
+  mscarlett2a: "T2A-mScarlet_I3",
+  t2amscarlet: "T2A-mScarlet_I3",
+  t2amscarleti3: "T2A-mScarlet_I3",
+  mstaygold2t2a: "T2A-mStayGold2",
+  t2amstaygold2: "T2A-mStayGold2",
+  mscarletp2a: "P2A-mScarlet",
+  p2amscarlet: "P2A-mScarlet",
+  mscarleti3p2a: "P2A-mScarlet",
+  mstaygold2p2a: "P2A-mStayGold2",
+  p2amstaygold2: "P2A-mStayGold2",
+  egfplinker: "N:EGFP-Linker",
+  mstaygold2linker: "N:mStayGold2-Linker",
+  sd40linker: "N:SD40-Linker",
+  dtaglinker: "N:dTAG-Linker",
+  maidlinker: "N:mAID-Linker",
+  egfpt2a: "T2A-EGFP",
+  mscarleti3t2a: "T2A-mScarlet_I3",
+  mcherryp2a: "P2A-mCherry",
+};
+
+const NT_CASSETTE_OPTIONS = [
+  "N:EGFP-Linker",
+  "N:mStayGold2-Linker",
+  "T2A-EGFP",
+  "T2A-mScarlet_I3",
+  "T2A-mStayGold2",
+  "P2A-mCherry",
+  "P2A-mScarlet",
+  "P2A-mStayGold2",
+  "N:SD40-Linker",
+  "N:dTAG-Linker",
+  "N:mAID-Linker",
+  "N:2xHA-dTAG-Linker",
+];
+
+const CT_CASSETTE_OPTIONS = [
+  "2xHA-only",
+  "SD40-2xHA",
+  "dTAG-2xHA",
+  "mAID-2xHA",
+  "T2A-EGFP",
+  "T2A-mScarlet_I3",
+  "T2A-mStayGold2",
+  "P2A-mCherry",
+  "P2A-mScarlet",
+  "P2A-mStayGold2",
+  "SD40-2xHA-P2A-mCherry",
+  "dTAG-2xHA-P2A-mCherry",
+  "mAID-2xHA-P2A-mCherry",
+];
+
+const CASSETTE_DISPLAY = {
+  "N:EGFP-Linker": {
+    nt: "EGFP fusion (reporter-linker)",
+  },
+  "N:mStayGold2-Linker": {
+    nt: "mStayGold2 fusion (reporter-linker)",
+  },
+  "N:SD40-Linker": {
+    nt: "SD40 fusion (tag-linker)",
+  },
+  "N:dTAG-Linker": {
+    nt: "dTAG fusion (tag-linker)",
+  },
+  "N:mAID-Linker": {
+    nt: "mAID fusion (tag-linker)",
+  },
+  "N:2xHA-dTAG-Linker": {
+    nt: "2xHA-dTAG fusion (tag-linker)",
+  },
+  "T2A-EGFP": {
+    nt: "EGFP-T2A cleavable",
+    ct: "T2A-EGFP cleavable",
+  },
+  "T2A-mScarlet_I3": {
+    nt: "mScarlet-I3-T2A cleavable",
+    ct: "T2A-mScarlet-I3 cleavable",
+  },
+  "T2A-mStayGold2": {
+    nt: "mStayGold2-T2A cleavable",
+    ct: "T2A-mStayGold2 cleavable",
+  },
+  "P2A-mCherry": {
+    nt: "mCherry-P2A cleavable",
+    ct: "P2A-mCherry cleavable",
+  },
+  "P2A-mScarlet": {
+    nt: "mScarlet-P2A cleavable",
+    ct: "P2A-mScarlet cleavable",
+  },
+  "P2A-mStayGold2": {
+    nt: "mStayGold2-P2A cleavable",
+    ct: "P2A-mStayGold2 cleavable",
+  },
+  "2xHA-only": {
+    ct: "2xHA fusion (linker-tag)",
+  },
+  "SD40-2xHA": {
+    ct: "SD40-2xHA fusion (linker-tag)",
+  },
+  "dTAG-2xHA": {
+    ct: "dTAG-2xHA fusion (linker-tag)",
+  },
+  "mAID-2xHA": {
+    ct: "mAID-2xHA fusion (linker-tag)",
+  },
+  "SD40-2xHA-P2A-mCherry": {
+    ct: "SD40-2xHA-P2A-mCherry cleavable",
+  },
+  "dTAG-2xHA-P2A-mCherry": {
+    ct: "dTAG-2xHA-P2A-mCherry cleavable",
+  },
+  "mAID-2xHA-P2A-mCherry": {
+    ct: "mAID-2xHA-P2A-mCherry cleavable",
+  },
+};
+
+const CONSTRUCT_BUILDER_OPTIONS = {
+  nt: [
+    {
+      id: "fusion",
+      label: "Fusion / linker",
+      help: "Reporter or tag is fused directly at the N-terminus with the built-in linker.",
+      payloads: [
+        { cassette: "N:EGFP-Linker", label: "EGFP", kind: "reporter" },
+        { cassette: "N:mStayGold2-Linker", label: "mStayGold2", kind: "reporter" },
+        { cassette: "N:SD40-Linker", label: "SD40", kind: "tag" },
+        { cassette: "N:dTAG-Linker", label: "dTAG", kind: "tag" },
+        { cassette: "N:mAID-Linker", label: "mAID", kind: "tag" },
+        { cassette: "N:2xHA-dTAG-Linker", label: "2xHA-dTAG", kind: "tag" },
+      ],
+    },
+    {
+      id: "t2a",
+      label: "T2A cleavable",
+      help: "Reporter is expressed as a cleavable N-terminal module with T2A.",
+      payloads: [
+        { cassette: "T2A-EGFP", label: "EGFP", kind: "reporter" },
+        { cassette: "T2A-mScarlet_I3", label: "mScarlet-I3", kind: "reporter" },
+        { cassette: "T2A-mStayGold2", label: "mStayGold2", kind: "reporter" },
+      ],
+    },
+    {
+      id: "p2a",
+      label: "P2A cleavable",
+      help: "Reporter is expressed as a cleavable N-terminal module with P2A.",
+      payloads: [
+        { cassette: "P2A-mCherry", label: "mCherry", kind: "reporter" },
+        { cassette: "P2A-mScarlet", label: "mScarlet", kind: "reporter" },
+        { cassette: "P2A-mStayGold2", label: "mStayGold2", kind: "reporter" },
+      ],
+    },
+  ],
+  ct: [
+    {
+      id: "fusion",
+      label: "Fusion / linker",
+      help: "Tag is fused directly at the C-terminus with the built-in linker.",
+      payloads: [
+        { cassette: "2xHA-only", label: "2xHA", kind: "tag" },
+        { cassette: "SD40-2xHA", label: "SD40-2xHA", kind: "tag" },
+        { cassette: "dTAG-2xHA", label: "dTAG-2xHA", kind: "tag" },
+        { cassette: "mAID-2xHA", label: "mAID-2xHA", kind: "tag" },
+      ],
+    },
+    {
+      id: "t2a",
+      label: "T2A cleavable",
+      help: "Reporter is expressed as a cleavable C-terminal module with T2A.",
+      payloads: [
+        { cassette: "T2A-EGFP", label: "EGFP", kind: "reporter" },
+        { cassette: "T2A-mScarlet_I3", label: "mScarlet-I3", kind: "reporter" },
+        { cassette: "T2A-mStayGold2", label: "mStayGold2", kind: "reporter" },
+      ],
+    },
+    {
+      id: "p2a",
+      label: "P2A cleavable",
+      help: "Reporter is expressed as a cleavable C-terminal module with P2A.",
+      payloads: [
+        { cassette: "P2A-mCherry", label: "mCherry", kind: "reporter" },
+        { cassette: "P2A-mScarlet", label: "mScarlet", kind: "reporter" },
+        { cassette: "P2A-mStayGold2", label: "mStayGold2", kind: "reporter" },
+      ],
+    },
+    {
+      id: "tag_p2a_reporter",
+      label: "Tag + P2A reporter",
+      help: "C-terminal fusion tag followed by a cleavable P2A reporter.",
+      payloads: [
+        { cassette: "SD40-2xHA-P2A-mCherry", label: "SD40-2xHA + mCherry", kind: "combo" },
+        { cassette: "dTAG-2xHA-P2A-mCherry", label: "dTAG-2xHA + mCherry", kind: "combo" },
+        { cassette: "mAID-2xHA-P2A-mCherry", label: "mAID-2xHA + mCherry", kind: "combo" },
+      ],
+    },
+  ],
+};
+
+const ORDER_READY_REPORTER_CASSETTES = {
+  EGFP: {
+    nt: ["N:EGFP-Linker", "T2A-EGFP"],
+    ct: ["T2A-EGFP"],
+  },
+  mCherry: {
+    nt: ["P2A-mCherry"],
+    ct: ["P2A-mCherry"],
+  },
+  mScarlet: {
+    nt: ["P2A-mScarlet"],
+    ct: ["P2A-mScarlet"],
+  },
+  mScarlet_I3: {
+    nt: ["T2A-mScarlet_I3"],
+    ct: ["T2A-mScarlet_I3"],
+  },
+  mStayGold2: {
+    nt: ["N:mStayGold2-Linker", "T2A-mStayGold2", "P2A-mStayGold2"],
+    ct: ["T2A-mStayGold2", "P2A-mStayGold2"],
+  },
+};
+
+const ORDER_READY_REPORTER_NAME_MAP = {
+  egfp: "EGFP",
+  mcherry: "mCherry",
+  mscarlet: "mScarlet",
+  mscarleti3: "mScarlet_I3",
+  mstaygold2: "mStayGold2",
+};
+
 function sanitizeSegment(value, fallback) {
   const clean = value.replace(/[<>:"/\\|?*\x00-\x1f]/g, "").replace(/\s+/g, " ").trim();
   return clean || fallback;
@@ -92,6 +322,60 @@ function sanitizeSegment(value, fallback) {
 
 function getProjectTypeMeta(projectType) {
   return PROJECT_TYPES.find((item) => item.id === projectType) || PROJECT_TYPES[0];
+}
+
+function getCassetteDisplayLabel(option, projectType) {
+  const display = CASSETTE_DISPLAY[option];
+  if (display?.[projectType]) return display[projectType];
+  return option.replace(/^N:/, "");
+}
+
+function normalizeReporterName(value) {
+  return String(value || "").replace(/[^A-Za-z0-9]+/g, "").toLowerCase();
+}
+
+function getOrderReadyReporterKey(name) {
+  return ORDER_READY_REPORTER_NAME_MAP[normalizeReporterName(name)] || "";
+}
+
+function getReporterActionOptions(reporterName, projectType) {
+  const key = getOrderReadyReporterKey(reporterName);
+  if (!key) return [];
+  return (ORDER_READY_REPORTER_CASSETTES[key]?.[projectType] || []).filter((option) => CASSETTES[option]);
+}
+
+function formatFpbaseReporterSummary(reporter) {
+  const parts = [];
+  if (reporter?.exMax && reporter?.emMax) parts.push(`Ex/Em ${reporter.exMax}/${reporter.emMax}`);
+  if (reporter?.brightness) parts.push(`Brightness ${reporter.brightness}`);
+  if (reporter?.agg) parts.push(`Agg ${reporter.agg}`);
+  if (reporter?.organism) parts.push(String(reporter.organism));
+  return parts.join(" • ");
+}
+
+function getConstructBuilderGroups(projectType) {
+  return CONSTRUCT_BUILDER_OPTIONS[projectType] || [];
+}
+
+function resolveConstructBuilderSelection(tag, projectType) {
+  const groups = getConstructBuilderGroups(projectType);
+  for (const group of groups) {
+    const payload = group.payloads.find((item) => item.cassette === tag);
+    if (payload) return { architecture: group.id, cassette: payload.cassette };
+  }
+  const fallback = groups[0];
+  return {
+    architecture: fallback?.id || "",
+    cassette: fallback?.payloads?.[0]?.cassette || tag || "",
+  };
+}
+
+function getConstructBuilderPayloads(projectType, architecture) {
+  return getConstructBuilderGroups(projectType).find((group) => group.id === architecture)?.payloads || [];
+}
+
+function getConstructBuilderHelp(projectType, architecture) {
+  return getConstructBuilderGroups(projectType).find((group) => group.id === architecture)?.help || "";
 }
 
 function buildProjectFolderName(meta) {
@@ -194,7 +478,7 @@ function buildGeneInfoRows(meta, result, fileName) {
     ["Target", buildDisplayedEditLabel(meta, result)],
     ["Cell line", meta.cellLine || "n/a"],
     ["Protein / CDS", result.prot ? `${result.prot} aa` : "n/a"],
-    ["Reference file", fileName || "Uploaded GenBank"],
+    ["Reference file", fileName || (result.referenceOnly ? "Gene-list KO mode (no GenBank uploaded)" : "Uploaded GenBank")],
   ];
 }
 
@@ -209,6 +493,179 @@ function calculateGcPercent(sequence) {
   return Math.round((gcCount / clean.length) * 100);
 }
 
+function reverseComplementLocal(sequence) {
+  return String(sequence || "").split("").reverse().map((base) => DNA_COMPLEMENT[base] || "N").join("");
+}
+
+function parseGuideCutFromNote(note) {
+  const match = String(note || "").match(/Cut at\s+(\d+)/i);
+  return match ? parseInt(match[1], 10) - 1 : null;
+}
+
+function parseGuideExonNumber(note) {
+  const match = String(note || "").match(/exon\s+(\d+)/i);
+  return match ? parseInt(match[1], 10) : null;
+}
+
+function findMatchingGuideCut(model, spacer, pam, preferredExonNumber = null, preferredCut = null) {
+  const seq = getGenomicSequence(model);
+  const cleanSpacer = String(spacer || "").toUpperCase();
+  const cleanPam = String(pam || "").toUpperCase();
+  if (!cleanSpacer || cleanSpacer.length !== 20 || !cleanPam || cleanPam.length !== 3) return null;
+
+  const matches = [];
+  for (let pos = 0; pos <= seq.length - 23; pos += 1) {
+    const plusSpacer = seq.slice(pos, pos + 20).toUpperCase();
+    const plusPam = seq.slice(pos + 20, pos + 23).toUpperCase();
+    if (plusSpacer === cleanSpacer && plusPam === cleanPam) {
+      const cut = pos + 17;
+      const context = describeKoGenomicContextFromModel(model, cut);
+      const exonMatch = context.label.match(/exon\s+(\d+)/i);
+      matches.push({ cut, str: "+", context, exonNumber: exonMatch ? parseInt(exonMatch[1], 10) : null });
+    }
+
+    const minusPamWindow = seq.slice(pos, pos + 3).toUpperCase();
+    const minusSpacerWindow = seq.slice(pos + 3, pos + 23).toUpperCase();
+    if (reverseComplementLocal(minusSpacerWindow) === cleanSpacer && reverseComplementLocal(minusPamWindow) === cleanPam) {
+      const cut = pos + 6;
+      const context = describeKoGenomicContextFromModel(model, cut);
+      const exonMatch = context.label.match(/exon\s+(\d+)/i);
+      matches.push({ cut, str: "-", context, exonNumber: exonMatch ? parseInt(exonMatch[1], 10) : null });
+    }
+  }
+
+  if (!matches.length) return null;
+  matches.sort((left, right) => {
+    const leftPreferredExon = preferredExonNumber && left.exonNumber === preferredExonNumber ? 0 : 1;
+    const rightPreferredExon = preferredExonNumber && right.exonNumber === preferredExonNumber ? 0 : 1;
+    if (leftPreferredExon !== rightPreferredExon) return leftPreferredExon - rightPreferredExon;
+    const leftPreferredCut = Number.isFinite(preferredCut) ? Math.abs(left.cut - preferredCut) : Number.MAX_SAFE_INTEGER;
+    const rightPreferredCut = Number.isFinite(preferredCut) ? Math.abs(right.cut - preferredCut) : Number.MAX_SAFE_INTEGER;
+    if (leftPreferredCut !== rightPreferredCut) return leftPreferredCut - rightPreferredCut;
+    return left.cut - right.cut;
+  });
+  return matches[0];
+}
+
+function pickCenteredPrimerPairLocal(seq, center, targetAmpliconLength = 480, primerLength = 24) {
+  const desiredAmplicon = Math.max(primerLength * 2, targetAmpliconLength);
+  const maxStart = Math.max(0, seq.length - desiredAmplicon);
+  let ampliconStart = Math.round(center - desiredAmplicon / 2);
+  ampliconStart = Math.max(0, Math.min(maxStart, ampliconStart));
+  let ampliconEnd = Math.min(seq.length, ampliconStart + desiredAmplicon);
+  if (ampliconEnd - ampliconStart < desiredAmplicon) {
+    ampliconStart = Math.max(0, ampliconEnd - desiredAmplicon);
+  }
+  return {
+    forward: seq.slice(ampliconStart, ampliconStart + primerLength),
+    reverse: reverseComplementLocal(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd)),
+    ampliconLength: ampliconEnd - ampliconStart,
+  };
+}
+
+function buildKoGuideDisplayNote(guide, context, pairSpacing, sourceDetail = "") {
+  const sourcePrefix = sourceDetail ? `${sourceDetail} | ` : "";
+  const spacingText = Number.isFinite(pairSpacing) ? ` | pair spacing ${pairSpacing} bp` : "";
+  return `${sourcePrefix}Cut at ${guide.cut + 1}, ${context.label} (${context.detail})${spacingText}`;
+}
+
+function finalizeKoResultWithGuides(result, row, guides) {
+  if (!result || result.type !== "ko") return result;
+  if (!row?.gbRaw) return finalizeReferenceOnlyKoResult(result, row, guides);
+  const model = normalizeGenBankToTranscriptModel(parseGB(row.gbRaw));
+  const seq = getGenomicSequence(model);
+  const currentGuides = [...(guides || [])];
+  if (currentGuides.length < 2) return result;
+
+  const mappedGuides = currentGuides.map((guide) => {
+    const existingCut = Number.isFinite(guide.cut) ? guide.cut : parseGuideCutFromNote(guide.note || guide.arm);
+    const preferredExon = parseGuideExonNumber(guide.note || guide.arm);
+    const mapped = findMatchingGuideCut(model, guide.sp, guide.pm, preferredExon, existingCut);
+    const cut = mapped?.cut ?? existingCut;
+    const context = mapped?.context ?? (Number.isFinite(cut) ? describeKoGenomicContextFromModel(model, cut) : { label: "genomic context unresolved", detail: "position unavailable" });
+    return {
+      ...guide,
+      str: mapped?.str || guide.str,
+      cut,
+      context,
+      exonNumber: mapped?.exonNumber ?? preferredExon ?? null,
+    };
+  });
+
+  const pairSpacing = mappedGuides.every((guide) => Number.isFinite(guide.cut))
+    ? Math.abs(mappedGuides[1].cut - mappedGuides[0].cut)
+    : null;
+
+  const updatedGuides = mappedGuides.map((guide) => ({
+    ...guide,
+    note: buildKoGuideDisplayNote(guide, guide.context, pairSpacing, guide.referenceDetail || ""),
+  }));
+
+  const cutCenter = mappedGuides.filter((guide) => Number.isFinite(guide.cut)).length
+    ? Math.round(mappedGuides.filter((guide) => Number.isFinite(guide.cut)).reduce((sum, guide) => sum + guide.cut, 0) / mappedGuides.filter((guide) => Number.isFinite(guide.cut)).length)
+    : null;
+  const primerPair = Number.isFinite(cutCenter) ? pickCenteredPrimerPairLocal(seq, cutCenter, 480, 24) : null;
+
+  const exonNumbers = [...new Set(mappedGuides.map((guide) => guide.exonNumber).filter(Number.isFinite))];
+  let exonLabel = result.exon;
+  if (exonNumbers.length === 1) {
+    const exon = (model.exons || []).find((entry) => entry.exonNumber === exonNumbers[0]);
+    if (exon) exonLabel = `Exon ${exon.exonNumber} (${exon.start + 1}-${exon.end}, ${exon.end - exon.start} bp)`;
+  }
+
+  return {
+    ...result,
+    exon: exonLabel,
+    gs: updatedGuides,
+    ps: primerPair ? [
+      { ...result.ps?.[0], s: primerPair.forward },
+      { ...result.ps?.[1], s: primerPair.reverse },
+    ] : result.ps,
+    amp: primerPair ? `~${primerPair.ampliconLength} bp` : result.amp,
+  };
+}
+
+function finalizeReferenceOnlyKoResult(result, row, guides, sourceLabel = "Reference") {
+  if (!result || result.type !== "ko") return result;
+  const currentGuides = [...(guides || [])].slice(0, 2).map((guide, index) => {
+    const exonNumber = parseGuideExonNumber(guide.note || guide.arm);
+    const sourceDetail = guide.referenceDetail || `${sourceLabel} guide`;
+    const note = `${sourceDetail} | Reference-only KO mode. Upload GenBank to calculate pair spacing and centered primers.`;
+    return {
+      ...guide,
+      n: guide.n || `${buildSafeToken(result.gene || row?.gene || "GENE", "GENE")}_KO_gRNA${index + 1}`,
+      gc: Number.isFinite(guide.gc) ? guide.gc : calculateGcPercent(guide.sp),
+      exonNumber: Number.isFinite(exonNumber) ? exonNumber : null,
+      note,
+    };
+  });
+  const exonNumbers = [...new Set(currentGuides.map((guide) => guide.exonNumber).filter(Number.isFinite))];
+  const exonLabel = exonNumbers.length === 1 ? `Reference exon shortlist: exon ${exonNumbers[0]}` : "Reference-only KO shortlist";
+  return {
+    ...result,
+    gene: result.gene || row?.gene || "",
+    exon: exonLabel,
+    gs: currentGuides,
+    ps: [],
+    amp: "n/a",
+    strat: `${sourceLabel} reference-guide shortlist; upload GenBank to calculate pair spacing and centered primers.`,
+    referenceOnly: true,
+  };
+}
+
+function updateKoResultWithMappedGuides(result, row, slotIndex, guideUpdater) {
+  if (!result || result.type !== "ko" || !row?.gbRaw) return result;
+  const currentGuides = [...(result.gs || [])];
+  if (!currentGuides[slotIndex]) return result;
+  const previousGuide = currentGuides[slotIndex];
+  const preferredExonNumber = parseGuideExonNumber(previousGuide.note || previousGuide.arm);
+  const preferredCut = Number.isFinite(previousGuide.cut) ? previousGuide.cut : parseGuideCutFromNote(previousGuide.note || previousGuide.arm);
+  const replacement = guideUpdater(previousGuide, slotIndex, preferredExonNumber, preferredCut);
+  if (!replacement) return result;
+  currentGuides[slotIndex] = replacement;
+  return finalizeKoResultWithGuides(result, row, currentGuides);
+}
+
 function buildBrunelloGuideOverride(guide, slotIndex, previousGuide) {
   return {
     ...previousGuide,
@@ -218,6 +675,8 @@ function buildBrunelloGuideOverride(guide, slotIndex, previousGuide) {
     str: guide.strand || previousGuide?.str || "n/a",
     gc: calculateGcPercent(guide.spacer),
     d: Number.isFinite(previousGuide?.d) ? previousGuide.d : null,
+    cut: Number.isFinite(guide.cutPosition) ? guide.cutPosition - 1 : (Number.isFinite(previousGuide?.cut) ? previousGuide.cut : null),
+    referenceDetail: `Brunello reference guide | Rule Set 2 ${guide.ruleSet2}${guide.exon ? ` | Exon ${guide.exon}` : ""}${guide.transcript ? ` | ${guide.transcript}` : ""}`,
     note: `Brunello reference guide | Rule Set 2 ${guide.ruleSet2}${guide.exon ? ` | Exon ${guide.exon}` : ""}${guide.transcript ? ` | ${guide.transcript}` : ""}`,
   };
 }
@@ -231,8 +690,81 @@ function buildCasDatabaseGuideOverride(target, slotIndex, previousGuide) {
     str: target.strand || previousGuide?.str || "n/a",
     gc: calculateGcPercent(target.spacer),
     d: Number.isFinite(previousGuide?.d) ? previousGuide.d : null,
+    cut: Number.isFinite(previousGuide?.cut) ? previousGuide.cut : null,
+    referenceDetail: `Cas-Database reference guide | OOF ${Number(target.oofScore || 0).toFixed(2)} | off-targets ${Array.isArray(target.offTargetCounts) ? target.offTargetCounts.join("/") : "n/a"}${target.location ? ` | ${target.location}` : ""}`,
     note: `Cas-Database reference guide | OOF ${Number(target.oofScore || 0).toFixed(2)} | off-targets ${Array.isArray(target.offTargetCounts) ? target.offTargetCounts.join("/") : "n/a"}${target.location ? ` | ${target.location}` : ""}`,
   };
+}
+
+function buildReferenceOnlyKoDesignFromGuides(row, sourceLabel, guides, extra = {}) {
+  if (!row?.gene || !Array.isArray(guides) || guides.length < 2) return { err: `No ${sourceLabel} guide pair was available for ${row?.gene || "this gene"}.` };
+  const baseResult = {
+    type: "ko",
+    gene: normalizeGeneToken(row.gene),
+    gs: [],
+    ps: [],
+    amp: "n/a",
+    exon: "Reference-only KO shortlist",
+    strat: `${sourceLabel} reference-guide shortlist; upload GenBank to calculate pair spacing and centered primers.`,
+    referenceOnly: true,
+    gb: { assembly: "" },
+    dbg: "",
+    ...extra,
+  };
+  return finalizeReferenceOnlyKoResult(baseResult, row, guides, sourceLabel);
+}
+
+async function fetchJsonOrThrow(url, endpointName) {
+  const response = await fetch(url);
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.toLowerCase().includes("application/json")) {
+    throw new Error(`${endpointName} endpoint returned HTML instead of JSON. Restart the dev server so the local API route is active.`);
+  }
+  const payload = await response.json();
+  if (!response.ok || payload?.ok === false) throw new Error(payload?.error || payload?.note || `${endpointName} lookup failed.`);
+  return payload;
+}
+
+function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuilder, sourceLabel) {
+  if (!result || result.type !== "ko" || !Array.isArray(sourceGuides) || sourceGuides.length < 2) return [];
+  const topGuides = sourceGuides.slice(0, 3);
+  const candidates = [];
+  for (let leftIndex = 0; leftIndex < topGuides.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < topGuides.length; rightIndex += 1) {
+      const leftGuide = overrideBuilder(topGuides[leftIndex], 0, result.gs?.[0]);
+      const rightGuide = overrideBuilder(topGuides[rightIndex], 1, result.gs?.[1]);
+      const pairResult = row?.gbRaw
+        ? finalizeKoResultWithGuides(result, row, [leftGuide, rightGuide])
+        : finalizeReferenceOnlyKoResult(result, row, [leftGuide, rightGuide], sourceLabel);
+      if (!pairResult) continue;
+      const guideCuts = (pairResult.gs || []).map((guide) => guide.cut).filter(Number.isFinite);
+      const spacing = guideCuts.length === 2 ? Math.abs(guideCuts[1] - guideCuts[0]) : null;
+      const exonNumbers = [...new Set((pairResult.gs || []).map((guide) => parseGuideExonNumber(guide.note || guide.arm)).filter(Number.isFinite))];
+      const sameExon = exonNumbers.length === 1;
+      const preferredSpacing = Number.isFinite(spacing) && spacing >= 40 && spacing <= 140;
+      candidates.push({
+        id: `${sourceLabel}-${leftIndex + 1}-${rightIndex + 1}`,
+        source: sourceLabel,
+        sourceIndexes: [leftIndex + 1, rightIndex + 1],
+        guides: [leftGuide, rightGuide],
+        result: pairResult,
+        spacing,
+        sameExon,
+        preferredSpacing,
+        exonLabel: pairResult.exon || (sameExon ? `Exon ${exonNumbers[0]}` : "Mixed exon context"),
+      });
+    }
+  }
+  return candidates
+    .sort((left, right) => {
+      if (left.sameExon !== right.sameExon) return left.sameExon ? -1 : 1;
+      if (left.preferredSpacing !== right.preferredSpacing) return left.preferredSpacing ? -1 : 1;
+      const leftDistance = Number.isFinite(left.spacing) ? Math.abs(left.spacing - 90) : Number.MAX_SAFE_INTEGER;
+      const rightDistance = Number.isFinite(right.spacing) ? Math.abs(right.spacing - 90) : Number.MAX_SAFE_INTEGER;
+      if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+      return String(left.id).localeCompare(String(right.id));
+    })
+    .slice(0, 3);
 }
 
 function renderGuideSequence(spacer, pam, html = false) {
@@ -491,11 +1023,14 @@ function detectProjectTypeFromText(text, mutation, internalSite, cassetteKey) {
   if (cassetteKey?.startsWith("N:")) return "nt";
   if (cassetteKey) return "ct";
   if (mutation) return "pm";
+  if (/^[A-Za-z0-9._-]+$/.test(String(text || "").trim())) return "ko";
   return "pm";
 }
 
 function detectCassetteKey(text, targetType = "") {
   const normalizedLine = String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const aliasedKey = CASSETTE_ALIASES[normalizedLine];
+  if (aliasedKey) return aliasedKey;
   if (!targetType || targetType === "it") {
     const internalKeys = Object.keys(INTERNAL_TAGS).sort((a, b) => b.length - a.length);
     for (const key of internalKeys) {
@@ -504,14 +1039,20 @@ function detectCassetteKey(text, targetType = "") {
     }
   }
   const keys = Object.keys(CASSETTES).sort((a, b) => b.length - a.length);
+  const allowKeyForTarget = (key) => {
+    if (!targetType) return true;
+    if (targetType === "nt") return NT_CASSETTE_OPTIONS.includes(key);
+    if (targetType === "ct") return CT_CASSETTE_OPTIONS.includes(key);
+    return true;
+  };
   for (const key of keys) {
     const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]+/g, "");
     const bareKey = normalizedKey.replace(/^n/, "");
     if (normalizedLine.includes(normalizedKey)) {
-      if (!targetType || (targetType === "nt" ? key.startsWith("N:") : !key.startsWith("N:"))) return key;
+      if (allowKeyForTarget(key)) return key;
     }
     if (targetType === "nt" && key.startsWith("N:") && normalizedLine.includes(bareKey)) return key;
-    if (targetType === "ct" && !key.startsWith("N:") && normalizedLine.includes(normalizedKey)) return key;
+    if (targetType === "ct" && CT_CASSETTE_OPTIONS.includes(key) && normalizedLine.includes(normalizedKey)) return key;
   }
   return "";
 }
@@ -598,35 +1139,16 @@ function parseWorkspaceProjectFolderEntries(entries, folderLibrary) {
   });
 }
 
-function loadDraftState() {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(APP_DRAFT_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveDraftState(draft) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(APP_DRAFT_STORAGE_KEY, JSON.stringify(draft));
-  } catch {
-    // Ignore local storage failures.
-  }
-}
-
 function summarizeRowParseIssue(row, fileEntryOverride = null) {
   const issues = [];
   if (!row?.gene) issues.push("gene");
-  if (!row?.cellLine) issues.push("cell line");
+  if (!row?.cellLine && !(row?.projectType === "ko" && !row?.gbRaw && !row?.fileName && !fileEntryOverride)) issues.push("cell line");
   if (row?.projectType === "pm" && !row?.mutation) issues.push("mutation");
   if (row?.projectType === "it" && !row?.mutation) issues.push("in-frame insert site");
   if (row?.projectType === "it" && !row?.tag) issues.push("internal tag");
   if ((row?.projectType === "ct" || row?.projectType === "nt") && !row?.tag) issues.push("cassette");
   const hasFile = Boolean(fileEntryOverride || row?.gbRaw || row?.fileName);
-  if (!hasFile) issues.push("GenBank");
+  if (!hasFile && row?.projectType !== "ko") issues.push("GenBank");
   return issues.length ? `Needs ${issues.join(", ")}` : "";
 }
 
@@ -1035,12 +1557,18 @@ function buildReviewItems(meta, result, fileName) {
     if (!(result.ss || []).length) items.push({ level: "warning", text: "No guide-blocking mutation was introduced in the internal ssODN donors. Re-cut after HDR may remain possible." });
     if ((result.os || []).length !== (result.gs || []).length) items.push({ level: "warning", text: "A donor was not generated for every selected guide. Review guide-linked donor coverage before ordering." });
     if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the internal insertion site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
+    if (result.insertValidation && !result.insertValidation.matchesPreset) items.push({ level: "warning", text: "The designed internal-tag donor insert does not match the intended tag preset sequence. Review the tag DNA before ordering." });
+    if (result.insertValidation && !result.insertValidation.framePreserved) items.push({ level: "warning", text: "The designed internal-tag donor insert is not passing the frame check. Review codon continuity and unexpected stop codons before ordering." });
+    (result.insertValidation?.canonicalChecks || []).forEach((check) => {
+      if (!check.matches) items.push({ level: "warning", text: `${check.label} does not match the designed internal-tag donor at the protein level. Review the preset sequence before ordering.` });
+    });
     items.push({ level: "check", text: "Confirm that the internal tag remains in frame with the surrounding CDS and verify that the inserted peptide does not disrupt known functional motifs." });
   }
 
   if (result.type === "ko") {
     const guideCount = (result.gs || []).length;
     if (guideCount < 2) items.push({ level: "warning", text: "Knockout design has fewer than two guides. Deletion-based screening will be weaker than expected." });
+    if (result.referenceOnly) items.push({ level: "warning", text: "This knockout was generated from gene-name reference guides only. Upload a GenBank file to calculate exact exon geometry, pair spacing, and validation primers on your target sequence." });
     items.push({ level: "check", text: "Validate the expected deletion by junction PCR and confirm frameshift or protein loss in established clones." });
   }
 
@@ -1055,6 +1583,11 @@ function buildReviewItems(meta, result, fileName) {
     }
     if (result.type === "nt" && !labels.has("Start")) items.push({ level: "warning", text: "N-terminal donor annotation does not include a start codon block. Verify start codon replacement before ordering." });
     if (result.type === "ct" && !labels.has("Stop")) items.push({ level: "warning", text: "C-terminal donor annotation does not include a terminal stop codon block. Verify stop codon placement before ordering." });
+    if (result.insertValidation && !result.insertValidation.matchesPreset) items.push({ level: "warning", text: "The designed HDR donor insert does not match the intended cassette preset. Review the insert sequence before ordering." });
+    if (result.insertValidation && !result.insertValidation.framePreserved) items.push({ level: "warning", text: "The designed HDR donor insert is not passing the frame check. Review codon continuity and unexpected stop codons before ordering." });
+    (result.insertValidation?.canonicalChecks || []).forEach((check) => {
+      if (!check.matches) items.push({ level: "warning", text: `${check.label} does not match the designed HDR donor at the protein level. Review the cassette preset before ordering.` });
+    });
     if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the insertion site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
     if ((result.donor || "").length > 2200) items.push({ level: "warning", text: "HDR donor is long for routine synthesis and cloning. Confirm assembly plan and QC strategy." });
     items.push({ level: "check", text: "Review donor frame across both homology junctions and confirm the expected translated product at the protein level." });
@@ -1288,6 +1821,21 @@ function buildKnockinProteinRowHtml(label, tokens = [], insertStart = 0, insertL
 
 function buildKnockinProteinHtml(preview, title = "Protein Translation View") {
   if (!preview) return "";
+  if (preview.wtCodons && preview.donorCodons && preview.wtAas && preview.donorAas) {
+    return `
+      <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+        <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
+        <p style="font-size:12px;color:#555;margin:0 0 10px 0;">${preview.note}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:#FDE68A;">Inserted tag / reporter codons and amino acids</span>
+        </div>
+        ${buildAlignedRowHtml("WT codons", { tokens: preview.wtCodons }, [], "wt")}
+        ${buildAlignedRowHtml("Donor codons", { tokens: preview.donorCodons }, Array.from({ length: preview.insertCodonLength }, (_, index) => preview.insertCodonStart + index), "donor")}
+        ${buildAlignedRowHtml("WT amino acids", { tokens: preview.wtAas }, [], "wt")}
+        ${buildAlignedRowHtml("Donor amino acids", { tokens: preview.donorAas }, Array.from({ length: preview.insertAaLength }, (_, index) => preview.insertAaStart + index), "donor")}
+      </div>
+    `;
+  }
   return `
     <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
       <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">${title}</div>
@@ -1297,6 +1845,128 @@ function buildKnockinProteinHtml(preview, title = "Protein Translation View") {
       </div>
       ${buildKnockinProteinRowHtml(preview.wtLabel, preview.wtTokens)}
       ${buildKnockinProteinRowHtml(preview.donorLabel, preview.donorTokens, preview.insertStart, preview.insertLength, true)}
+    </div>
+  `;
+}
+
+function buildInsertValidationHtml(validation) {
+  if (!validation) return "";
+  const expectedAa = (validation.expectedAas || []).join("");
+  const actualAa = (validation.actualAas || []).join("");
+  const badges = [
+    {
+      label: validation.matchesPreset ? "Preset matches donor" : "Preset mismatch",
+      color: validation.matchesPreset ? "#047857" : "#B42318",
+      background: validation.matchesPreset ? "#D1FAE5" : "#FEE4E2",
+    },
+    {
+      label: validation.framePreserved ? "Reading frame preserved" : "Frame flagged",
+      color: validation.framePreserved ? "#047857" : "#B42318",
+      background: validation.framePreserved ? "#D1FAE5" : "#FEE4E2",
+    },
+  ];
+  if (validation.unexpectedStop || validation.terminalStopPresent) {
+    badges.push({
+      label: validation.unexpectedStop ? "Unexpected stop detected" : "Terminal stop retained",
+      color: validation.unexpectedStop ? "#B42318" : "#92400E",
+      background: validation.unexpectedStop ? "#FEE4E2" : "#FEF3C7",
+    });
+  }
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Insert Identity Check</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+        ${badges.map((badge) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>`).join("")}
+      </div>
+      <div style="font-size:12px;color:#555;margin-bottom:8px;">Expected insert: ${validation.expectedLengthBp} bp | Designed donor insert: ${validation.actualLengthBp} bp</div>
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Expected insert DNA</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${validation.expectedSequence || "n/a"}</div>
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Designed donor insert DNA</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${validation.actualSequence || "n/a"}</div>
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Expected insert amino acids</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${expectedAa || "n/a"}</div>
+      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Designed donor insert amino acids</div>
+      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;">${actualAa || "n/a"}</div>
+      ${(validation.canonicalChecks || []).map((check) => `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px solid #E5E7EB;">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px;">
+            <span style="font-size:12px;font-weight:700;color:#111827;">${check.label}</span>
+            <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${check.matches ? "#047857" : "#B42318"};background:${check.matches ? "#D1FAE5" : "#FEE4E2"};">${check.matches ? "Protein matches reference" : "Protein mismatch"}</span>
+          </div>
+          ${check.sourceUrl ? `<div style="color:#667085;font-size:11px;margin-bottom:6px;">Source: <a href="${check.sourceUrl}" target="_blank" rel="noreferrer" style="color:#2E75B6;text-decoration:none;">${check.sourceUrl}</a></div>` : ""}
+          <div style="color:#667085;font-size:11px;margin-bottom:4px;">Reference amino acids</div>
+          <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${check.expectedAas || "n/a"}</div>
+          <div style="color:#667085;font-size:11px;margin-bottom:4px;">Designed amino acids</div>
+          <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;">${check.actualAas || "n/a"}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function buildKnockinQcChecks(result) {
+  if (!result || !["it", "ct", "nt"].includes(result.type)) return [];
+  const canonicalChecks = result.insertValidation?.canonicalChecks || [];
+  const anyGuideProtection = result.type === "it"
+    ? (result.ss || []).length > 0
+    : ((result.guideProtection || []).some((entry) => entry.protected) || (result.ss || []).length > 0);
+  const checks = [
+    {
+      label: "Insert matches preset",
+      status: result.insertValidation ? (result.insertValidation.matchesPreset ? "pass" : "warn") : "na",
+      detail: result.insertValidation ? (result.insertValidation.matchesPreset ? "Designed donor insert matches the intended preset." : "Designed donor insert differs from the intended preset.") : "Insert identity check unavailable.",
+    },
+    {
+      label: "Frame preserved",
+      status: result.insertValidation ? (result.insertValidation.framePreserved ? "pass" : "warn") : "na",
+      detail: result.insertValidation ? (result.insertValidation.framePreserved ? "Insert passes the codon/frame check." : "Insert failed the codon/frame check.") : "Frame check unavailable.",
+    },
+    {
+      label: "Reporter sequence verified",
+      status: canonicalChecks.length ? (canonicalChecks.every((check) => check.matches) ? "pass" : "warn") : "na",
+      detail: canonicalChecks.length
+        ? (canonicalChecks.every((check) => check.matches)
+          ? canonicalChecks.map((check) => `${check.label} matches canonical FPbase reference.`).join(" ")
+          : canonicalChecks.filter((check) => !check.matches).map((check) => `${check.label} does not match canonical FPbase reference.`).join(" "))
+        : "No external canonical protein reference attached to this cassette.",
+    },
+    {
+      label: "Guide blocking present",
+      status: anyGuideProtection ? "pass" : "warn",
+      detail: anyGuideProtection ? "At least one selected guide is blocked by donor mutation or insertion geometry." : "No selected guide is clearly blocked by the donor.",
+    },
+    {
+      label: "Primer strategy ready",
+      status: (result.ps || []).length >= 2 && result.amp ? "pass" : "warn",
+      detail: (result.ps || []).length >= 2 && result.amp ? `Validation primers are present (${result.amp}).` : "Validation primers or amplicon sizing are incomplete.",
+    },
+  ];
+  return checks;
+}
+
+function buildKnockinQcSummaryHtml(result) {
+  const checks = buildKnockinQcChecks(result);
+  if (!checks.length) return "";
+  const styleFor = (status) => status === "pass"
+    ? { color: "#047857", background: "#D1FAE5", label: "Pass" }
+    : status === "warn"
+      ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
+      : { color: "#475467", background: "#EAECF0", label: "N/A" };
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Knock-in QC Summary</div>
+      ${checks.map((check) => {
+        const badge = styleFor(check.status);
+        return `
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-top:1px solid #E5E7EB;">
+            <div style="min-width:0;">
+              <div style="font-size:12px;font-weight:700;color:#111827;">${check.label}</div>
+              <div style="font-size:12px;color:#555;margin-top:2px;">${check.detail}</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;white-space:nowrap;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>
+          </div>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -1481,10 +2151,10 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
       : result.type === "ko"
-      ? `<p style="font-size:13px;line-height:1.45;">No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption.</p>`
+      ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
-        ? `${buildInternalProteinHtml(result)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
-      : `${buildKnockinProteinHtml(result.proteinPreview)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
+        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+      : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>
 <html>
@@ -1721,6 +2391,96 @@ function InternalProteinPreviewCard({ result }) {
   );
 }
 
+function InsertValidationCard({ validation }) {
+  if (!validation) return null;
+  const expectedAa = (validation.expectedAas || []).join("");
+  const actualAa = (validation.actualAas || []).join("");
+  const badges = [
+    {
+      label: validation.matchesPreset ? "Preset matches donor" : "Preset mismatch",
+      color: validation.matchesPreset ? COLORS.success : "#B42318",
+      background: validation.matchesPreset ? "#D1FAE5" : "#FEE4E2",
+    },
+    {
+      label: validation.framePreserved ? "Reading frame preserved" : "Frame flagged",
+      color: validation.framePreserved ? COLORS.success : "#B42318",
+      background: validation.framePreserved ? "#D1FAE5" : "#FEE4E2",
+    },
+  ];
+  if (validation.unexpectedStop || validation.terminalStopPresent) {
+    badges.push({
+      label: validation.unexpectedStop ? "Unexpected stop detected" : "Terminal stop retained",
+      color: validation.unexpectedStop ? "#B42318" : "#92400E",
+      background: validation.unexpectedStop ? "#FEE4E2" : "#FEF3C7",
+    });
+  }
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Insert identity check</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+        {badges.map((badge) => (
+          <span key={badge.label} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: badge.color, background: badge.background }}>
+            {badge.label}
+          </span>
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: "#555", marginBottom: 8 }}>Expected insert: {validation.expectedLengthBp} bp | Designed donor insert: {validation.actualLengthBp} bp</div>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>Expected insert DNA</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginBottom: 8 }}>{validation.expectedSequence || "n/a"}</div>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>Designed donor insert DNA</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginBottom: 8 }}>{validation.actualSequence || "n/a"}</div>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>Expected insert amino acids</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginBottom: 8 }}>{expectedAa || "n/a"}</div>
+      <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>Designed donor insert amino acids</div>
+      <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{actualAa || "n/a"}</div>
+      {(validation.canonicalChecks || []).map((check) => (
+        <div key={check.label} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #E5E7EB" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{check.label}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: check.matches ? "#047857" : "#B42318", background: check.matches ? "#D1FAE5" : "#FEE4E2" }}>
+              {check.matches ? "Protein matches reference" : "Protein mismatch"}
+            </span>
+          </div>
+          {check.sourceUrl ? <div style={{ color: "#667085", fontSize: 11, marginBottom: 6 }}>Source: <a href={check.sourceUrl} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>{check.sourceUrl}</a></div> : null}
+          <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>Reference amino acids</div>
+          <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere", marginBottom: 8 }}>{check.expectedAas || "n/a"}</div>
+          <div style={{ color: "#667085", fontSize: 11, marginBottom: 4 }}>Designed amino acids</div>
+          <div style={{ fontFamily: "Consolas, monospace", fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{check.actualAas || "n/a"}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function KnockinQcSummaryCard({ result }) {
+  const checks = buildKnockinQcChecks(result);
+  if (!checks.length) return null;
+  const styleFor = (status) => status === "pass"
+    ? { color: COLORS.success, background: "#D1FAE5", label: "Pass" }
+    : status === "warn"
+      ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
+      : { color: "#475467", background: "#EAECF0", label: "N/A" };
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Knock-in QC summary</div>
+      {checks.map((check, index) => {
+        const badge = styleFor(check.status);
+        return (
+          <div key={`${check.label}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", padding: "8px 0", borderTop: "1px solid #E5E7EB" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{check.label}</div>
+              <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{check.detail}</div>
+            </div>
+            <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: badge.color, background: badge.background }}>
+              {badge.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function InternalDonorPreview({ donor }) {
   const strands = buildInternalStrandModels(donor);
   return (
@@ -1755,6 +2515,21 @@ function InternalDonorPreview({ donor }) {
 
 function KnockinProteinPreviewCard({ preview }) {
   if (!preview) return null;
+  if (preview.wtCodons && preview.donorCodons && preview.wtAas && preview.donorAas) {
+    return (
+      <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+        <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
+        <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{preview.note}</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag / reporter codons and amino acids</span>
+        </div>
+        <AlignedTokenRow label="WT codons" tokens={preview.wtCodons} />
+        <AlignedTokenRow label="Donor codons" tokens={preview.donorCodons} diffIndexes={Array.from({ length: preview.insertCodonLength }, (_, index) => preview.insertCodonStart + index)} mode="donor" />
+        <AlignedTokenRow label="WT amino acids" tokens={preview.wtAas} />
+        <AlignedTokenRow label="Donor amino acids" tokens={preview.donorAas} diffIndexes={Array.from({ length: preview.insertAaLength }, (_, index) => preview.insertAaStart + index)} mode="donor" />
+      </div>
+    );
+  }
   const insertEnd = preview.insertStart + preview.insertLength;
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
@@ -1821,7 +2596,6 @@ export default function App() {
   const [workspaceFolders, setWorkspaceFolders] = useState([]);
   const [selectedWorkspaceFolders, setSelectedWorkspaceFolders] = useState([]);
   const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
-  const [draftHydrated, setDraftHydrated] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
   const [requestText, setRequestText] = useState("");
@@ -1833,12 +2607,16 @@ export default function App() {
     hdrScale: "",
     hdrModification: "",
   });
+  const [batchKoReferenceMap, setBatchKoReferenceMap] = useState({});
   const [casDbOrganismId, setCasDbOrganismId] = useState("1");
   const [casDbLookup, setCasDbLookup] = useState({ status: "idle", gene: "", data: null, error: "" });
   const [brunelloLookup, setBrunelloLookup] = useState({ status: "idle", gene: "", data: null, error: "" });
+  const [fpbaseLookup, setFpbaseLookup] = useState({ status: "idle", search: "", data: null, error: "" });
+  const [fpbaseSearchInput, setFpbaseSearchInput] = useState("");
+  const [fpbaseRowId, setFpbaseRowId] = useState("");
 
-  const ctCassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
-  const ntCassetteOptions = useMemo(() => Object.keys(CASSETTES), []);
+  const ctCassetteOptions = useMemo(() => CT_CASSETTE_OPTIONS.filter((key) => CASSETTES[key]), []);
+  const ntCassetteOptions = useMemo(() => NT_CASSETTE_OPTIONS.filter((key) => CASSETTES[key]), []);
   const internalTagOptions = useMemo(() => Object.keys(INTERNAL_TAGS), []);
   const supportsWorkspaceAccess = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
   const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
@@ -1856,6 +2634,14 @@ export default function App() {
   const brunelloReferenceGuideSet = useMemo(
     () => getBrunelloReferenceGuideSet(selectedEntry?.result, brunelloLookup.data),
     [selectedEntry, brunelloLookup.data],
+  );
+  const brunelloPairCandidates = useMemo(
+    () => buildKoReferencePairCandidates(selectedEntry?.result, selectedEntry?.row, brunelloReferenceGuideSet?.guides, buildBrunelloGuideOverride, "Brunello"),
+    [selectedEntry, brunelloReferenceGuideSet],
+  );
+  const casDatabasePairCandidates = useMemo(
+    () => buildKoReferencePairCandidates(selectedEntry?.result, selectedEntry?.row, casDbLookup.data?.targets, buildCasDatabaseGuideOverride, "Cas-Database"),
+    [selectedEntry, casDbLookup.data],
   );
   const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
   const additionalInfoSectionNumber = reviewSectionNumber + 1;
@@ -1883,44 +2669,18 @@ export default function App() {
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
   const currentHost = typeof window !== "undefined" ? window.location.host : "local";
 
-  const fetchCasDatabaseReferences = useCallback(async () => {
-    if (!selectedEntry?.result?.gene || selectedEntry.result.type !== "ko") return;
-    setCasDbLookup({ status: "loading", gene: selectedEntry.result.gene, data: null, error: "" });
-    try {
-      const response = await fetch(`/api/cas-database?gene=${encodeURIComponent(selectedEntry.result.gene)}&organism=${encodeURIComponent(casDbOrganismId)}`);
-      const contentType = response.headers.get("content-type") || "";
-      if (!contentType.toLowerCase().includes("application/json")) {
-        throw new Error("Cas-Database endpoint returned HTML instead of JSON. Restart the dev server so the local API route is active.");
-      }
-      const payload = await response.json();
-      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Cas-Database lookup failed.");
-      setCasDbLookup({ status: "success", gene: selectedEntry.result.gene, data: payload, error: "" });
-    } catch (error) {
-      setCasDbLookup({
-        status: "error",
-        gene: selectedEntry?.result?.gene || "",
-        data: null,
-        error: error?.message || "Cas-Database lookup failed unexpectedly.",
-      });
-    }
-  }, [casDbOrganismId, selectedEntry]);
-
   const replaceSelectedKoGuide = useCallback((slotIndex, replacementGuide) => {
     if (!selectedEntry?.result || selectedEntry.result.type !== "ko") return;
     setBatchResults((current) => current.map((entry) => {
       if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
-      const nextGuides = [...(entry.result.gs || [])];
-      if (!nextGuides[slotIndex]) return entry;
-      nextGuides[slotIndex] = replacementGuide(nextGuides[slotIndex], slotIndex);
+      const nextResult = updateKoResultWithMappedGuides(entry.result, entry.row, slotIndex, replacementGuide);
+      if (!nextResult) return entry;
       return {
         ...entry,
-        result: {
-          ...entry.result,
-          gs: nextGuides,
-        },
+        result: nextResult,
       };
     }));
-    setCopyState(`Updated ${slotIndex === 0 ? "gRNA1" : "gRNA2"} from the reference guide panel.`);
+    setCopyState(`Updated ${slotIndex === 0 ? "gRNA1" : "gRNA2"} and recalculated KO spacing and primers.`);
   }, [selectedEntry]);
 
   const applyBrunelloGuideToSelectedKo = useCallback((slotIndex, guide) => {
@@ -1930,6 +2690,59 @@ export default function App() {
   const applyCasDatabaseGuideToSelectedKo = useCallback((slotIndex, target) => {
     replaceSelectedKoGuide(slotIndex, (previousGuide) => buildCasDatabaseGuideOverride(target, slotIndex, previousGuide));
   }, [replaceSelectedKoGuide]);
+
+  const applyKoGuidePairToSelected = useCallback((pairCandidate) => {
+    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !pairCandidate?.guides?.length) return;
+    setBatchResults((current) => current.map((entry) => {
+      if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
+      const nextResult = finalizeKoResultWithGuides(entry.result, entry.row, pairCandidate.guides);
+      if (!nextResult) return entry;
+      return {
+        ...entry,
+        result: nextResult,
+      };
+    }));
+    setCopyState(`Applied ${pairCandidate.source} pair and recalculated KO spacing and primers.`);
+  }, [selectedEntry]);
+
+  const applyKoGuidePairToRow = useCallback((rowId, pairCandidate) => {
+    if (!pairCandidate?.guides?.length) return;
+    setBatchResults((current) => current.map((entry) => {
+      if (entry.rowId !== rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
+      const nextResult = finalizeKoResultWithGuides(entry.result, entry.row, pairCandidate.guides);
+      if (!nextResult) return entry;
+      return {
+        ...entry,
+        result: nextResult,
+      };
+    }));
+    setSelectedProjectId(rowId);
+    setCopyState(`Applied ${pairCandidate.source} pair and recalculated KO spacing and primers.`);
+  }, []);
+
+  const loadFpbaseReporters = useCallback(async (search = "") => {
+    setFpbaseLookup({ status: "loading", search, data: null, error: "" });
+    try {
+      const data = await fetchJsonOrThrow(`/api/fpbase-reporters?search=${encodeURIComponent(search)}&limit=200`, "FPbase");
+      setFpbaseLookup({ status: "success", search, data, error: "" });
+    } catch (error) {
+      setFpbaseLookup({ status: "error", search, data: null, error: error?.message || "FPbase lookup failed." });
+    }
+  }, []);
+
+  const toggleFpbaseRow = useCallback((rowId) => {
+    setFpbaseRowId((current) => current === rowId ? "" : rowId);
+  }, []);
+
+  const applyFpbaseReporterToRow = useCallback((rowIndex, cassetteKey) => {
+    updateBatchRow(rowIndex, "tag", cassetteKey);
+    setCopyState(`Selected ${getCassetteDisplayLabel(cassetteKey, batchRows[rowIndex]?.projectType || "ct")} from the FPbase order-ready reporter library.`);
+  }, [batchRows]);
+
+  useEffect(() => {
+    if (!fpbaseRowId || fpbaseLookup.status !== "idle") return;
+    loadFpbaseReporters("");
+  }, [fpbaseRowId, fpbaseLookup.status, loadFpbaseReporters]);
 
   useEffect(() => {
     if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
@@ -1959,39 +2772,103 @@ export default function App() {
   }, [selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
-    const draft = loadDraftState();
-    if (draft) {
-      if (Array.isArray(draft.batchRows) && draft.batchRows.length) setBatchRows(draft.batchRows);
-      if (Array.isArray(draft.batchResults)) setBatchResults(draft.batchResults);
-      if (typeof draft.selectedProjectId === "string") setSelectedProjectId(draft.selectedProjectId);
-      if (Array.isArray(draft.batchFolderEntries)) setBatchFolderEntries(draft.batchFolderEntries);
-      if (typeof draft.requestText === "string") setRequestText(draft.requestText);
-      if (typeof draft.batchDefinitionText === "string") setBatchDefinitionText(draft.batchDefinitionText);
-      if (draft.idtDefaults && typeof draft.idtDefaults === "object") setIdtDefaults((current) => ({ ...current, ...draft.idtDefaults }));
-      if (Array.isArray(draft.selectedWorkspaceFolders)) setSelectedWorkspaceFolders(draft.selectedWorkspaceFolders);
-      setWorkspaceStatus("Draft restored after refresh. Re-link the project root to import project folders again.");
-    }
-    setDraftHydrated(true);
-  }, []);
-
-  useEffect(() => {
     setCasDbOrganismId(inferCasDatabaseOrganismId(selectedEntry?.result));
     setCasDbLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
   }, [selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
-    if (!draftHydrated) return;
-    saveDraftState({
-      batchRows,
-      batchResults,
-      selectedProjectId,
-      batchFolderEntries,
-      requestText,
-      batchDefinitionText,
-      idtDefaults,
-      selectedWorkspaceFolders,
+    if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
+      setCasDbLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
+      return;
+    }
+    let cancelled = false;
+    setCasDbLookup({ status: "loading", gene: selectedEntry.result.gene, data: null, error: "" });
+    fetch(`/api/cas-database?gene=${encodeURIComponent(selectedEntry.result.gene)}&organism=${encodeURIComponent(casDbOrganismId)}`)
+      .then((response) => {
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.toLowerCase().includes("application/json")) {
+          throw new Error("Cas-Database endpoint returned HTML instead of JSON. Restart the dev server so the local API route is active.");
+        }
+        return response.json().then((payload) => ({ response, payload }));
+      })
+      .then(({ response, payload }) => {
+        if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Cas-Database lookup failed.");
+        if (!cancelled) setCasDbLookup({ status: "success", gene: selectedEntry.result.gene, data: payload, error: "" });
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setCasDbLookup({
+            status: "error",
+            gene: selectedEntry?.result?.gene || "",
+            data: null,
+            error: error?.message || "Cas-Database lookup failed unexpectedly.",
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [casDbOrganismId, selectedEntry?.rowId, selectedEntry?.result]);
+
+  useEffect(() => {
+    const koEntries = batchSuccessfulResults.filter((entry) => entry.result?.type === "ko" && entry.result?.gene);
+    const activeIds = new Set(koEntries.map((entry) => entry.rowId));
+    setBatchKoReferenceMap((current) => {
+      const next = Object.fromEntries(Object.entries(current).filter(([rowId]) => activeIds.has(rowId)));
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
-  }, [batchDefinitionText, batchFolderEntries, batchResults, batchRows, draftHydrated, idtDefaults, requestText, selectedProjectId, selectedWorkspaceFolders]);
+    const entriesToFetch = koEntries.filter((entry) => {
+      const cached = batchKoReferenceMap[entry.rowId];
+      const organismId = inferCasDatabaseOrganismId(entry.result);
+      if (!cached) return true;
+      if (cached.status === "loading") return false;
+      return cached.gene !== entry.result.gene || cached.organismId !== organismId;
+    });
+    if (!entriesToFetch.length) return undefined;
+    let cancelled = false;
+    entriesToFetch.forEach((entry) => {
+      const organismId = inferCasDatabaseOrganismId(entry.result);
+      setBatchKoReferenceMap((current) => ({
+        ...current,
+        [entry.rowId]: { status: "loading", gene: entry.result.gene, organismId, brunello: null, casDb: null, error: "" },
+      }));
+      Promise.allSettled([
+        fetch(`/api/brunello?gene=${encodeURIComponent(entry.result.gene)}`).then(async (response) => {
+          const contentType = response.headers.get("content-type") || "";
+          if (!contentType.toLowerCase().includes("application/json")) throw new Error("Brunello endpoint returned HTML instead of JSON.");
+          const payload = await response.json();
+          if (!payload?.ok) throw new Error(payload?.error || payload?.note || "Brunello lookup failed.");
+          return payload;
+        }),
+        fetch(`/api/cas-database?gene=${encodeURIComponent(entry.result.gene)}&organism=${encodeURIComponent(organismId)}`).then(async (response) => {
+          const contentType = response.headers.get("content-type") || "";
+          if (!contentType.toLowerCase().includes("application/json")) throw new Error("Cas-Database endpoint returned HTML instead of JSON.");
+          const payload = await response.json();
+          if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Cas-Database lookup failed.");
+          return payload;
+        }),
+      ]).then(([brunelloResult, casDbResult]) => {
+        if (cancelled) return;
+        setBatchKoReferenceMap((current) => ({
+          ...current,
+          [entry.rowId]: {
+            status: "success",
+            gene: entry.result.gene,
+            organismId,
+            brunello: brunelloResult.status === "fulfilled" ? brunelloResult.value : null,
+            casDb: casDbResult.status === "fulfilled" ? casDbResult.value : null,
+            error: [
+              brunelloResult.status === "rejected" ? brunelloResult.reason?.message : "",
+              casDbResult.status === "rejected" ? casDbResult.reason?.message : "",
+            ].filter(Boolean).join(" | "),
+          },
+        }));
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [batchSuccessfulResults, batchKoReferenceMap]);
 
   useEffect(() => {
     if (!batchSuccessfulResults.length) {
@@ -2249,26 +3126,68 @@ export default function App() {
     }
   }, []);
 
-  const runBatch = () => {
+  const runBatch = async () => {
     setBatchError("");
     setBatchResults([]);
     setBatchCopyState("");
-    const activeRows = batchRows.filter((row) => row.gbRaw);
+    const activeRows = batchRows.filter((row) => row.gbRaw || (row.projectType === "ko" && row.gene));
     if (!activeRows.length) {
-      setBatchError("Upload at least one GenBank file, either through the folder upload or directly on a design row.");
+      setBatchError("Upload at least one GenBank file, or provide at least one knockout row with a gene name for gene-list KO mode.");
       return;
     }
-    const nextResults = batchRows.map((row, index) => {
+    const nextResults = await Promise.all(batchRows.map(async (row, index) => {
       const slot = index + 1;
-      if (!row.gbRaw) return { slot, rowId: row.id, row, status: "empty" };
+      if (!row.gbRaw && !(row.projectType === "ko" && row.gene)) return { slot, rowId: row.id, row, status: "empty" };
       try {
+        if (row.projectType === "ko" && !row.gbRaw) {
+          const organismId = "1";
+          const [brunello, casDb] = await Promise.allSettled([
+            fetchJsonOrThrow(`/api/brunello?gene=${encodeURIComponent(row.gene)}`, "Brunello"),
+            fetchJsonOrThrow(`/api/cas-database?gene=${encodeURIComponent(row.gene)}&organism=${encodeURIComponent(organismId)}`, "Cas-Database"),
+          ]);
+          const brunelloGuides = brunello.status === "fulfilled"
+            ? brunello.value.guides.slice(0, 2).map((guide, slotIndex) => buildBrunelloGuideOverride(guide, slotIndex, {}))
+            : [];
+          const casDbGuides = casDb.status === "fulfilled"
+            ? casDb.value.targets.slice(0, 2).map((target, slotIndex) => buildCasDatabaseGuideOverride(target, slotIndex, {}))
+            : [];
+          const primarySource = brunelloGuides.length >= 2 ? "Brunello" : casDbGuides.length >= 2 ? "Cas-Database" : "";
+          const guides = primarySource === "Brunello" ? brunelloGuides : primarySource === "Cas-Database" ? casDbGuides : [];
+          if (guides.length < 2) {
+            const errorParts = [
+              brunello.status === "rejected" ? brunello.reason?.message : "",
+              casDb.status === "rejected" ? casDb.reason?.message : "",
+            ].filter(Boolean);
+            return {
+              slot,
+              rowId: row.id,
+              row,
+              status: "error",
+              error: errorParts[0] || `No Brunello or Cas-Database guide pair was available for ${row.gene}.`,
+              debug: "",
+            };
+          }
+          const referenceOnlyDesign = buildReferenceOnlyKoDesignFromGuides(
+            row,
+            primarySource,
+            guides,
+            {
+              referenceSources: {
+                brunello: brunello.status === "fulfilled" ? brunello.value : null,
+                casDb: casDb.status === "fulfilled" ? casDb.value : null,
+              },
+            },
+          );
+          if (referenceOnlyDesign.err) return { slot, rowId: row.id, row, status: "error", error: referenceOnlyDesign.err, debug: "" };
+          return { slot, rowId: row.id, row, status: "success", result: referenceOnlyDesign, debug: "" };
+        }
         const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm);
         if (design.err) return { slot, rowId: row.id, row, status: "error", error: design.err, debug: design.dbg || "" };
         return { slot, rowId: row.id, row, status: "success", result: design, debug: design.dbg || "" };
       } catch (runError) {
         return { slot, rowId: row.id, row, status: "error", error: runError?.message || "Design generation failed unexpectedly.", debug: "" };
       }
-    });
+    }));
     setBatchResults(nextResults);
     if (!nextResults.some((entry) => entry.status === "success")) setBatchError("No batch designs were generated successfully.");
   };
@@ -2496,7 +3415,7 @@ export default function App() {
             ))}
           </div>
           <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
-            Drafts persist across browser refresh, so current design work stays in the browser session.
+            Each fresh open starts with a clean workspace. Load sample requests or upload your own GenBank files to begin.
           </div>
         </div>
 
@@ -2630,7 +3549,26 @@ export default function App() {
             {batchRows.map((row, index) => {
               const slot = index + 1;
               const batchStatus = batchResults.find((entry) => entry.rowId === row.id);
-              const rowReady = !row.parseIssue && !!row.gbRaw;
+              const koRowReferences = batchKoReferenceMap[row.id];
+              const koRowBrunelloGuideSet = batchStatus?.status === "success" && batchStatus.result?.type === "ko"
+                ? getBrunelloReferenceGuideSet(batchStatus.result, koRowReferences?.brunello)
+                : null;
+              const koRowBrunelloPairs = batchStatus?.status === "success" && batchStatus.result?.type === "ko"
+                ? buildKoReferencePairCandidates(batchStatus.result, row, koRowBrunelloGuideSet?.guides, buildBrunelloGuideOverride, "Brunello")
+                : [];
+              const koRowCasPairs = batchStatus?.status === "success" && batchStatus.result?.type === "ko"
+                ? buildKoReferencePairCandidates(batchStatus.result, row, koRowReferences?.casDb?.targets, buildCasDatabaseGuideOverride, "Cas-Database")
+                : [];
+              const constructSelection = (row.projectType === "ct" || row.projectType === "nt")
+                ? resolveConstructBuilderSelection(row.tag, row.projectType)
+                : null;
+              const constructPayloads = constructSelection
+                ? getConstructBuilderPayloads(row.projectType, constructSelection.architecture)
+                : [];
+              const constructHelp = constructSelection
+                ? getConstructBuilderHelp(row.projectType, constructSelection.architecture)
+                : "";
+              const rowReady = !row.parseIssue && (row.projectType === "ko" ? !!row.gene : !!row.gbRaw);
               return (
                 <div key={row.id} style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
@@ -2664,7 +3602,7 @@ export default function App() {
                   <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Notes / assumptions</div><textarea value={row.notes} onChange={(event) => updateBatchRow(index, "notes", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 84, resize: "vertical" }} placeholder="Transcript assumptions, strand notes, delivery mode, client constraints..." /></label>
 
                   <label style={{ display: "block", marginTop: 12 }}>
-                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference GenBank</div>
+                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference GenBank {row.projectType === "ko" ? "(optional for gene-list KO mode)" : ""}</div>
                     <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
                       <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
                       <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
@@ -2675,17 +3613,140 @@ export default function App() {
                   {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Mutation</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
                   {row.projectType === "it" && (
                     <Grid>
-                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Internal tag</div><select value={INTERNAL_TAGS[row.tag] ? row.tag : "SPOT"} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>{internalTagOptions.map((option) => <option key={option} value={option}>{option} ({INTERNAL_TAGS[option].len} bp)</option>)}</select></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Internal tag</div><select value={INTERNAL_TAGS[row.tag] ? row.tag : "SPOT"} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>{internalTagOptions.map((option) => <option key={option} value={option}>{option} ({INTERNAL_TAGS[option].seq.length} bp)</option>)}</select></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Insert after residue</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="P155" /></label>
                     </Grid>
                   )}
                   {(row.projectType === "ct" || row.projectType === "nt") && (
-                    <Grid>
-                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cassette</div><select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>{(row.projectType === "nt" ? ntCassetteOptions : ctCassetteOptions).map((option) => <option key={option} value={option}>{option} ({CASSETTES[option].len} bp)</option>)}</select></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Homology arm</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={FIELD_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
-                    </Grid>
+                    <>
+                      <Grid>
+                        <label>
+                          <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Architecture</div>
+                          <select
+                            value={constructSelection?.architecture || ""}
+                            onChange={(event) => {
+                              const payloads = getConstructBuilderPayloads(row.projectType, event.target.value);
+                              if (payloads.length) updateBatchRow(index, "tag", payloads[0].cassette);
+                            }}
+                            style={FIELD_STYLE}
+                          >
+                            {getConstructBuilderGroups(row.projectType).map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{constructSelection?.architecture === "fusion" ? "Reporter / tag" : constructSelection?.architecture === "tag_p2a_reporter" ? "Tag + reporter" : "Reporter"}</div>
+                          <select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>
+                            {constructPayloads.map((option) => <option key={option.cassette} value={option.cassette}>{option.label} ({getCassetteSequenceLength(option.cassette, row.projectType)} bp)</option>)}
+                          </select>
+                        </label>
+                        <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Homology arm</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={FIELD_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
+                      </Grid>
+                      <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
+                        {row.projectType === "nt"
+                          ? "N-terminal convention: fusion designs use reporter-linker or tag-linker. Cleavable designs use reporter-T2A or reporter-P2A."
+                          : "C-terminal convention: fusion designs use linker-tag. Cleavable designs use T2A-reporter or P2A-reporter."}
+                      </div>
+                      {constructHelp && (
+                        <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                          {constructHelp}
+                        </div>
+                      )}
+                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                        Resolved cassette: <span style={{ fontFamily: "Consolas, monospace", color: COLORS.text }}>{row.tag}</span>
+                      </div>
+                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                        Reporter inserts come from the built-in FPbase-backed reporter library, so you do not need to paste reporter DNA manually.
+                      </div>
+                      <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #D7DEE7", background: "#F8FAFC" }}>
+                        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>FPbase reporter catalog</div>
+                            <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5 }}>Search all FPbase reporters, then apply curated order-ready reporters directly into this {row.projectType === "nt" ? "N-terminal" : "C-terminal"} design.</div>
+                          </div>
+                          <button type="button" onClick={() => toggleFpbaseRow(row.id)} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #D0D5DD", background: "#fff", color: "#111827", fontWeight: 700, cursor: "pointer" }}>
+                            {fpbaseRowId === row.id ? "Hide FPbase reporters" : "Browse FPbase reporters"}
+                          </button>
+                        </div>
+                        {fpbaseRowId === row.id && (
+                          <>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                              <input
+                                value={fpbaseSearchInput}
+                                onChange={(event) => setFpbaseSearchInput(event.target.value)}
+                                placeholder="Search FPbase, for example mNeonGreen or tdTomato"
+                                style={{ ...FIELD_STYLE, flex: "1 1 260px", background: "#fff", color: "#111827" }}
+                              />
+                              <button type="button" onClick={() => loadFpbaseReporters(fpbaseSearchInput.trim())} style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #D0D5DD", background: "#fff", color: "#111827", fontWeight: 700, cursor: "pointer" }}>
+                                Search FPbase
+                              </button>
+                            </div>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                              <Badge color="#D1FAE5">Order-ready: built-in donor DNA available</Badge>
+                              <Badge color="#EAECF0">Reference only: visible from FPbase, not yet curated for donor design</Badge>
+                            </div>
+                            {fpbaseLookup.status === "loading" && (
+                              <div style={{ color: "#667085", fontSize: 12 }}>Loading FPbase reporters...</div>
+                            )}
+                            {fpbaseLookup.status === "error" && (
+                              <div style={{ padding: 10, borderRadius: 10, background: "#FEE4E2", color: "#B42318", fontSize: 12 }}>{fpbaseLookup.error}</div>
+                            )}
+                            {fpbaseLookup.status === "success" && (
+                              <div style={{ display: "grid", gap: 10 }}>
+                                <div style={{ color: "#667085", fontSize: 12 }}>
+                                  {fpbaseLookup.data?.count || fpbaseLookup.data?.reporters?.length || 0} FPbase reporters found.
+                                  {fpbaseLookup.data?.sourceUrl ? <> Source: <a href={fpbaseLookup.data.sourceUrl} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>{fpbaseLookup.data.sourceUrl}</a></> : null}
+                                </div>
+                                {(fpbaseLookup.data?.reporters || []).slice(0, 24).map((reporter) => {
+                                  const actionOptions = getReporterActionOptions(reporter.name, row.projectType);
+                                  const orderReadyKey = getOrderReadyReporterKey(reporter.name);
+                                  const builtInReporter = orderReadyKey ? REPORTERS[orderReadyKey] : null;
+                                  return (
+                                    <div key={reporter.id || reporter.name} style={{ padding: 12, borderRadius: 12, border: "1px solid #D7DEE7", background: "#fff" }}>
+                                      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 6 }}>
+                                        <div style={{ fontWeight: 700, color: "#111827" }}>{reporter.name}</div>
+                                        <Badge color={actionOptions.length ? "#D1FAE5" : "#EAECF0"}>{actionOptions.length ? "Order-ready" : "Reference only"}</Badge>
+                                      </div>
+                                      <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}>
+                                        {formatFpbaseReporterSummary(reporter) || "FPbase reporter entry"}
+                                      </div>
+                                      <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                        {reporter.aaLength ? `${reporter.aaLength} aa` : "AA length n/a"}
+                                        {reporter.genbank ? ` • GenBank ${reporter.genbank}` : ""}
+                                        {builtInReporter?.sourceUrl ? <> • <a href={builtInReporter.sourceUrl} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>FPbase entry</a></> : reporter.url ? <> • <a href={reporter.url} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>FPbase entry</a></> : null}
+                                      </div>
+                                      {!!actionOptions.length && (
+                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                          {actionOptions.map((option) => (
+                                            <button
+                                              key={option}
+                                              type="button"
+                                              onClick={() => applyFpbaseReporterToRow(index, option)}
+                                              style={{
+                                                padding: "8px 12px",
+                                                borderRadius: 10,
+                                                border: row.tag === option ? "1px solid #10B981" : "1px solid #D0D5DD",
+                                                background: row.tag === option ? "#ECFDF5" : "#fff",
+                                                color: "#111827",
+                                                fontWeight: 700,
+                                                cursor: "pointer",
+                                              }}
+                                            >
+                                              Use {getCassetteDisplayLabel(option, row.projectType)}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    </>
                   )}
-                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 12 }}>KO uses the uploaded GenBank only. No mutation or donor cassette entry is needed.</div>}
+                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 12 }}>KO can run from gene name alone for high-throughput reference-guide mode, or use an uploaded GenBank for sequence-backed spacing and primer design.</div>}
 
                   {batchStatus?.status === "error" && (
                     <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>
@@ -2695,6 +3756,50 @@ export default function App() {
                   {batchStatus?.status === "success" && (
                     <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
                       {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" || batchStatus.result.type === "it" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
+                    </div>
+                  )}
+                  {batchStatus?.status === "success" && batchStatus.result?.type === "ko" && (
+                    <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
+                      <div style={{ color: "#111827", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>High-throughput KO pair suggestions</div>
+                      <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
+                        For KO rows, the app can suggest nearby pairs from the top 3 Brunello and Cas-Database guides, then center validation primers automatically.
+                      </div>
+                      {koRowReferences?.status === "loading" && (
+                        <div style={{ color: "#667085", fontSize: 12 }}>Loading KO reference pairs...</div>
+                      )}
+                      {koRowReferences?.error && (
+                        <div style={{ color: "#B42318", fontSize: 12, marginBottom: 8 }}>{koRowReferences.error}</div>
+                      )}
+                      {koRowBrunelloPairs[0] && (
+                        <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FED7AA" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            <div>
+                              <div style={{ color: "#9A3412", fontWeight: 700, fontSize: 12 }}>Top Brunello nearby pair</div>
+                              <div style={{ color: "#7C2D12", fontSize: 12, marginTop: 4 }}>
+                                {koRowBrunelloPairs[0].exonLabel} | {Number.isFinite(koRowBrunelloPairs[0].spacing) ? `${koRowBrunelloPairs[0].spacing} bp spacing` : "spacing n/a"} | {koRowBrunelloPairs[0].result.amp || "amplicon n/a"}
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowBrunelloPairs[0])} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                              Apply Brunello pair
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {koRowCasPairs[0] && (
+                        <div style={{ padding: 10, borderRadius: 10, background: "#ffffff", border: "1px solid #D0D5DD" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                            <div>
+                              <div style={{ color: "#111827", fontWeight: 700, fontSize: 12 }}>Top Cas-Database nearby pair</div>
+                              <div style={{ color: "#475467", fontSize: 12, marginTop: 4 }}>
+                                {koRowCasPairs[0].exonLabel} | {Number.isFinite(koRowCasPairs[0].spacing) ? `${koRowCasPairs[0].spacing} bp spacing` : "spacing n/a"} | {koRowCasPairs[0].result.amp || "amplicon n/a"}
+                              </div>
+                            </div>
+                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowCasPairs[0])} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                              Apply Cas-Database pair
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2889,7 +3994,9 @@ export default function App() {
                 {selectedEntry.result.type === "ko" && (
                   <>
                     <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
-                      No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption.
+                      {selectedEntry.result.referenceOnly
+                        ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs above are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up."
+                        : "No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption."}
                     </div>
                     {brunelloLookup.status === "loading" && (
                       <div style={{ marginBottom: 12, color: "#9A3412", fontSize: 13 }}>
@@ -2935,12 +4042,48 @@ export default function App() {
                             ))}
                           </tbody>
                         </table>
+                        {!!brunelloPairCandidates.length && (
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Nearby pair designs from the top 3 Brunello guides</div>
+                            <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                              These pairs are remapped onto your uploaded GenBank, then spacing and centered validation primers are calculated automatically.
+                            </div>
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                              </thead>
+                              <tbody>
+                                {brunelloPairCandidates.map((candidate) => (
+                                  <tr key={candidate.id}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
+                                      <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
+                                      <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp` : "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
+                                      <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
+                                      <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                        Use pair
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
                       </div>
                     )}
                     <div style={{ marginBottom: 16, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
                       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Cas-Database Reference Guides</div>
                       <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
-                        Optional external SpCas9 knockout guide lookup from Cas-Database. Use these as reference guides; the local ASSURED KO design above remains the primary design.
+                        Top 3 Cas-Database knockout reference guides using the default recommended filters. These load automatically for the selected KO design and can be applied into the local design above.
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end", marginBottom: 10 }}>
                         <label>
@@ -2949,12 +4092,14 @@ export default function App() {
                             {CAS_DATABASE_ORGANISM_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
                           </select>
                         </label>
-                        <button type="button" onClick={fetchCasDatabaseReferences} disabled={casDbLookup.status === "loading"} style={{ ...FIELD_STYLE, width: "auto", cursor: casDbLookup.status === "loading" ? "wait" : "pointer", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
-                          {casDbLookup.status === "loading" ? "Loading..." : "Fetch reference guides"}
-                        </button>
                         <Badge>{selectedEntry.result.gene}</Badge>
                         {casDbLookup.status === "success" && casDbLookup.data?.tierLabel && <Badge color={COLORS.success}>{casDbLookup.data.tierLabel}</Badge>}
                       </div>
+                      {casDbLookup.status === "loading" && (
+                        <div style={{ marginBottom: 10, color: "#667085", fontSize: 13 }}>
+                          Loading Cas-Database reference guides...
+                        </div>
+                      )}
                       {casDbLookup.status === "error" && (
                         <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#FEF3F2", border: "1px solid #FECDCA", color: "#B42318", fontSize: 13 }}>
                           {casDbLookup.error}
@@ -2970,35 +4115,73 @@ export default function App() {
                             <div style={{ color: "#667085", fontSize: 13 }}>No reference guides were returned for the selected filter tiers.</div>
                           )}
                           {!!casDbLookup.data.targets?.length && (
-                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                              <thead>
-                                <tr>{["Spacer", "PAM", "Location", "Strand", "Off-targets (0/1/2)", "OOF", "Coverage", "Best CDS %", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
-                              </thead>
-                              <tbody>
-                                {casDbLookup.data.targets.map((target) => (
-                                  <tr key={target.id}>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.spacer}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.pam || "n/a"}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.location || "n/a"}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.strand || "n/a"}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.offTargetCounts.join("/")}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.oofScore.toFixed(2)}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.coverage}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.bestCdsPercentage === null ? "n/a" : `${target.bestCdsPercentage.toFixed(2)}%`}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
-                                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                        <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(0, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                                          Use as gRNA1
-                                        </button>
-                                        <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(1, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
-                                          Use as gRNA2
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            <>
+                              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                <thead>
+                                  <tr>{["Spacer", "PAM", "Location", "Strand", "Off-targets (0/1/2)", "OOF", "Coverage", "Best CDS %", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                </thead>
+                                <tbody>
+                                  {casDbLookup.data.targets.map((target) => (
+                                    <tr key={target.id}>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.spacer}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.pam || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.location || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.strand || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.offTargetCounts.join("/")}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.oofScore.toFixed(2)}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.coverage}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.bestCdsPercentage === null ? "n/a" : `${target.bestCdsPercentage.toFixed(2)}%`}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                          <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(0, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                            Use as gRNA1
+                                          </button>
+                                          <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(1, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                            Use as gRNA2
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {!!casDatabasePairCandidates.length && (
+                                <div style={{ marginTop: 14 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Nearby pair designs from the top 3 Cas-Database guides</div>
+                                  <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                    These nearby pairs are remapped onto your uploaded GenBank and the validation primers are centered automatically on the chosen deletion window.
+                                  </div>
+                                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                    <thead>
+                                      <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                    </thead>
+                                    <tbody>
+                                      {casDatabasePairCandidates.map((candidate) => (
+                                        <tr key={candidate.id}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
+                                            <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
+                                            <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
+                                          </td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp` : "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
+                                            <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
+                                            <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
+                                          </td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                              Use pair
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </>
                           )}
                         </>
                       )}
@@ -3007,13 +4190,17 @@ export default function App() {
                 )}
                 {selectedEntry.result.type === "it" && (
                   <>
+                    <KnockinQcSummaryCard result={selectedEntry.result} />
                     <InternalProteinPreviewCard result={selectedEntry.result} />
+                    <InsertValidationCard validation={selectedEntry.result.insertValidation} />
                     {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} />)}
                   </>
                 )}
                 {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (
                   <>
+                    <KnockinQcSummaryCard result={selectedEntry.result} />
                     <KnockinProteinPreviewCard preview={selectedEntry.result.proteinPreview} />
+                    <InsertValidationCard validation={selectedEntry.result.insertValidation} />
                     <AnnotatedDonor sequence={selectedEntry.result.donor} annotations={selectedEntry.result.donorAnnotations} />
                   </>
                 )}

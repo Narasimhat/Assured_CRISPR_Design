@@ -48,7 +48,7 @@ function loadBrunelloGuides() {
       gene,
       guides
         .sort((left, right) => (right.ruleSet2 - left.ruleSet2) || String(left.exon).localeCompare(String(right.exon)) || left.spacer.localeCompare(right.spacer))
-        .slice(0, 4),
+        .slice(0, 3),
     ]),
   );
   return cachedGuidesByGene;

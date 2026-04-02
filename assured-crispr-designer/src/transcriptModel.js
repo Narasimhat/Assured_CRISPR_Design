@@ -346,11 +346,14 @@ export function findKoDesignTargetFromModel(model, reverseComplement, selectKoGu
   const seq = getGenomicSequence(model);
   const segs = getCdsSegments(model);
   const exons = getExonsFromModel(model);
-  const targetSegments = segs.slice(1, 4);
-  if (!targetSegments.length) return null;
+  const indexedSegments = segs.map(([start, end], index) => ({ start, end, index }));
+  const nonTerminalSegments = indexedSegments.filter((entry) => entry.index < segs.length - 1);
+  if (!nonTerminalSegments.length) return null;
+  const preferredSegments = nonTerminalSegments.filter((entry) => entry.index >= 1 && entry.index <= 3);
+  const targetSegments = preferredSegments.length ? preferredSegments : nonTerminalSegments;
   const boundaryWindow = 25;
 
-  const candidates = targetSegments.map(([start, end], offset) => {
+  const candidates = targetSegments.map(({ start, end, index }) => {
     const exonLength = end - start;
     const exon = findExonForSegment(exons, start, end);
     const guides = findSpCas9Guides(model, reverseComplement, Math.floor((start + end) / 2), Math.floor(exonLength / 2) + 10)
@@ -358,8 +361,8 @@ export function findKoDesignTargetFromModel(model, reverseComplement, selectKoGu
       .sort((left, right) => right.gc - left.gc);
     const pair = selectKoGuidePair(guides);
     return {
-      segmentIndex: offset + 2,
-      exonNumber: exon?.exonNumber || offset + 2,
+      segmentIndex: index + 1,
+      exonNumber: exon?.exonNumber || index + 1,
       start,
       end,
       exonLength,
