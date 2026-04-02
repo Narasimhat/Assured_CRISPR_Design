@@ -24,6 +24,14 @@ const PROJECT_TYPES = [
   { id: "nt", label: "N-terminal tag / reporter", short: "HDR insert at ATG" },
 ];
 
+const CAS_DATABASE_ORGANISM_OPTIONS = [
+  { id: "1", label: "Human (GRCh38/hg38)" },
+  { id: "6", label: "Mouse (GRCm38/mm10)" },
+  { id: "5", label: "Rat (Rnor 6.0)" },
+  { id: "8", label: "Zebrafish (GRCz10)" },
+  { id: "12", label: "Pig (Ensembl v10.2)" },
+];
+
 const FIELD_STYLE = {
   width: "100%",
   padding: "10px 12px",
@@ -154,7 +162,9 @@ function buildDesignSummary(result) {
   if (result.type === "pm") lines.push(`Codon: ${result.wC} -> ${result.mC}`);
   if (result.type === "ko") {
     lines.push(`Target exon: ${result.exon}`);
-    if (result.gs?.length >= 2) lines.push(`Pair spacing: ${Math.abs((result.gs[1]?.d ?? 0) - (result.gs[0]?.d ?? 0))} bp`);
+    if (result.gs?.length >= 2 && Number.isFinite(result.gs[0]?.d) && Number.isFinite(result.gs[1]?.d)) {
+      lines.push(`Pair spacing: ${Math.abs(result.gs[1].d - result.gs[0].d)} bp`);
+    }
     if (result.strat) lines.push(`Strategy: ${result.strat}`);
     return lines.join("\n");
   }
@@ -190,6 +200,39 @@ function buildGeneInfoRows(meta, result, fileName) {
 
 function buildGuideRows(result) {
   return (result?.gs || []).map((guide) => [guide.n, `${guide.sp} ${guide.pm}`, `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
+}
+
+function calculateGcPercent(sequence) {
+  const clean = String(sequence || "").toUpperCase();
+  if (!clean) return 0;
+  const gcCount = [...clean].filter((base) => base === "G" || base === "C").length;
+  return Math.round((gcCount / clean.length) * 100);
+}
+
+function buildBrunelloGuideOverride(guide, slotIndex, previousGuide) {
+  return {
+    ...previousGuide,
+    n: previousGuide?.n || `gRNA${slotIndex + 1}`,
+    sp: guide.spacer,
+    pm: guide.pam || previousGuide?.pm || "",
+    str: guide.strand || previousGuide?.str || "n/a",
+    gc: calculateGcPercent(guide.spacer),
+    d: Number.isFinite(previousGuide?.d) ? previousGuide.d : null,
+    note: `Brunello reference guide | Rule Set 2 ${guide.ruleSet2}${guide.exon ? ` | Exon ${guide.exon}` : ""}${guide.transcript ? ` | ${guide.transcript}` : ""}`,
+  };
+}
+
+function buildCasDatabaseGuideOverride(target, slotIndex, previousGuide) {
+  return {
+    ...previousGuide,
+    n: previousGuide?.n || `gRNA${slotIndex + 1}`,
+    sp: target.spacer,
+    pm: target.pam || previousGuide?.pm || "",
+    str: target.strand || previousGuide?.str || "n/a",
+    gc: calculateGcPercent(target.spacer),
+    d: Number.isFinite(previousGuide?.d) ? previousGuide.d : null,
+    note: `Cas-Database reference guide | OOF ${Number(target.oofScore || 0).toFixed(2)} | off-targets ${Array.isArray(target.offTargetCounts) ? target.offTargetCounts.join("/") : "n/a"}${target.location ? ` | ${target.location}` : ""}`,
+  };
 }
 
 function renderGuideSequence(spacer, pam, html = false) {
@@ -719,6 +762,26 @@ function normalizeGeneToken(value) {
   const withoutIds = upper.replace(/[-_\s]*(ENSG|NM_|NCBI)\S*/g, " ");
   const compact = withoutIds.replace(/[^A-Z0-9]+/g, " ").trim();
   return compact.split(/\s+/)[0] || "";
+}
+
+function inferCasDatabaseOrganismId(result) {
+  const assembly = String(result?.gb?.assembly || "").toLowerCase();
+  if (assembly.includes("grcm") || assembly.includes("mm10") || assembly.includes("mouse")) return "6";
+  if (assembly.includes("rnor") || assembly.includes("rat")) return "5";
+  if (assembly.includes("grcz") || assembly.includes("zebrafish")) return "8";
+  if (assembly.includes("sus") || assembly.includes("pig")) return "12";
+  return "1";
+}
+
+function getBrunelloReferenceGuideSet(result, brunelloLookup) {
+  if (!brunelloLookup?.guides?.length) return null;
+  return {
+    requestedGene: brunelloLookup.requestedGene || normalizeGeneToken(result?.gene),
+    libraryGene: brunelloLookup.libraryGene || normalizeGeneToken(result?.gene),
+    source: brunelloLookup.source || "Broad GPP Brunello human CRISPRko library",
+    summary: brunelloLookup.summary || "Reference sgRNAs ranked by Rule Set 2 on-target score from the Addgene Brunello library contents table.",
+    guides: brunelloLookup.guides,
+  };
 }
 
 const CELL_LINE_ALIAS_GROUPS = [
@@ -1398,7 +1461,7 @@ function buildHistoricalRowsHtml(matches) {
   return `<table>${tableHtml([["Gene", "Parental line", "Established line", "Used gRNAs", "Used donor", "Guide overlap"]], true)}${tableHtml(rows)}</table>`;
 }
 
-function buildReportHtml(meta, result, fileName, historicalContext, reviewItems) {
+function buildReportHtml(meta, result, fileName, historicalContext, reviewItems, brunelloLibrary = null) {
   if (!result) return "";
   const headerRows = [
     ["Group", meta.clientName || "n/a"],
@@ -1409,6 +1472,10 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems)
   const primerRows = buildPrimerRows(result);
   const ssOdnNotes = buildSsOdnNotes(result);
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
+  const hasHistoricalMatches = Boolean(historicalContext?.topMatches?.length);
+  const brunelloReferenceGuideSet = getBrunelloReferenceGuideSet(result, brunelloLibrary);
+  const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
+  const additionalInfoSectionNumber = reviewSectionNumber + 1;
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
@@ -1449,11 +1516,12 @@ p{font-size:13px;line-height:1.45}
   <h2>4. ${resolvedSectionTitle}</h2>
   <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
+  ${result.type === "ko" && brunelloReferenceGuideSet ? `<h3>Brunello CRISPRko Reference Guides</h3><p>${brunelloReferenceGuideSet.source}. ${brunelloReferenceGuideSet.summary}${brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}</p><table>${tableHtml([["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand"]], true)}${tableHtml(brunelloReferenceGuideSet.guides.map((guide) => [guide.spacer, guide.pam, `Exon ${guide.exon}`, String(guide.ruleSet2), guide.transcript, guide.strand]))}</table>` : ""}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
-  ${historicalContext?.topMatches?.length ? `<h2>5. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
-  <h2>${historicalContext?.topMatches?.length ? "6" : "5"}. Review Checkpoints</h2>
+  ${hasHistoricalMatches ? `<h2>5. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
+  <h2>${reviewSectionNumber}. Review Checkpoints</h2>
   ${buildReviewListHtml(reviewItems)}
-  <h2>${historicalContext?.topMatches?.length ? "7" : "6"}. Additional Info</h2>
+  <h2>${additionalInfoSectionNumber}. Additional Info</h2>
   <p>${buildDesignSummary(result).replace(/\n/g, "<br/>")}</p>
 </body>
 </html>`;
@@ -1765,6 +1833,9 @@ export default function App() {
     hdrScale: "",
     hdrModification: "",
   });
+  const [casDbOrganismId, setCasDbOrganismId] = useState("1");
+  const [casDbLookup, setCasDbLookup] = useState({ status: "idle", gene: "", data: null, error: "" });
+  const [brunelloLookup, setBrunelloLookup] = useState({ status: "idle", gene: "", data: null, error: "" });
 
   const ctCassetteOptions = useMemo(() => Object.keys(CASSETTES).filter((key) => !key.startsWith("N:")), []);
   const ntCassetteOptions = useMemo(() => Object.keys(CASSETTES), []);
@@ -1781,13 +1852,20 @@ export default function App() {
     () => buildHistoricalContext(selectedRowMeta, selectedEntry?.result, selectedEntry?.row?.projectType),
     [selectedRowMeta, selectedEntry],
   );
+  const hasHistoricalMatches = historicalContext.topMatches.length > 0;
+  const brunelloReferenceGuideSet = useMemo(
+    () => getBrunelloReferenceGuideSet(selectedEntry?.result, brunelloLookup.data),
+    [selectedEntry, brunelloLookup.data],
+  );
+  const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
+  const additionalInfoSectionNumber = reviewSectionNumber + 1;
   const reviewItems = useMemo(
     () => buildReviewItems(selectedRowMeta, selectedEntry?.result, selectedEntry?.row?.fileName),
     [selectedRowMeta, selectedEntry],
   );
   const reportHtml = useMemo(
-    () => buildReportHtml(selectedRowMeta, selectedEntry?.result, selectedEntry?.row?.fileName, historicalContext, reviewItems),
-    [selectedRowMeta, selectedEntry, historicalContext, reviewItems],
+    () => buildReportHtml(selectedRowMeta, selectedEntry?.result, selectedEntry?.row?.fileName, historicalContext, reviewItems, brunelloLookup.data),
+    [selectedRowMeta, selectedEntry, historicalContext, reviewItems, brunelloLookup.data],
   );
   const singleOrderRows = useMemo(() => {
     if (!selectedEntry?.result) return [];
@@ -1805,6 +1883,81 @@ export default function App() {
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
   const currentHost = typeof window !== "undefined" ? window.location.host : "local";
 
+  const fetchCasDatabaseReferences = useCallback(async () => {
+    if (!selectedEntry?.result?.gene || selectedEntry.result.type !== "ko") return;
+    setCasDbLookup({ status: "loading", gene: selectedEntry.result.gene, data: null, error: "" });
+    try {
+      const response = await fetch(`/api/cas-database?gene=${encodeURIComponent(selectedEntry.result.gene)}&organism=${encodeURIComponent(casDbOrganismId)}`);
+      const contentType = response.headers.get("content-type") || "";
+      if (!contentType.toLowerCase().includes("application/json")) {
+        throw new Error("Cas-Database endpoint returned HTML instead of JSON. Restart the dev server so the local API route is active.");
+      }
+      const payload = await response.json();
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Cas-Database lookup failed.");
+      setCasDbLookup({ status: "success", gene: selectedEntry.result.gene, data: payload, error: "" });
+    } catch (error) {
+      setCasDbLookup({
+        status: "error",
+        gene: selectedEntry?.result?.gene || "",
+        data: null,
+        error: error?.message || "Cas-Database lookup failed unexpectedly.",
+      });
+    }
+  }, [casDbOrganismId, selectedEntry]);
+
+  const replaceSelectedKoGuide = useCallback((slotIndex, replacementGuide) => {
+    if (!selectedEntry?.result || selectedEntry.result.type !== "ko") return;
+    setBatchResults((current) => current.map((entry) => {
+      if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
+      const nextGuides = [...(entry.result.gs || [])];
+      if (!nextGuides[slotIndex]) return entry;
+      nextGuides[slotIndex] = replacementGuide(nextGuides[slotIndex], slotIndex);
+      return {
+        ...entry,
+        result: {
+          ...entry.result,
+          gs: nextGuides,
+        },
+      };
+    }));
+    setCopyState(`Updated ${slotIndex === 0 ? "gRNA1" : "gRNA2"} from the reference guide panel.`);
+  }, [selectedEntry]);
+
+  const applyBrunelloGuideToSelectedKo = useCallback((slotIndex, guide) => {
+    replaceSelectedKoGuide(slotIndex, (previousGuide) => buildBrunelloGuideOverride(guide, slotIndex, previousGuide));
+  }, [replaceSelectedKoGuide]);
+
+  const applyCasDatabaseGuideToSelectedKo = useCallback((slotIndex, target) => {
+    replaceSelectedKoGuide(slotIndex, (previousGuide) => buildCasDatabaseGuideOverride(target, slotIndex, previousGuide));
+  }, [replaceSelectedKoGuide]);
+
+  useEffect(() => {
+    if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
+      setBrunelloLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
+      return;
+    }
+    let cancelled = false;
+    setBrunelloLookup({ status: "loading", gene: selectedEntry.result.gene, data: null, error: "" });
+    fetch(`/api/brunello?gene=${encodeURIComponent(selectedEntry.result.gene)}`)
+      .then((response) => {
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.toLowerCase().includes("application/json")) {
+          throw new Error("Brunello endpoint returned HTML instead of JSON. Restart the dev server so the local API route is active.");
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (!data?.ok) throw new Error(data?.error || data?.note || "Brunello lookup failed.");
+        if (!cancelled) setBrunelloLookup({ status: "success", gene: selectedEntry.result.gene, data, error: "" });
+      })
+      .catch((error) => {
+        if (!cancelled) setBrunelloLookup({ status: "error", gene: selectedEntry.result.gene, data: null, error: error?.message || "Brunello lookup failed." });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEntry?.rowId, selectedEntry?.result]);
+
   useEffect(() => {
     const draft = loadDraftState();
     if (draft) {
@@ -1820,6 +1973,11 @@ export default function App() {
     }
     setDraftHydrated(true);
   }, []);
+
+  useEffect(() => {
+    setCasDbOrganismId(inferCasDatabaseOrganismId(selectedEntry?.result));
+    setCasDbLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
+  }, [selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
     if (!draftHydrated) return;
@@ -1998,7 +2156,7 @@ export default function App() {
     const entryMeta = buildRowMeta(entry.row, entry.result);
     const entryHistorical = buildHistoricalContext(entryMeta, entry.result, entry.row?.projectType);
     const entryReview = buildReviewItems(entryMeta, entry.result, entry.row?.fileName);
-    const entryHtml = buildReportHtml(entryMeta, entry.result, entry.row?.fileName, entryHistorical, entryReview);
+    const entryHtml = buildReportHtml(entryMeta, entry.result, entry.row?.fileName, entryHistorical, entryReview, brunelloLookup.data);
     const entrySummary = buildDesignSummary(entry.result);
     const entryOrderRows = buildBatchOrderRows([{ slot: entry.slot, row: entry.row, status: "success", result: entry.result }]);
     const entryTemplateRows = buildIdtTemplateRows(entryOrderRows, idtDefaults);
@@ -2015,7 +2173,7 @@ export default function App() {
       if (workbookFile) await writeBlobToDirectory(summaryHandle, workbookFile.fileName, workbookFile.blob);
     }
     return folderNameForEntry;
-  }, [idtDefaults, workspaceHandle]);
+  }, [brunelloLookup.data, idtDefaults, workspaceHandle]);
 
   const saveSelectedToWorkspace = useCallback(async () => {
     try {
@@ -2207,7 +2365,7 @@ export default function App() {
       const entryMeta = buildRowMeta(entry.row, entry.result);
       const entryHistorical = buildHistoricalContext(entryMeta, entry.result, entry.row?.projectType);
       const entryReview = buildReviewItems(entryMeta, entry.result, entry.row?.fileName);
-      const entryHtml = buildReportHtml(entryMeta, entry.result, entry.row?.fileName, entryHistorical, entryReview);
+      const entryHtml = buildReportHtml(entryMeta, entry.result, entry.row?.fileName, entryHistorical, entryReview, brunelloLookup.data);
       const blob = new Blob([entryHtml], { type: "text/html" });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -2729,9 +2887,123 @@ export default function App() {
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
                 {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} />)}
                 {selectedEntry.result.type === "ko" && (
-                  <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5 }}>
-                    No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption.
-                  </div>
+                  <>
+                    <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+                      No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption.
+                    </div>
+                    {brunelloLookup.status === "loading" && (
+                      <div style={{ marginBottom: 12, color: "#9A3412", fontSize: 13 }}>
+                        Loading Brunello CRISPRko reference guides...
+                      </div>
+                    )}
+                    {brunelloLookup.status === "error" && (
+                      <div style={{ marginBottom: 12, padding: 10, borderRadius: 10, background: "#FEF3F2", border: "1px solid #FECDCA", color: "#B42318", fontSize: 13 }}>
+                        {brunelloLookup.error}
+                      </div>
+                    )}
+                    {brunelloReferenceGuideSet && (
+                      <div style={{ marginBottom: 16, padding: 12, borderRadius: 12, background: "#FFF7ED", border: "1px solid #FED7AA" }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Brunello CRISPRko Reference Guides</div>
+                        <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
+                          {brunelloReferenceGuideSet.source}. {brunelloReferenceGuideSet.summary}
+                          {brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}
+                        </div>
+                        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                          <thead>
+                            <tr>{["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                          </thead>
+                          <tbody>
+                            {brunelloReferenceGuideSet.guides.map((guide) => (
+                              <tr key={guide.spacer}>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{guide.spacer}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{guide.pam}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>Exon {guide.exon}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{guide.ruleSet2}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{guide.transcript}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{guide.strand}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                    <button type="button" onClick={() => applyBrunelloGuideToSelectedKo(0, guide)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                      Use as gRNA1
+                                    </button>
+                                    <button type="button" onClick={() => applyBrunelloGuideToSelectedKo(1, guide)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                      Use as gRNA2
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    <div style={{ marginBottom: 16, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Cas-Database Reference Guides</div>
+                      <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
+                        Optional external SpCas9 knockout guide lookup from Cas-Database. Use these as reference guides; the local ASSURED KO design above remains the primary design.
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end", marginBottom: 10 }}>
+                        <label>
+                          <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Cas-Database organism</div>
+                          <select value={casDbOrganismId} onChange={(event) => setCasDbOrganismId(event.target.value)} style={{ ...FIELD_STYLE, width: 240, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                            {CAS_DATABASE_ORGANISM_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+                          </select>
+                        </label>
+                        <button type="button" onClick={fetchCasDatabaseReferences} disabled={casDbLookup.status === "loading"} style={{ ...FIELD_STYLE, width: "auto", cursor: casDbLookup.status === "loading" ? "wait" : "pointer", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                          {casDbLookup.status === "loading" ? "Loading..." : "Fetch reference guides"}
+                        </button>
+                        <Badge>{selectedEntry.result.gene}</Badge>
+                        {casDbLookup.status === "success" && casDbLookup.data?.tierLabel && <Badge color={COLORS.success}>{casDbLookup.data.tierLabel}</Badge>}
+                      </div>
+                      {casDbLookup.status === "error" && (
+                        <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#FEF3F2", border: "1px solid #FECDCA", color: "#B42318", fontSize: 13 }}>
+                          {casDbLookup.error}
+                        </div>
+                      )}
+                      {casDbLookup.status === "success" && (
+                        <>
+                          <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
+                            {casDbLookup.data.note}
+                            {casDbLookup.data.matchedGene?.ensembl_id ? ` Gene match: ${casDbLookup.data.matchedGene.symbol} (${casDbLookup.data.matchedGene.ensembl_id}).` : ""}
+                          </div>
+                          {!casDbLookup.data.targets?.length && (
+                            <div style={{ color: "#667085", fontSize: 13 }}>No reference guides were returned for the selected filter tiers.</div>
+                          )}
+                          {!!casDbLookup.data.targets?.length && (
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr>{["Spacer", "PAM", "Location", "Strand", "Off-targets (0/1/2)", "OOF", "Coverage", "Best CDS %", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                              </thead>
+                              <tbody>
+                                {casDbLookup.data.targets.map((target) => (
+                                  <tr key={target.id}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.spacer}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.pam || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.location || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.strand || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.offTargetCounts.join("/")}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.oofScore.toFixed(2)}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.coverage}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.bestCdsPercentage === null ? "n/a" : `${target.bestCdsPercentage.toFixed(2)}%`}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                        <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(0, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                          Use as gRNA1
+                                        </button>
+                                        <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(1, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                          Use as gRNA2
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </>
                 )}
                 {selectedEntry.result.type === "it" && (
                   <>
@@ -2747,7 +3019,7 @@ export default function App() {
                 )}
                 {buildSsOdnNotes(selectedEntry.result).map((line) => <div key={line} style={{ color: "#CC0000", fontWeight: 700, marginTop: 6 }}>{line}</div>)}
 
-                {historicalContext.topMatches.length > 0 && (
+                {hasHistoricalMatches && (
                   <>
                     <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>5. Matched Historical Records</div>
                     <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
@@ -2774,7 +3046,7 @@ export default function App() {
                   </>
                 )}
 
-                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>{historicalContext.topMatches.length > 0 ? "6. Review Checkpoints" : "5. Review Checkpoints"}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>{reviewSectionNumber}. Review Checkpoints</div>
                 {!reviewItems.length && <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>No automated warnings were triggered. Manual review is still required before synthesis or ordering.</div>}
                 {reviewItems.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
@@ -2786,7 +3058,7 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>{historicalContext.topMatches.length > 0 ? "7. Additional Info" : "6. Additional Info"}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>{additionalInfoSectionNumber}. Additional Info</div>
                 <div style={{ fontSize: 13, color: "#333", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{buildDesignSummary(selectedEntry.result)}</div>
               </>
             )}
