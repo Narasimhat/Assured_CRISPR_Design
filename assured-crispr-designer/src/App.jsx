@@ -4307,32 +4307,6 @@ export default function App() {
                 </div>
               </div>
 
-              {batchDonorRows.length > 0 && (
-                <>
-                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Batch Donor Sequences</div>
-                  <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                    This section lists the donor sequences explicitly before export. For SNP designs, the sequence shown here is the recommended order strand.
-                  </div>
-                  <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16, minWidth: 980 }}>
-                    <thead>
-                      <tr>{["Slot", "Design", "Donor Name", "Sequence", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {batchDonorRows.map((row, rowIndex) => (
-                        <tr key={`${row.slot}-${row.name}-${rowIndex}`}>
-                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.slot}</td>
-                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.designLabel}</td>
-                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.name}</td>
-                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace", wordBreak: "break-all" }}>{row.sequence}</td>
-                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.linkedGuide || "n/a"}</td>
-                          <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.notes || ""}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </>
-              )}
-
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Combined Order Preview</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
                 This is a review table only. The actual upload files are the separate IDT template downloads above. For gRNAs, the sequence exported to IDT is the spacer without PAM. For SNP donors, the exported donor is the recommended order strand.
