@@ -4523,7 +4523,7 @@ export default function App() {
             <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: "#ECFDF3", border: "1px solid #A7F3D0" }}>
               <div style={{ color: "#047857", fontSize: 12, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 6 }}>Recommended Save Path</div>
               <div style={{ color: "#111827", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-                Save the selected report and IDT order files into the linked project folder. The HTML report is the editable version; open it in Word if you want to revise it, then export PDF from Word only for a final fixed copy.
+                Save the selected report and order files into the linked project folder. The HTML report is the editable version; open it in Word if you want to revise it, then export PDF from Word only for a final fixed copy.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 <button type="button" onClick={saveSelectedToWorkspace} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "#D1FAE5", border: "1px solid #86EFAC", color: "#065F46" }}>
@@ -4554,7 +4554,7 @@ export default function App() {
             <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}` }}>
               <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Selected Design Order Export</div>
               <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-                Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. The generated files remain compatible with your current IDT-style upload workflow.
+                Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. The generated files remain compatible with your current upload workflow.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 <button type="button" disabled={!singleIdtTemplateRows.crispr.length} onClick={() => downloadSingleIdtTemplate("crispr")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.crispr.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
