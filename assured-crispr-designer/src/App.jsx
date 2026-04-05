@@ -3982,13 +3982,13 @@ export default function App() {
                 </div>
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.15, maxWidth: 760, marginBottom: 10 }}>
-                Design CRISPR edits, review donor architecture, and export ordering-ready reports from one browser workflow.
+                Design CRISPR edits, review donor architecture, and export order-ready reports from one browser workflow.
               </div>
               <div style={{ color: COLORS.muted, fontSize: 14, lineHeight: 1.65, maxWidth: 760, marginBottom: 16 }}>
-                Built for SNP knock-ins, knockouts, internal in-frame tags, N-terminal tags, and C-terminal tags. The app turns a request plus GenBank reference into a scientist-readable report and separated IDT ordering sheets.
+                Built for SNP knock-ins, knockouts, internal in-frame tags, N-terminal tags, and C-terminal tags. The app turns a request plus GenBank reference into a scientist-readable report and vendor-neutral ordering exports.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                {["Batch design in one run", "Annotated donor and protein views", "Separate IDT export sheets", "Scientist-friendly review report"].map((item) => (
+                {["Batch design in one run", "Annotated donor and protein views", "Spreadsheet-ready exports", "Scientist-friendly review report"].map((item) => (
                   <div key={item} style={{ padding: "8px 12px", borderRadius: 999, border: `1px solid ${COLORS.border}`, background: "rgba(15,28,46,0.75)", color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
                     {item}
                   </div>
@@ -4010,14 +4010,14 @@ export default function App() {
             <div style={{ flex: "0 1 320px", minWidth: 260, ...CARD_STYLE, padding: 16, background: "rgba(15,28,46,0.72)" }}>
               <div style={{ color: COLORS.accent, fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Why it matters</div>
               <div style={{ color: COLORS.text, fontSize: 16, fontWeight: 700, lineHeight: 1.4, marginBottom: 10 }}>
-                Faster path from edit request to order-ready design package.
+                Faster path from edit request to an order-ready design package.
               </div>
               <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.6 }}>
-                Instead of stitching together guide design, donor review, protein interpretation, and order sheets manually, the app packages them into one consistent output.
+                Instead of stitching together guide design, donor review, protein interpretation, and vendor upload sheets manually, the app packages them into one consistent output.
               </div>
               <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
                 <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700 }}>Hosted workflow highlights</div>
-                {["Browser-based workflow", "Batch designs in one run", "Export-ready reports and IDT sheets"].map((item) => (
+                {["Browser-based workflow", "Batch designs in one run", "Export-ready reports and spreadsheet templates"].map((item) => (
                   <div key={item} style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
                     - {item}
                   </div>
@@ -4064,7 +4064,7 @@ export default function App() {
               ["1. Upload", "Upload a GenBank folder once, or attach a GenBank file directly to a design row."],
               ["2. Describe", "Paste natural-language edit requests instead of filling every field manually."],
               ["3. Generate", "Review only flagged rows, then generate designs in one run."],
-              ["4. Export", "Download HTML reports plus separate CRISPR, donor, and primer IDT sheets."],
+              ["4. Export", "Download HTML reports plus separate CRISPR, donor, and primer spreadsheet templates."],
             ].map(([title, text]) => (
               <div key={title} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 12, background: COLORS.panelAlt }}>
                 <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.5, color: COLORS.accent, textTransform: "uppercase", marginBottom: 6 }}>{title}</div>
@@ -4552,19 +4552,19 @@ export default function App() {
 
           {selectedEntry?.result && (
             <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}` }}>
-              <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Selected Design IDT Export</div>
+              <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Selected Design Order Export</div>
               <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-                Export the currently selected project directly into the same IDT upload template format used in the multi-project order sheet.
+                Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. The generated files remain compatible with your current IDT-style upload workflow.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 <button type="button" disabled={!singleIdtTemplateRows.crispr.length} onClick={() => downloadSingleIdtTemplate("crispr")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.crispr.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-                  Download single IDT CRISPR template
+                  Download single CRISPR template
                 </button>
                 <button type="button" disabled={!singleIdtTemplateRows.oligo.length} onClick={() => downloadSingleIdtTemplate("oligo")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.oligo.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-                  Download single IDT primer template
+                  Download single primer template
                 </button>
                 <button type="button" disabled={!singleIdtTemplateRows.hdr.length} onClick={() => downloadSingleIdtTemplate("hdr")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.hdr.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
-                  Download single IDT HDR template
+                  Download single HDR template
                 </button>
               </div>
             </div>
@@ -5132,7 +5132,7 @@ export default function App() {
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>3. Order Exports</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Successful designs are flattened into IDT-ready order files for gRNAs, primers, and donors. The same export area works whether you designed one project or many.
+            Successful designs are flattened into order-ready spreadsheet files for gRNAs, primers, and donors. The same export area works whether you designed one project or many.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
             <Badge color={COLORS.success}>{batchSuccessfulResults.length} successful designs</Badge>
@@ -5143,9 +5143,9 @@ export default function App() {
 
           {batchSuccessfulResults.length > 0 && (
             <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", overflowX: "auto" }}>
-              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>IDT Template Export</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Spreadsheet Template Export</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                These downloads match the headers in your IDT upload templates:
+                These downloads match the headers in your current upload templates:
                 `template-paste-entry-crispr.xlsx`, `template-paste-entry.xlsx`, and `template-paste-entry-hdr.xlsx`.
               </div>
               <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
@@ -5173,20 +5173,20 @@ export default function App() {
                 </Grid>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                   <button type="button" disabled={!idtTemplateRows.crispr.length} onClick={() => downloadIdtTemplate("crispr")} style={{ ...FIELD_STYLE, width: "auto", cursor: idtTemplateRows.crispr.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
-                    Download IDT CRISPR template
+                    Download CRISPR template
                   </button>
                   <button type="button" disabled={!idtTemplateRows.oligo.length} onClick={() => downloadIdtTemplate("oligo")} style={{ ...FIELD_STYLE, width: "auto", cursor: idtTemplateRows.oligo.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
-                    Download IDT primer template
+                    Download primer template
                   </button>
                   <button type="button" disabled={!idtTemplateRows.hdr.length} onClick={() => downloadIdtTemplate("hdr")} style={{ ...FIELD_STYLE, width: "auto", cursor: idtTemplateRows.hdr.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
-                    Download IDT HDR template
+                    Download HDR template
                   </button>
                 </div>
               </div>
 
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Combined Order Preview</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                This is a review table only. The actual upload files are the separate IDT template downloads above. For gRNAs, the sequence exported to IDT is the spacer without PAM. For SNP donors, the exported donor is the recommended order strand.
+                This is a review table only. The actual upload files are the separate spreadsheet template downloads above. For gRNAs, the exported sequence is the spacer without PAM. For SNP donors, the exported donor is the recommended order strand.
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
                 <thead>
