@@ -1,5 +1,6 @@
 import {
   codingPosToGenomic,
+  describeGuidePlacementFromModel,
   describeKoGenomicContextFromModel,
   extractCodingDonorWindowFromModel,
   findKoDesignTargetFromModel,
@@ -9,6 +10,7 @@ import {
   getCodonAtAa,
   getGenomicSequence,
   normalizeGenBankToTranscriptModel,
+  normalizeRawSequenceToTranscriptModel,
   selectNearbyGuidesForModel,
 } from "./transcriptModel";
 
@@ -583,21 +585,99 @@ function pickPrimerOutsideRight(seq, boundary, primerLength = 24) {
   return reverseComplement(seq.slice(start, end));
 }
 
-function pickCenteredPrimerPair(seq, center, targetAmpliconLength = 480, primerLength = 24) {
-  const desiredAmplicon = Math.max(primerLength * 2, targetAmpliconLength);
-  const maxStart = Math.max(0, seq.length - desiredAmplicon);
-  let ampliconStart = Math.round(center - desiredAmplicon / 2);
-  ampliconStart = Math.max(0, Math.min(maxStart, ampliconStart));
-  let ampliconEnd = Math.min(seq.length, ampliconStart + desiredAmplicon);
-  if (ampliconEnd - ampliconStart < desiredAmplicon) {
-    ampliconStart = Math.max(0, ampliconEnd - desiredAmplicon);
+function scorePrimerSequence(primer) {
+  const seq = String(primer || "").toUpperCase();
+  if (!seq) return Number.MAX_SAFE_INTEGER;
+  const gcCount = [...seq].filter((base) => base === "G" || base === "C").length;
+  const gcPercent = (gcCount / seq.length) * 100;
+  let score = Math.abs(gcPercent - 50);
+  if (/(A{5,}|T{5,}|G{5,}|C{5,})/.test(seq)) score += 20;
+  if (/AAAA|TTTT/.test(seq)) score += 6;
+  const lastBase = seq[seq.length - 1];
+  if (lastBase !== "G" && lastBase !== "C") score += 4;
+  return score;
+}
+
+function pickCenteredPrimerPair(seq, center, minAmpliconLength = 450, maxAmpliconLength = 500, primerLength = 24) {
+  const minLength = Math.max(primerLength * 2, minAmpliconLength);
+  const maxLength = Math.max(minLength, maxAmpliconLength);
+  let best = null;
+
+  for (let ampliconLength = minLength; ampliconLength <= maxLength; ampliconLength += 1) {
+    const maxStart = Math.max(0, seq.length - ampliconLength);
+    const idealStart = Math.round(center - ampliconLength / 2);
+    for (const offset of [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5]) {
+      const ampliconStart = Math.max(0, Math.min(maxStart, idealStart + offset));
+      const ampliconEnd = ampliconStart + ampliconLength;
+      const forward = seq.slice(ampliconStart, ampliconStart + primerLength);
+      const reverse = reverseComplement(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd));
+      if (forward.length !== primerLength || reverse.length !== primerLength) continue;
+      const ampliconCenter = ampliconStart + ampliconLength / 2;
+      const centerPenalty = Math.abs(center - ampliconCenter);
+      const forwardPenalty = scorePrimerSequence(forward);
+      const reversePenalty = scorePrimerSequence(reverse);
+      const score = centerPenalty * 3 + forwardPenalty + reversePenalty + Math.abs(ampliconLength - 475) * 0.2;
+      if (!best || score < best.score) {
+        best = {
+          forward,
+          reverse,
+          ampliconLength,
+          score,
+        };
+      }
+    }
   }
-  const forwardStart = ampliconStart;
-  const reverseEnd = ampliconEnd;
+
+  if (best) return best;
+  const fallbackLength = Math.max(primerLength * 2, Math.min(seq.length, 480));
+  const maxStart = Math.max(0, seq.length - fallbackLength);
+  const ampliconStart = Math.max(0, Math.min(maxStart, Math.round(center - fallbackLength / 2)));
+  const ampliconEnd = Math.min(seq.length, ampliconStart + fallbackLength);
+  return {
+    forward: seq.slice(ampliconStart, ampliconStart + primerLength),
+    reverse: reverseComplement(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd)),
+    ampliconLength: ampliconEnd - ampliconStart,
+  };
+}
+
+const KO_LONG_DELETION_THRESHOLD = 1000;
+const KO_DELETION_SCREEN_FLANK = 250;
+
+function pickDeletionScreenPrimerPair(seq, leftCut, rightCut, flank = KO_DELETION_SCREEN_FLANK, primerLength = 24) {
+  const maxStart = Math.max(0, seq.length - primerLength);
+  const desiredForwardStart = Math.max(0, Math.min(maxStart, leftCut - flank));
+  const desiredReverseStart = Math.max(0, Math.min(maxStart, rightCut + flank - primerLength));
+  let best = null;
+  for (let forwardOffset = -20; forwardOffset <= 20; forwardOffset += 1) {
+    const forwardStart = Math.max(0, Math.min(maxStart, desiredForwardStart + forwardOffset));
+    const forward = seq.slice(forwardStart, forwardStart + primerLength);
+    if (forward.length !== primerLength) continue;
+    for (let reverseOffset = -20; reverseOffset <= 20; reverseOffset += 1) {
+      const reverseStart = Math.max(forwardStart + primerLength + 50, Math.min(maxStart, desiredReverseStart + reverseOffset));
+      const reverse = reverseComplement(seq.slice(reverseStart, reverseStart + primerLength));
+      if (reverse.length !== primerLength) continue;
+      const wtAmpliconLength = reverseStart + primerLength - forwardStart;
+      const deletionAmpliconLength = Math.max(primerLength * 2, (leftCut - forwardStart) + ((reverseStart + primerLength) - rightCut));
+      const leftFlankPenalty = Math.abs((leftCut - forwardStart) - flank);
+      const rightFlankPenalty = Math.abs(((reverseStart + primerLength) - rightCut) - flank);
+      const score = scorePrimerSequence(forward)
+        + scorePrimerSequence(reverse)
+        + leftFlankPenalty * 0.15
+        + rightFlankPenalty * 0.15
+        + Math.abs(deletionAmpliconLength - 500) * 0.2;
+      if (!best || score < best.score) {
+        best = { forward, reverse, wtAmpliconLength, deletionAmpliconLength, score };
+      }
+    }
+  }
+  if (best) return best;
+  const forwardStart = desiredForwardStart;
+  const reverseStart = Math.max(forwardStart + primerLength + 50, desiredReverseStart);
   return {
     forward: seq.slice(forwardStart, forwardStart + primerLength),
-    reverse: reverseComplement(seq.slice(Math.max(0, reverseEnd - primerLength), reverseEnd)),
-    ampliconLength: reverseEnd - ampliconStart,
+    reverse: reverseComplement(seq.slice(reverseStart, reverseStart + primerLength)),
+    wtAmpliconLength: reverseStart + primerLength - forwardStart,
+    deletionAmpliconLength: Math.max(primerLength * 2, (leftCut - forwardStart) + ((reverseStart + primerLength) - rightCut)),
   };
 }
 
@@ -642,15 +722,101 @@ function selectInsertGuidesWithFallback(model, targetPos) {
   return null;
 }
 
+function normalizeCustomSpacer(spacer) {
+  return String(spacer || "").toUpperCase().replace(/[^ACGT]/g, "");
+}
+
+function findGuideMatchesForSpacer(model, spacer, targetPos = null) {
+  const seq = getGenomicSequence(model);
+  const cleanSpacer = normalizeCustomSpacer(spacer);
+  if (cleanSpacer.length !== 20) return [];
+  const matches = [];
+  for (let pos = 0; pos <= seq.length - 23; pos += 1) {
+    const plusSpacer = seq.slice(pos, pos + 20);
+    const plusPam = seq.slice(pos + 20, pos + 23);
+    if (plusSpacer === cleanSpacer && /GG$/.test(plusPam)) {
+      const cut = pos + 17;
+      matches.push({
+        sp: cleanSpacer,
+        pam: plusPam,
+        str: "+",
+        cut,
+        d: Number.isFinite(targetPos) ? cut - targetPos : null,
+        gc: Math.round((cleanSpacer.split("").filter((base) => base === "G" || base === "C").length / 20) * 100),
+        ps: pos,
+      });
+    }
+    const minusPam = seq.slice(pos, pos + 3);
+    const minusSpacer = reverseComplement(seq.slice(pos + 3, pos + 23));
+    if (minusSpacer === cleanSpacer && /^CC/.test(minusPam)) {
+      const cut = pos + 6;
+      matches.push({
+        sp: cleanSpacer,
+        pam: reverseComplement(minusPam),
+        str: "-",
+        cut,
+        d: Number.isFinite(targetPos) ? cut - targetPos : null,
+        gc: Math.round((cleanSpacer.split("").filter((base) => base === "G" || base === "C").length / 20) * 100),
+        ps: pos,
+      });
+    }
+  }
+  matches.sort((left, right) => {
+    const leftDistance = Number.isFinite(left.d) ? Math.abs(left.d) : Number.MAX_SAFE_INTEGER;
+    const rightDistance = Number.isFinite(right.d) ? Math.abs(right.d) : Number.MAX_SAFE_INTEGER;
+    if (leftDistance !== rightDistance) return leftDistance - rightDistance;
+    return left.cut - right.cut;
+  });
+  return matches;
+}
+
+function resolveCustomGuides(model, spacers, targetPos, options = {}) {
+  const maxDistance = Number.isFinite(options.maxDistance) ? options.maxDistance : null;
+  const desiredCount = Number.isFinite(options.desiredCount) ? options.desiredCount : 2;
+  const seenSites = new Set();
+  const selected = [];
+  for (const rawSpacer of spacers || []) {
+    const cleanSpacer = normalizeCustomSpacer(rawSpacer);
+    if (!cleanSpacer) continue;
+    if (cleanSpacer.length !== 20) return { err: `Custom gRNA "${rawSpacer}" must be a 20 nt spacer.` };
+    const matches = findGuideMatchesForSpacer(model, cleanSpacer, targetPos).filter((guide) => {
+      if (maxDistance === null) return true;
+      return Number.isFinite(guide.d) && Math.abs(guide.d) <= maxDistance;
+    });
+    if (!matches.length) {
+      if (maxDistance === null) return { err: `Custom gRNA ${cleanSpacer} could not be mapped to the reference sequence.` };
+      return { err: `Custom gRNA ${cleanSpacer} does not map within ${maxDistance} bp of the target site.` };
+    }
+    const chosen = matches.find((guide) => !seenSites.has(`${guide.ps}:${guide.str}`)) || matches[0];
+    seenSites.add(`${chosen.ps}:${chosen.str}`);
+    selected.push(chosen);
+    if (selected.length >= desiredCount) break;
+  }
+  if (!selected.length) return null;
+  return {
+    guides: selected,
+    window: selected.reduce((max, guide) => Math.max(max, Number.isFinite(guide.d) ? Math.abs(guide.d) : 0), 0),
+    tier: "custom",
+  };
+}
+
 function buildInsertGuideNote(guide, anchorLabel, tier, window) {
+  if (tier === "custom") return `Custom gRNA | cut ${Math.abs(guide.d)} bp ${guide.d < 0 ? "5-prime" : "3-prime"} of ${anchorLabel}`;
   const relativeLabel = guide.d < 0 ? "5-prime" : "3-prime";
   const tierLabel = tier === "preferred" ? "preferred window" : tier === "fallback" ? "fallback window" : "distant fallback";
   return `Cut ${Math.abs(guide.d)} bp ${relativeLabel} of ${anchorLabel} | ${tierLabel} <=${window} bp`;
 }
 
 function buildPointMutationGuideNote(guide, tier, window) {
+  if (tier === "custom") return `Custom gRNA | cut-to-edit distance ${Math.abs(guide.d)} bp`;
   const tierLabel = tier === "preferred" ? "preferred window" : tier === "fallback" ? "fallback window" : "distant fallback";
   return `Cut-to-edit distance ${Math.abs(guide.d)} bp | ${tierLabel} <=${window} bp`;
+}
+
+function appendGuideContext(note, model, guide) {
+  const context = describeGuidePlacementFromModel(model, guide);
+  if (!context?.label) return note;
+  return `${note} | ${context.label}: ${context.detail}`;
 }
 
 function getGuideSpan(guide) {
@@ -920,7 +1086,7 @@ function buildKnockinProteinPreview(model, orientation, preset) {
   };
 }
 
-export function designPM(gb, mutationString) {
+export function designPM(gb, mutationString, options = {}) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
   const seq = getGenomicSequence(gb);
@@ -952,7 +1118,9 @@ export function designPM(gb, mutationString) {
 
   const mutationPositions = bestChanges.map((change) => change.p);
   const mutationBases = bestChanges.map((change) => change.m);
-  const guideSelection = selectInsertGuidesWithFallback(gb, codonInfo.g);
+  const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, codonInfo.g, { maxDistance: 30, desiredCount: 2 }) : null;
+  if (customGuideSelection?.err) return { err: customGuideSelection.err };
+  const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, codonInfo.g);
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the mutation site." };
   const { guides: selectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
   const blockedPositions = new Set(mutationPositions);
@@ -962,12 +1130,12 @@ export function designPM(gb, mutationString) {
     const silent = findSilent(gb, guide, blockedPositions);
     const donor = mkODN(gb, guide, mutationPositions, mutationBases, silent ? [silent] : []);
     const guideName = makeGuideName(gb.gene, "pm", index, mutationString);
-    result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: buildPointMutationGuideNote(guide, guideTier, guideWindow) });
+    result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: appendGuideContext(buildPointMutationGuideNote(guide, guideTier, guideWindow), gb, guide) });
     if (donor) result.os.push({ ...donor, n: `ssODN${index + 1}`, gi: index, guideName, guideStrand: guide.str });
     if (silent) result.ss.push({ ...silent, gi: index + 1 });
   });
 
-  const primerPair = pickCenteredPrimerPair(seq, codonInfo.g, 480, 24);
+  const primerPair = pickCenteredPrimerPair(seq, codonInfo.g, 450, 500, 24);
   result.ps = [
     { n: makePrimerName(gb.gene, "pm", "Fw", mutationString), s: primerPair.forward },
     { n: makePrimerName(gb.gene, "pm", "Rev", mutationString), s: primerPair.reverse },
@@ -976,7 +1144,7 @@ export function designPM(gb, mutationString) {
   return result;
 }
 
-export function designIT(gb, siteString, tag) {
+export function designIT(gb, siteString, tag, options = {}) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
   const site = parseInternalSiteInput(siteString);
@@ -993,7 +1161,9 @@ export function designIT(gb, siteString, tag) {
   const insertionPos = codingPosToGenomic(gb, aaNumber * 3);
   if (insertionPos === null || insertionPos === undefined) return { err: `Cannot map insertion point after amino acid ${aaNumber}.` };
 
-  const guideSelection = selectInsertGuidesWithFallback(gb, insertionPos);
+  const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, insertionPos, { maxDistance: 30, desiredCount: 2 }) : null;
+  if (customGuideSelection?.err) return { err: customGuideSelection.err };
+  const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, insertionPos);
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the internal insertion site." };
   const { guides, window: guideWindow, tier: guideTier } = guideSelection;
 
@@ -1028,7 +1198,7 @@ export function designIT(gb, siteString, tag) {
   const proteinPreview = buildInternalProteinPreview(gb, aaNumber, preset.aa);
   const codingPreview = buildInternalCodingPreview(gb, aaNumber, preset.seq, preset.aa);
   const seq = getGenomicSequence(gb);
-  const primerPair = pickCenteredPrimerPair(seq, insertionPos, 480, 24);
+  const primerPair = pickCenteredPrimerPair(seq, insertionPos, 450, 500, 24);
   const insertValidation = donors[0]
     ? buildInsertValidation(preset.seq, donors[0].od.slice(donors[0].insertStart, donors[0].insertEnd))
     : buildInsertValidation(preset.seq, "");
@@ -1055,7 +1225,7 @@ export function designIT(gb, siteString, tag) {
       str: guide.str,
       gc: guide.gc,
       d: guide.d,
-      arm: `Cut-to-insert distance ${Math.abs(guide.d)} bp | ${guideTier === "preferred" ? "preferred window" : guideTier === "fallback" ? "fallback window" : "distant fallback"} <=${guideWindow} bp`,
+      arm: appendGuideContext(`Cut-to-insert distance ${Math.abs(guide.d)} bp | ${guideTier === "preferred" ? "preferred window" : guideTier === "fallback" ? "fallback window" : "distant fallback"} <=${guideWindow} bp`, gb, guide),
     })),
     os: donors,
     ss: allBlockingMutations,
@@ -1067,7 +1237,7 @@ export function designIT(gb, siteString, tag) {
   };
 }
 
-export function designCT(gb, tag, homologyArmLength) {
+export function designCT(gb, tag, homologyArmLength, options = {}) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
   const seq = getGenomicSequence(gb);
@@ -1083,7 +1253,9 @@ export function designCT(gb, tag, homologyArmLength) {
   const homology3End = Math.min(seq.length, stopStart + 3 + armLength);
   const homology5 = seq.slice(homology5Start, stopStart);
   const homology3 = seq.slice(stopStart + 3, homology3End);
-  const guideSelection = selectInsertGuidesWithFallback(gb, stopStart);
+  const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, stopStart, { maxDistance: 30, desiredCount: 2 }) : null;
+  if (customGuideSelection?.err) return { err: customGuideSelection.err };
+  const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, stopStart);
   if (!guideSelection) return { err: "No SpCas9 gRNAs found with cut sites within 30 bp of the stop codon." };
   const { guides, window: guideWindow, tier: guideTier } = guideSelection;
 
@@ -1164,7 +1336,7 @@ export function designCT(gb, tag, homologyArmLength) {
     guideWindow: guideWindow,
     guideTier,
     guideProtection,
-    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: buildInsertGuideNote(guide, "stop", guideTier, guideWindow) })),
+    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: appendGuideContext(buildInsertGuideNote(guide, "stop", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
     ps: [
       { n: makePrimerName(gb.gene, "ct", "Fw", "", tag), s: pickPrimerOutsideLeft(seq, homology5Start) },
@@ -1174,16 +1346,46 @@ export function designCT(gb, tag, homologyArmLength) {
   };
 }
 
-export function designKO(gb) {
+export function designKO(gb, options = {}) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found." };
   if (gb.cdsSegments.length < 2) return { err: "Not enough coding exons available for KO design." };
-  const target = findKoDesignTargetFromModel(gb, reverseComplement, selectKoGuidePair);
-  if (!target) return { err: "No gRNA pair found with cut-site spacing up to 140 bp across non-terminal coding exons, preferentially exons 2-4, including exon-intron boundaries." };
-  const { start: exonStart, end: exonEnd, exonLength: bestLength, exonNumber, pair: selectedPair } = target;
+  let selectedPair;
+  let exonStart;
+  let exonEnd;
+  let bestLength;
+  let exonNumber;
+  if (options.customGuides?.length) {
+    const customGuideSelection = resolveCustomGuides(gb, options.customGuides, null, { desiredCount: 2 });
+    if (customGuideSelection?.err) return { err: customGuideSelection.err };
+    if (!customGuideSelection || customGuideSelection.guides.length < 2) return { err: "Paste two custom gRNAs for knockout design." };
+    const guides = customGuideSelection.guides
+      .slice(0, 2)
+      .sort((left, right) => left.cut - right.cut)
+      .map((guide) => ({ ...guide, d: null }));
+    selectedPair = {
+      guides,
+      spacing: Math.abs(guides[1].cut - guides[0].cut),
+    };
+    const contexts = guides.map((guide) => describeKoGenomicContextFromModel(gb, guide.cut));
+    const exonMatch = contexts[0]?.label?.match(/Exon\s+(\d+)/i);
+    exonNumber = exonMatch ? parseInt(exonMatch[1], 10) : null;
+    const exon = Array.isArray(gb.exons) ? gb.exons.find((entry) => entry.exonNumber === exonNumber) : null;
+    exonStart = exon?.start ?? 0;
+    exonEnd = exon?.end ?? 0;
+    bestLength = exon ? (exon.end - exon.start) : 0;
+  } else {
+    const target = findKoDesignTargetFromModel(gb, reverseComplement, selectKoGuidePair);
+    if (!target) return { err: "No gRNA pair found with cut-site spacing up to 140 bp across non-terminal coding exons, preferentially exons 2-4, including exon-intron boundaries." };
+    ({ start: exonStart, end: exonEnd, exonLength: bestLength, exonNumber, pair: selectedPair } = target);
+  }
   const seq = getGenomicSequence(gb);
   const cutCenter = Math.round(selectedPair.guides.reduce((sum, guide) => sum + guide.cut, 0) / selectedPair.guides.length);
-  const primerPair = pickCenteredPrimerPair(seq, cutCenter, 480, 24);
+  const sortedCuts = selectedPair.guides.map((guide) => guide.cut).filter(Number.isFinite).sort((left, right) => left - right);
+  const longDeletion = sortedCuts.length === 2 && selectedPair.spacing > KO_LONG_DELETION_THRESHOLD;
+  const primerPair = longDeletion
+    ? pickDeletionScreenPrimerPair(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK, 24)
+    : pickCenteredPrimerPair(seq, cutCenter, 450, 500, 24);
 
   return {
     type: "ko",
@@ -1193,6 +1395,7 @@ export function designKO(gb) {
     prot: gb.proteinLength,
     gs: selectedPair.guides.map((guide, index) => {
       const context = describeKoGenomicContextFromModel(gb, guide.cut);
+      const placement = describeGuidePlacementFromModel(gb, guide);
       return {
         n: makeGuideName(gb.gene, "ko", index),
         sp: guide.sp,
@@ -1201,19 +1404,24 @@ export function designKO(gb) {
         gc: guide.gc,
         cut: guide.cut,
         d: guide.d,
-        note: `Cut at ${guide.cut + 1}, ${context.label} (${context.detail}) | pair spacing ${selectedPair.spacing} bp`,
+        note: `Cut at ${guide.cut + 1}, ${context.label} (${context.detail}) | ${placement.label}: ${placement.detail} | pair spacing ${selectedPair.spacing} bp`,
       };
     }),
     ps: [
       { n: makePrimerName(gb.gene, "ko", "Fw"), s: primerPair.forward },
       { n: makePrimerName(gb.gene, "ko", "Rev"), s: primerPair.reverse },
     ],
-    amp: `~${primerPair.ampliconLength} bp`,
-    strat: "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
+    amp: longDeletion
+      ? `WT ~${primerPair.wtAmpliconLength} bp | deletion ~${primerPair.deletionAmpliconLength} bp`
+      : `~${primerPair.ampliconLength} bp`,
+    strat: longDeletion
+      ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
+      : "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
+    primerStrategy: longDeletion ? "deletion-screen" : "centered",
   };
 }
 
-export function designNT(gb, tag, homologyArmLength) {
+export function designNT(gb, tag, homologyArmLength, options = {}) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found." };
   const seq = getGenomicSequence(gb);
@@ -1229,7 +1437,9 @@ export function designNT(gb, tag, homologyArmLength) {
   const homology3End = Math.min(seq.length, codingResume + armLength);
   const homology5 = seq.slice(homology5Start, insertionSite);
   const homology3 = seq.slice(codingResume, homology3End);
-  const guideSelection = selectInsertGuidesWithFallback(gb, startCodonPos);
+  const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, startCodonPos, { maxDistance: 30, desiredCount: 2 }) : null;
+  if (customGuideSelection?.err) return { err: customGuideSelection.err };
+  const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, startCodonPos);
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the start codon." };
   const { guides, window: guideWindow, tier: guideTier } = guideSelection;
 
@@ -1302,7 +1512,7 @@ export function designNT(gb, tag, homologyArmLength) {
     guideWindow: guideWindow,
     guideTier,
     guideProtection,
-    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: buildInsertGuideNote(guide, "start codon replacement site", guideTier, guideWindow) })),
+    gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: appendGuideContext(buildInsertGuideNote(guide, "start codon replacement site", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
     ps: [
       { n: makePrimerName(gb.gene, "nt", "Fw", "", tag), s: pickPrimerOutsideLeft(seq, homology5Start) },
@@ -1312,7 +1522,7 @@ export function designNT(gb, tag, homologyArmLength) {
   };
 }
 
-export function runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength) {
+export function runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength, options = {}) {
   if (!model?.genomicSequence) return { err: "Transcript model is missing genomic sequence." };
   if (!projectType) return { err: "Select a project type first." };
   const cds = getCdsFromModel(model);
@@ -1321,13 +1531,13 @@ export function runDesignFromTranscriptModel(projectType, model, mutation, tag, 
   let designResult;
   if (projectType === "pm") {
     if (!mutation) return { err: "Enter a mutation such as L72S." };
-    designResult = designPM(model, mutation);
+    designResult = designPM(model, mutation, options);
   } else if (projectType === "it") {
     if (!mutation) return { err: "Enter an internal insertion site such as P155." };
-    designResult = designIT(model, mutation, tag);
-  } else if (projectType === "ct") designResult = designCT(model, tag, homologyArmLength);
-  else if (projectType === "nt") designResult = designNT(model, tag, homologyArmLength);
-  else designResult = designKO(model);
+    designResult = designIT(model, mutation, tag, options);
+  } else if (projectType === "ct") designResult = designCT(model, tag, homologyArmLength, options);
+  else if (projectType === "nt") designResult = designNT(model, tag, homologyArmLength, options);
+  else designResult = designKO(model, options);
 
   return {
     gb: model,
@@ -1337,11 +1547,17 @@ export function runDesignFromTranscriptModel(projectType, model, mutation, tag, 
   };
 }
 
-export function runDesign(projectType, gbRaw, mutation, tag, homologyArmLength) {
-  if (!gbRaw) return { err: "Upload a GenBank file first." };
-  const parsedGenBank = parseGB(gbRaw);
-  if (!parsedGenBank.seq) return { err: "Could not parse a DNA sequence from the file." };
-  const model = normalizeGenBankToTranscriptModel(parsedGenBank);
+export function runDesign(projectType, gbRaw, mutation, tag, homologyArmLength, options = {}) {
+  let model = null;
+  if (options.rawReference?.sequence) {
+    model = normalizeRawSequenceToTranscriptModel(options.rawReference);
+    if (!model?.genomicSequence) return { err: "Could not normalize the raw DNA input into a transcript model. Check the DNA sequence and CDS coordinates." };
+  } else {
+    if (!gbRaw) return { err: "Upload a GenBank file first." };
+    const parsedGenBank = parseGB(gbRaw);
+    if (!parsedGenBank.seq) return { err: "Could not parse a DNA sequence from the file." };
+    model = normalizeGenBankToTranscriptModel(parsedGenBank);
+  }
   if (!model?.genomicSequence) return { err: "Could not normalize the GenBank file into a transcript model." };
-  return runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength);
+  return runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength, options);
 }

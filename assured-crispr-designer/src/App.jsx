@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, getCassetteSequenceLength, parseGB, runDesign } from "./designEngine";
-import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel } from "./transcriptModel";
+import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
 const COLORS = {
@@ -416,6 +416,7 @@ function buildRowMeta(row, result = null) {
     editSummary: row?.editSummary || row?.label || "",
     notes: row?.notes || "",
     projectType: row?.projectType || result?.type || "pm",
+    referenceSource: row?.referenceSource || "genbank",
   };
 }
 
@@ -471,6 +472,9 @@ function buildDesignSummary(result) {
 }
 
 function buildGeneInfoRows(meta, result, fileName) {
+  const referenceLabel = result?.gb?.source === "raw-sequence"
+    ? "Raw DNA + CDS coordinates"
+    : fileName || (result.referenceOnly ? "Gene-list KO mode (no GenBank uploaded)" : "Uploaded GenBank");
   if (!result) return [];
   return [
     ["Gene", meta.gene || result.gene],
@@ -478,7 +482,7 @@ function buildGeneInfoRows(meta, result, fileName) {
     ["Target", buildDisplayedEditLabel(meta, result)],
     ["Cell line", meta.cellLine || "n/a"],
     ["Protein / CDS", result.prot ? `${result.prot} aa` : "n/a"],
-    ["Reference file", fileName || (result.referenceOnly ? "Gene-list KO mode (no GenBank uploaded)" : "Uploaded GenBank")],
+    ["Reference", referenceLabel],
   ];
 }
 
@@ -547,19 +551,90 @@ function findMatchingGuideCut(model, spacer, pam, preferredExonNumber = null, pr
   return matches[0];
 }
 
-function pickCenteredPrimerPairLocal(seq, center, targetAmpliconLength = 480, primerLength = 24) {
-  const desiredAmplicon = Math.max(primerLength * 2, targetAmpliconLength);
-  const maxStart = Math.max(0, seq.length - desiredAmplicon);
-  let ampliconStart = Math.round(center - desiredAmplicon / 2);
-  ampliconStart = Math.max(0, Math.min(maxStart, ampliconStart));
-  let ampliconEnd = Math.min(seq.length, ampliconStart + desiredAmplicon);
-  if (ampliconEnd - ampliconStart < desiredAmplicon) {
-    ampliconStart = Math.max(0, ampliconEnd - desiredAmplicon);
+function scorePrimerSequenceLocal(primer) {
+  const seq = String(primer || "").toUpperCase();
+  if (!seq) return Number.MAX_SAFE_INTEGER;
+  const gcCount = [...seq].filter((base) => base === "G" || base === "C").length;
+  const gcPercent = (gcCount / seq.length) * 100;
+  let score = Math.abs(gcPercent - 50);
+  if (/(A{5,}|T{5,}|G{5,}|C{5,})/.test(seq)) score += 20;
+  if (/AAAA|TTTT/.test(seq)) score += 6;
+  const lastBase = seq[seq.length - 1];
+  if (lastBase !== "G" && lastBase !== "C") score += 4;
+  return score;
+}
+
+function pickCenteredPrimerPairLocal(seq, center, minAmpliconLength = 450, maxAmpliconLength = 500, primerLength = 24) {
+  const minLength = Math.max(primerLength * 2, minAmpliconLength);
+  const maxLength = Math.max(minLength, maxAmpliconLength);
+  let best = null;
+  for (let ampliconLength = minLength; ampliconLength <= maxLength; ampliconLength += 1) {
+    const maxStart = Math.max(0, seq.length - ampliconLength);
+    const idealStart = Math.round(center - ampliconLength / 2);
+    for (const offset of [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5]) {
+      const ampliconStart = Math.max(0, Math.min(maxStart, idealStart + offset));
+      const ampliconEnd = ampliconStart + ampliconLength;
+      const forward = seq.slice(ampliconStart, ampliconStart + primerLength);
+      const reverse = reverseComplementLocal(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd));
+      if (forward.length !== primerLength || reverse.length !== primerLength) continue;
+      const ampliconCenter = ampliconStart + ampliconLength / 2;
+      const centerPenalty = Math.abs(center - ampliconCenter);
+      const score = centerPenalty * 3 + scorePrimerSequenceLocal(forward) + scorePrimerSequenceLocal(reverse) + Math.abs(ampliconLength - 475) * 0.2;
+      if (!best || score < best.score) {
+        best = { forward, reverse, ampliconLength, score };
+      }
+    }
   }
+  if (best) return best;
+  const fallbackLength = Math.max(primerLength * 2, Math.min(seq.length, 480));
+  const maxStart = Math.max(0, seq.length - fallbackLength);
+  const ampliconStart = Math.max(0, Math.min(maxStart, Math.round(center - fallbackLength / 2)));
+  const ampliconEnd = Math.min(seq.length, ampliconStart + fallbackLength);
   return {
     forward: seq.slice(ampliconStart, ampliconStart + primerLength),
     reverse: reverseComplementLocal(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd)),
     ampliconLength: ampliconEnd - ampliconStart,
+  };
+}
+
+const KO_LONG_DELETION_THRESHOLD = 1000;
+const KO_DELETION_SCREEN_FLANK = 250;
+
+function pickDeletionScreenPrimerPairLocal(seq, leftCut, rightCut, flank = KO_DELETION_SCREEN_FLANK, primerLength = 24) {
+  const maxStart = Math.max(0, seq.length - primerLength);
+  const desiredForwardStart = Math.max(0, Math.min(maxStart, leftCut - flank));
+  const desiredReverseStart = Math.max(0, Math.min(maxStart, rightCut + flank - primerLength));
+  let best = null;
+  for (let forwardOffset = -20; forwardOffset <= 20; forwardOffset += 1) {
+    const forwardStart = Math.max(0, Math.min(maxStart, desiredForwardStart + forwardOffset));
+    const forward = seq.slice(forwardStart, forwardStart + primerLength);
+    if (forward.length !== primerLength) continue;
+    for (let reverseOffset = -20; reverseOffset <= 20; reverseOffset += 1) {
+      const reverseStart = Math.max(forwardStart + primerLength + 50, Math.min(maxStart, desiredReverseStart + reverseOffset));
+      const reverse = reverseComplementLocal(seq.slice(reverseStart, reverseStart + primerLength));
+      if (reverse.length !== primerLength) continue;
+      const wtAmpliconLength = reverseStart + primerLength - forwardStart;
+      const deletionAmpliconLength = Math.max(primerLength * 2, (leftCut - forwardStart) + ((reverseStart + primerLength) - rightCut));
+      const leftFlankPenalty = Math.abs((leftCut - forwardStart) - flank);
+      const rightFlankPenalty = Math.abs(((reverseStart + primerLength) - rightCut) - flank);
+      const score = scorePrimerSequenceLocal(forward)
+        + scorePrimerSequenceLocal(reverse)
+        + leftFlankPenalty * 0.15
+        + rightFlankPenalty * 0.15
+        + Math.abs(deletionAmpliconLength - 500) * 0.2;
+      if (!best || score < best.score) {
+        best = { forward, reverse, wtAmpliconLength, deletionAmpliconLength, score };
+      }
+    }
+  }
+  if (best) return best;
+  const forwardStart = desiredForwardStart;
+  const reverseStart = Math.max(forwardStart + primerLength + 50, desiredReverseStart);
+  return {
+    forward: seq.slice(forwardStart, forwardStart + primerLength),
+    reverse: reverseComplementLocal(seq.slice(reverseStart, reverseStart + primerLength)),
+    wtAmpliconLength: reverseStart + primerLength - forwardStart,
+    deletionAmpliconLength: Math.max(primerLength * 2, (leftCut - forwardStart) + ((reverseStart + primerLength) - rightCut)),
   };
 }
 
@@ -571,8 +646,19 @@ function buildKoGuideDisplayNote(guide, context, pairSpacing, sourceDetail = "")
 
 function finalizeKoResultWithGuides(result, row, guides) {
   if (!result || result.type !== "ko") return result;
-  if (!row?.gbRaw) return finalizeReferenceOnlyKoResult(result, row, guides);
-  const model = normalizeGenBankToTranscriptModel(parseGB(row.gbRaw));
+  let model = null;
+  if (row?.referenceSource === "raw" && hasRawReference(row)) {
+    model = normalizeRawSequenceToTranscriptModel({
+      gene: row.gene || result.gene || "Unknown",
+      sequence: parseRawSequenceInput(row.rawSequence),
+      cdsStart: row.cdsStart,
+      cdsEnd: row.cdsEnd,
+      exons: parseExonCoordinateInput(row.exonCoordinates),
+    });
+  } else if (row?.gbRaw) {
+    model = normalizeGenBankToTranscriptModel(parseGB(row.gbRaw));
+  }
+  if (!model) return finalizeReferenceOnlyKoResult(result, row, guides);
   const seq = getGenomicSequence(model);
   const currentGuides = [...(guides || [])];
   if (currentGuides.length < 2) return result;
@@ -604,7 +690,11 @@ function finalizeKoResultWithGuides(result, row, guides) {
   const cutCenter = mappedGuides.filter((guide) => Number.isFinite(guide.cut)).length
     ? Math.round(mappedGuides.filter((guide) => Number.isFinite(guide.cut)).reduce((sum, guide) => sum + guide.cut, 0) / mappedGuides.filter((guide) => Number.isFinite(guide.cut)).length)
     : null;
-  const primerPair = Number.isFinite(cutCenter) ? pickCenteredPrimerPairLocal(seq, cutCenter, 480, 24) : null;
+  const sortedCuts = mappedGuides.map((guide) => guide.cut).filter(Number.isFinite).sort((left, right) => left - right);
+  const longDeletion = sortedCuts.length === 2 && Number.isFinite(pairSpacing) && pairSpacing > KO_LONG_DELETION_THRESHOLD;
+  const primerPair = longDeletion
+    ? pickDeletionScreenPrimerPairLocal(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK, 24)
+    : (Number.isFinite(cutCenter) ? pickCenteredPrimerPairLocal(seq, cutCenter, 450, 500, 24) : null);
 
   const exonNumbers = [...new Set(mappedGuides.map((guide) => guide.exonNumber).filter(Number.isFinite))];
   let exonLabel = result.exon;
@@ -621,7 +711,15 @@ function finalizeKoResultWithGuides(result, row, guides) {
       { ...result.ps?.[0], s: primerPair.forward },
       { ...result.ps?.[1], s: primerPair.reverse },
     ] : result.ps,
-    amp: primerPair ? `~${primerPair.ampliconLength} bp` : result.amp,
+    amp: primerPair
+      ? (longDeletion
+        ? `WT ~${primerPair.wtAmpliconLength} bp | deletion ~${primerPair.deletionAmpliconLength} bp`
+        : `~${primerPair.ampliconLength} bp`)
+      : result.amp,
+    strat: longDeletion
+      ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
+      : result.strat,
+    primerStrategy: longDeletion ? "deletion-screen" : (result.primerStrategy || "centered"),
   };
 }
 
@@ -725,15 +823,25 @@ async function fetchJsonOrThrow(url, endpointName) {
   return payload;
 }
 
-function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuilder, sourceLabel) {
-  if (!result || result.type !== "ko" || !Array.isArray(sourceGuides) || sourceGuides.length < 2) return [];
+function buildKoPairLocationLabel(pairResult, exonNumbers = []) {
+  const uniqueExons = [...new Set(exonNumbers.filter(Number.isFinite))];
+  if (uniqueExons.length === 1 && pairResult?.exon) return pairResult.exon;
+  if (uniqueExons.length >= 2) return `Exon ${uniqueExons[0]} -> Exon ${uniqueExons[uniqueExons.length - 1]}`;
+  return pairResult?.exon || "Location unavailable";
+}
+
+function buildKoReferencePairDiagnostics(result, row, sourceGuides, overrideBuilder, sourceLabel) {
+  if (!result || result.type !== "ko" || !Array.isArray(sourceGuides) || sourceGuides.length < 2) return { included: [], filtered: [] };
   const topGuides = sourceGuides.slice(0, 3);
+  const hasLocalReference = hasSequenceBackedReference(row);
   const candidates = [];
+  const filtered = [];
   for (let leftIndex = 0; leftIndex < topGuides.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < topGuides.length; rightIndex += 1) {
       const leftGuide = overrideBuilder(topGuides[leftIndex], 0, result.gs?.[0]);
       const rightGuide = overrideBuilder(topGuides[rightIndex], 1, result.gs?.[1]);
-      const pairResult = row?.gbRaw
+      const sourceExonNumbers = [leftGuide, rightGuide].map((guide) => parseGuideExonNumber(guide.note || guide.arm)).filter(Number.isFinite);
+      const pairResult = hasLocalReference
         ? finalizeKoResultWithGuides(result, row, [leftGuide, rightGuide])
         : finalizeReferenceOnlyKoResult(result, row, [leftGuide, rightGuide], sourceLabel);
       if (!pairResult) continue;
@@ -742,6 +850,34 @@ function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuild
       const exonNumbers = [...new Set((pairResult.gs || []).map((guide) => parseGuideExonNumber(guide.note || guide.arm)).filter(Number.isFinite))];
       const sameExon = exonNumbers.length === 1;
       const preferredSpacing = Number.isFinite(spacing) && spacing >= 40 && spacing <= 140;
+      const candidateMode = !hasLocalReference
+        ? "reference-only"
+        : sameExon && preferredSpacing
+          ? "nearby"
+          : sameExon && Number.isFinite(spacing)
+            ? "local"
+          : Number.isFinite(spacing) && spacing > KO_LONG_DELETION_THRESHOLD
+            ? "deletion-screen"
+            : Number.isFinite(spacing) && !sameExon
+              ? "cross-exon"
+            : "unresolved";
+      const exonLabel = buildKoPairLocationLabel(pairResult, exonNumbers);
+      if (candidateMode === "unresolved") {
+        let reason = "This pair did not survive remapping onto the selected reference.";
+        if (!Number.isFinite(spacing)) {
+          reason = "Could not remap both guides cleanly onto the selected reference.";
+        } else if (!sameExon) {
+          reason = `Guides remap to ${exonLabel}. Only same-exon local pairs or >${KO_LONG_DELETION_THRESHOLD} bp long-range deletions are shown.`;
+        }
+        filtered.push({
+          id: `${sourceLabel}-${leftIndex + 1}-${rightIndex + 1}`,
+          sourceIndexes: [leftIndex + 1, rightIndex + 1],
+          spacing,
+          exonLabel,
+          reason,
+        });
+        continue;
+      }
       candidates.push({
         id: `${sourceLabel}-${leftIndex + 1}-${rightIndex + 1}`,
         source: sourceLabel,
@@ -751,20 +887,33 @@ function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuild
         spacing,
         sameExon,
         preferredSpacing,
-        exonLabel: pairResult.exon || (sameExon ? `Exon ${exonNumbers[0]}` : "Mixed exon context"),
+        candidateMode,
+        deletionSize: spacing,
+        sourceSameExon: sourceExonNumbers.length === 2 && sourceExonNumbers[0] === sourceExonNumbers[1],
+        sourceExonGap: sourceExonNumbers.length === 2 ? Math.abs(sourceExonNumbers[1] - sourceExonNumbers[0]) : Number.MAX_SAFE_INTEGER,
+        exonLabel,
       });
     }
   }
-  return candidates
+  const included = candidates
     .sort((left, right) => {
-      if (left.sameExon !== right.sameExon) return left.sameExon ? -1 : 1;
-      if (left.preferredSpacing !== right.preferredSpacing) return left.preferredSpacing ? -1 : 1;
+      const modePriority = { nearby: 0, local: 1, "cross-exon": 2, "deletion-screen": 3, "reference-only": 4 };
+      if ((modePriority[left.candidateMode] || 9) !== (modePriority[right.candidateMode] || 9)) return (modePriority[left.candidateMode] || 9) - (modePriority[right.candidateMode] || 9);
+      if (left.candidateMode === "reference-only") {
+        if (left.sourceSameExon !== right.sourceSameExon) return left.sourceSameExon ? -1 : 1;
+        if (left.sourceExonGap !== right.sourceExonGap) return left.sourceExonGap - right.sourceExonGap;
+      }
       const leftDistance = Number.isFinite(left.spacing) ? Math.abs(left.spacing - 90) : Number.MAX_SAFE_INTEGER;
       const rightDistance = Number.isFinite(right.spacing) ? Math.abs(right.spacing - 90) : Number.MAX_SAFE_INTEGER;
       if (leftDistance !== rightDistance) return leftDistance - rightDistance;
       return String(left.id).localeCompare(String(right.id));
     })
     .slice(0, 3);
+  return { included, filtered };
+}
+
+function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuilder, sourceLabel) {
+  return buildKoReferencePairDiagnostics(result, row, sourceGuides, overrideBuilder, sourceLabel).included;
 }
 
 function renderGuideSequence(spacer, pam, html = false) {
@@ -804,11 +953,17 @@ function createBatchRow(index) {
     projectFolderName: "",
     notes: "",
     projectType: "pm",
+    referenceSource: "genbank",
     mutation: "",
     tag: "SD40-2xHA",
     homologyArm: "250",
+    customGuides: "",
     gbRaw: "",
     fileName: "",
+    rawSequence: "",
+    cdsStart: "",
+    cdsEnd: "",
+    exonCoordinates: "",
   };
 }
 
@@ -856,7 +1011,7 @@ function buildBatchOrderRows(entries) {
       designLabel,
       gene: result.gene,
       designType,
-      referenceFile: row.fileName || "Uploaded GenBank",
+      referenceFile: row.referenceSource === "raw" ? "Raw DNA + CDS coordinates" : (row.fileName || "Uploaded GenBank"),
     };
     const guides = (result.gs || []).map((guide) => ({
       ...common,
@@ -1105,6 +1260,7 @@ function parseRequestLine(line, index, folderLibrary) {
         ? (cassetteKey || "SPOT")
         : "SD40-2xHA",
     homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
+    customGuides: "",
     gbRaw: fileEntry?.gbRaw || "",
     fileName: fileEntry?.fileName || "",
     parseIssue: "",
@@ -1139,6 +1295,47 @@ function parseWorkspaceProjectFolderEntries(entries, folderLibrary) {
   });
 }
 
+function parseCustomGuideInput(value) {
+  return String(value || "")
+    .split(/\r?\n|,|;/)
+    .map((entry) => entry.toUpperCase().replace(/[^ACGT]/g, ""))
+    .filter(Boolean)
+    .slice(0, 2);
+}
+
+function parseRawSequenceInput(value) {
+  return String(value || "").toUpperCase().replace(/[^ACGT]/g, "");
+}
+
+function parseExonCoordinateInput(value) {
+  return String(value || "")
+    .split(/\r?\n|,|;/)
+    .map((entry, index) => {
+      const match = entry.trim().match(/^(\d+)\s*[-:]\s*(\d+)$/);
+      if (!match) return null;
+      const start = parseInt(match[1], 10);
+      const end = parseInt(match[2], 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      return {
+        start: start - 1,
+        end,
+        exonNumber: index + 1,
+        label: `Exon ${index + 1}`,
+      };
+    })
+    .filter(Boolean);
+}
+
+function hasRawReference(row) {
+  return Boolean(parseRawSequenceInput(row?.rawSequence) && row?.cdsStart && row?.cdsEnd);
+}
+
+function hasSequenceBackedReference(row) {
+  return row?.referenceSource === "raw"
+    ? hasRawReference(row)
+    : Boolean(row?.gbRaw || row?.fileName);
+}
+
 function summarizeRowParseIssue(row, fileEntryOverride = null) {
   const issues = [];
   if (!row?.gene) issues.push("gene");
@@ -1148,7 +1345,15 @@ function summarizeRowParseIssue(row, fileEntryOverride = null) {
   if (row?.projectType === "it" && !row?.tag) issues.push("internal tag");
   if ((row?.projectType === "ct" || row?.projectType === "nt") && !row?.tag) issues.push("cassette");
   const hasFile = Boolean(fileEntryOverride || row?.gbRaw || row?.fileName);
-  if (!hasFile && row?.projectType !== "ko") issues.push("GenBank");
+  const hasRawReferenceValue = hasRawReference(row);
+  const hasCustomGuides = parseCustomGuideInput(row?.customGuides).length > 0;
+  if (row?.referenceSource === "raw") {
+    if (!parseRawSequenceInput(row?.rawSequence)) issues.push("DNA sequence");
+    if (!row?.cdsStart || !row?.cdsEnd) issues.push("CDS coordinates");
+  } else if (!hasFile && (row?.projectType !== "ko" || hasCustomGuides)) {
+    issues.push("GenBank");
+  }
+  if (row?.projectType === "ko" && hasCustomGuides && !(hasFile || hasRawReferenceValue)) issues.push("reference sequence");
   return issues.length ? `Needs ${issues.join(", ")}` : "";
 }
 
@@ -1540,7 +1745,7 @@ function buildReviewItems(meta, result, fileName) {
   if (!result) return [];
   const items = [];
 
-  if (!fileName) items.push({ level: "warning", text: "Reference sequence filename is missing from the report. Keep the exact GenBank record with the final design package." });
+  if (!fileName && result?.gb?.source !== "raw-sequence" && !result?.referenceOnly) items.push({ level: "warning", text: "Reference sequence filename is missing from the report. Keep the exact GenBank record with the final design package." });
   if (!meta.notes.trim()) items.push({ level: "check", text: "Record transcript assumptions, exon numbering assumptions, and delivery method before final sign-off." });
 
   const outOfRangeGuides = (result.gs || []).filter((guide) => typeof guide.gc === "number" && (guide.gc < 30 || guide.gc > 80));
@@ -1971,6 +2176,300 @@ function buildKnockinQcSummaryHtml(result) {
   `;
 }
 
+function buildDesignReadinessChecks(result) {
+  if (!result) return [];
+  const referenceAvailable = Boolean(result.gb?.genomicSequence || result.gbRaw || result.gene);
+  const guideCount = (result.gs || []).length;
+  const primerReady = (result.ps || []).length >= 2 && !!result.amp;
+  const checks = [
+    {
+      label: "Reference anchored",
+      status: referenceAvailable ? "pass" : "warn",
+      detail: result.referenceOnly
+        ? "Guide shortlist is gene-level only. Upload GenBank for exact locus geometry."
+        : referenceAvailable
+          ? "Design is anchored to a concrete reference sequence or validated lookup."
+          : "Reference sequence is missing.",
+    },
+  ];
+
+  if (result.type === "pm") {
+    checks.push(
+      {
+        label: "Requested edit validated",
+        status: result.wA && result.mA && result.gp !== undefined ? "pass" : "warn",
+        detail: result.wA && result.mA
+          ? `${result.wA}${result.an}${result.mA} was mapped onto the coding sequence.`
+          : "Mutation could not be validated against the coding sequence.",
+      },
+      {
+        label: "Guide geometry acceptable",
+        status: typeof result.guideWindow === "number" && result.guideWindow <= 30 && guideCount > 0 ? (result.guideWindow <= 10 ? "pass" : "warn") : "warn",
+        detail: guideCount
+          ? `Selected ${guideCount} guide${guideCount === 1 ? "" : "s"} with best cut distance ${result.guideWindow || "n/a"} bp from the edit.`
+          : "No usable guide was found near the mutation.",
+      },
+      {
+        label: "Guide blocking present",
+        status: (result.ss || []).length ? "pass" : "warn",
+        detail: (result.ss || []).length
+          ? "At least one silent guide-blocking change was added to the donor."
+          : "No silent guide-blocking change was captured.",
+      },
+      {
+        label: "Primer strategy ready",
+        status: primerReady ? "pass" : "warn",
+        detail: primerReady ? `Centered validation primers are ready (${result.amp}).` : "Validation primers are incomplete.",
+      },
+    );
+    return checks;
+  }
+
+  if (result.type === "ko") {
+    checks.push(
+      {
+        label: "Guide pair ready",
+        status: guideCount >= 2 ? "pass" : "warn",
+        detail: guideCount >= 2
+          ? result.referenceOnly
+            ? "Two reference knockout guides are selected. Sequence-backed spacing still needs GenBank."
+            : "Two knockout guides are selected with local spacing and primer design."
+          : "A full knockout guide pair is not available.",
+      },
+      {
+        label: "Sequence-backed geometry",
+        status: result.referenceOnly ? "warn" : "pass",
+        detail: result.referenceOnly
+          ? "This is a high-throughput reference-only KO design."
+          : "Cut spacing and exon context were calculated on the uploaded reference.",
+      },
+      {
+        label: "Primer strategy ready",
+        status: primerReady ? "pass" : result.referenceOnly ? "na" : "warn",
+        detail: primerReady
+          ? `${result.primerStrategy === "deletion-screen" ? "Deletion-junction" : "Validation"} primers are ready (${result.amp}).`
+          : result.referenceOnly
+            ? "Primer design is deferred until a GenBank reference is uploaded."
+            : "Validation primers are incomplete.",
+      },
+    );
+    return checks;
+  }
+
+  if (["it", "ct", "nt"].includes(result.type)) {
+    const canonicalChecks = result.insertValidation?.canonicalChecks || [];
+    const anyGuideProtection = result.type === "it"
+      ? (result.ss || []).length > 0
+      : ((result.guideProtection || []).some((entry) => entry.protected) || (result.ss || []).length > 0);
+    checks.push(
+      {
+        label: "Insert matches preset",
+        status: result.insertValidation ? (result.insertValidation.matchesPreset ? "pass" : "warn") : "na",
+        detail: result.insertValidation ? (result.insertValidation.matchesPreset ? "Designed insert matches the intended preset." : "Designed insert differs from the intended preset.") : "Insert identity check unavailable.",
+      },
+      {
+        label: "Frame preserved",
+        status: result.insertValidation ? (result.insertValidation.framePreserved ? "pass" : "warn") : "na",
+        detail: result.insertValidation ? (result.insertValidation.framePreserved ? "Insert passes the frame check." : "Insert fails the frame check.") : "Frame check unavailable.",
+      },
+      {
+        label: "Reporter or tag verified",
+        status: canonicalChecks.length ? (canonicalChecks.every((check) => check.matches) ? "pass" : "warn") : "na",
+        detail: canonicalChecks.length
+          ? (canonicalChecks.every((check) => check.matches) ? "Canonical FPbase protein check passed." : "Canonical FPbase protein check failed.")
+          : "No canonical reporter check attached to this construct.",
+      },
+      {
+        label: "Guide blocking present",
+        status: anyGuideProtection ? "pass" : "warn",
+        detail: anyGuideProtection ? "At least one selected guide is blocked by donor mutation or insertion geometry." : "No selected guide is clearly blocked by the donor.",
+      },
+      {
+        label: "Primer strategy ready",
+        status: primerReady ? "pass" : "warn",
+        detail: primerReady ? `Validation primers are ready (${result.amp}).` : "Validation primers are incomplete.",
+      },
+    );
+    return checks;
+  }
+
+  return checks;
+}
+
+function buildDesignReadinessHtml(result) {
+  const checks = buildDesignReadinessChecks(result);
+  if (!checks.length) return "";
+  const styleFor = (status) => status === "pass"
+    ? { color: "#047857", background: "#D1FAE5", label: "Pass" }
+    : status === "warn"
+      ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
+      : { color: "#475467", background: "#EAECF0", label: "N/A" };
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Design Readiness</div>
+      ${checks.map((check) => {
+        const badge = styleFor(check.status);
+        return `
+          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-top:1px solid #E5E7EB;">
+            <div style="min-width:0;">
+              <div style="font-size:12px;font-weight:700;color:#111827;">${check.label}</div>
+              <div style="font-size:12px;color:#555;margin-top:2px;">${check.detail}</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;white-space:nowrap;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function normalizeLocusWindow(result) {
+  const genomicLength = result?.gb?.genomicSequence?.length || 0;
+  if (!genomicLength) return null;
+  const positions = [];
+  (result.gs || []).forEach((guide) => {
+    if (Number.isFinite(guide.cut)) positions.push(guide.cut);
+    const noteCut = String(guide.note || guide.arm || "").match(/Cut at (\d+)/i);
+    if (noteCut) positions.push(parseInt(noteCut[1], 10) - 1);
+  });
+  if (result.type === "pm" && Number.isFinite(result.gp)) positions.push(result.gp);
+  if (result.type === "it" && Number.isFinite(result.gp)) positions.push(result.gp);
+  if (result.type === "ct" && Number.isFinite(result.sp)) positions.push(result.sp - 1);
+  if (result.type === "nt" && Array.isArray(result.gb?.cdsSegments) && result.gb.cdsSegments.length) positions.push(result.gb.cdsSegments[0][0]);
+  if (!positions.length) return null;
+  const center = Math.round(positions.reduce((sum, value) => sum + value, 0) / positions.length);
+  const span = 520;
+  const start = Math.max(0, center - Math.floor(span / 2));
+  const end = Math.min(genomicLength, Math.max(start + 1, start + span));
+  return { start, end, length: end - start, genomicLength };
+}
+
+function primerWindowMatches(seq, primer, reverse = false) {
+  const target = String(primer || "").toUpperCase();
+  if (!target) return null;
+  const search = reverse ? reverseComplement(target) : target;
+  const index = seq.indexOf(search);
+  if (index < 0) return null;
+  return { start: index, end: index + search.length, reverse };
+}
+
+function buildLocusStructureItems(result, window) {
+  if (!window) return { exons: [], introns: [] };
+  const exons = Array.isArray(result?.gb?.exons) && result.gb.exons.length
+    ? result.gb.exons
+    : (Array.isArray(result?.gb?.cdsSegments)
+      ? result.gb.cdsSegments.map(([start, end], index) => ({ start, end, exonNumber: index + 1, label: `Exon ${index + 1}` }))
+      : []);
+  const normalizeItem = (item, kind, label, color) => {
+    if (item.end <= window.start || item.start >= window.end) return null;
+    return {
+      kind,
+      label,
+      color,
+      start: item.start,
+      end: item.end,
+      left: ((Math.max(item.start, window.start) - window.start) / window.length) * 100,
+      width: Math.max(1, ((Math.min(item.end, window.end) - Math.max(item.start, window.start)) / window.length) * 100),
+    };
+  };
+  const exonItems = exons
+    .map((exon) => normalizeItem(exon, "exon", exon.label || `Exon ${exon.exonNumber}`, "#2563EB"))
+    .filter(Boolean);
+  const intronItems = [];
+  for (let index = 0; index < exons.length - 1; index += 1) {
+    const left = exons[index];
+    const right = exons[index + 1];
+    if (right.start <= left.end) continue;
+    const intron = normalizeItem(
+      { start: left.end, end: right.start },
+      "intron",
+      `Intron ${left.exonNumber}-${right.exonNumber}`,
+      "#94A3B8",
+    );
+    if (intron) intronItems.push(intron);
+  }
+  return { exons: exonItems, introns: intronItems };
+}
+
+function buildLocusMapItems(result, window) {
+  if (!window) return [];
+  const items = [];
+  const pushItem = (item) => {
+    if (item.end <= window.start || item.start >= window.end) return;
+    items.push({
+      ...item,
+      left: ((Math.max(item.start, window.start) - window.start) / window.length) * 100,
+      width: (Math.max(2, (Math.min(item.end, window.end) - Math.max(item.start, window.start)) / window.length * 100)),
+    });
+  };
+  (result.gs || []).forEach((guide, index) => {
+    if (Number.isFinite(guide.cut)) {
+      pushItem({
+        label: `gRNA${index + 1}`,
+        detail: `${guide.sp}${guide.note || guide.arm ? ` | ${guide.note || guide.arm}` : ""}`,
+        start: guide.cut,
+        end: guide.cut + 1,
+        color: "#7C3AED",
+        kind: "cut",
+      });
+    }
+  });
+  if (result.type === "pm" && Number.isFinite(result.gp)) {
+    pushItem({ label: "Edit", detail: `${result.wA}${result.an}${result.mA}`, start: result.gp, end: result.gp + 3, color: "#D97706", kind: "target" });
+  }
+  if (result.type === "it" && Number.isFinite(result.gp)) {
+    pushItem({ label: "Insert", detail: result.tag, start: result.gp, end: result.gp + 3, color: "#D97706", kind: "target" });
+  }
+  if (result.type === "ct" && Number.isFinite(result.sp)) {
+    const start = result.sp - 1;
+    pushItem({ label: "Stop junction", detail: result.tag, start, end: start + 3, color: "#D97706", kind: "target" });
+    pushItem({ label: "HDR donor", detail: `${result.il || 0} bp insert`, start: Math.max(0, start - (result.h5l || 0)), end: start + 3 + (result.h3l || 0), color: "#0EA5E9", kind: "donor" });
+  }
+  if (result.type === "nt" && Array.isArray(result.gb?.cdsSegments) && result.gb.cdsSegments.length) {
+    const start = result.gb.cdsSegments[0][0];
+    pushItem({ label: "Start junction", detail: result.tag, start, end: start + 3, color: "#D97706", kind: "target" });
+    pushItem({ label: "HDR donor", detail: `${result.il || 0} bp insert`, start: Math.max(0, start - (result.h5l || 0)), end: start + 3 + (result.h3l || 0), color: "#0EA5E9", kind: "donor" });
+  }
+  const seq = result.gb?.genomicSequence || "";
+  const forwardPrimer = result.ps?.[0]?.s;
+  const reversePrimer = result.ps?.[1]?.s;
+  const forwardRange = seq ? primerWindowMatches(seq, forwardPrimer, false) : null;
+  const reverseRange = seq ? primerWindowMatches(seq, reversePrimer, true) : null;
+  if (forwardRange) pushItem({ label: "Fw primer", detail: forwardPrimer, start: forwardRange.start, end: forwardRange.end, color: "#059669", kind: "primer" });
+  if (reverseRange) pushItem({ label: "Rev primer", detail: reversePrimer, start: reverseRange.start, end: reverseRange.end, color: "#DC2626", kind: "primer" });
+  return items;
+}
+
+function buildLocusMapHtml(result) {
+  const window = normalizeLocusWindow(result);
+  if (!window) return "";
+  const structure = buildLocusStructureItems(result, window);
+  const items = buildLocusMapItems(result, window);
+  if (!items.length) return "";
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Target Region Map</div>
+      <div style="font-size:12px;color:#555;margin-bottom:10px;">Showing ${window.start + 1}-${window.end} on the uploaded reference sequence.</div>
+      <div style="font-size:11px;color:#667085;font-weight:700;margin-bottom:6px;">Exon / intron structure</div>
+      <div style="position:relative;height:18px;border-radius:999px;background:#E5E7EB;overflow:hidden;margin-bottom:10px;">
+        ${structure.introns.map((item) => `<div title="${item.label}" style="position:absolute;left:${item.left}%;width:${item.width}%;top:7px;height:4px;background:${item.color};opacity:0.9;"></div>`).join("")}
+        ${structure.exons.map((item) => `<div title="${item.label}" style="position:absolute;left:${item.left}%;width:${item.width}%;top:0;bottom:0;background:${item.color};border-radius:999px;opacity:0.85;"></div>`).join("")}
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+        ${structure.exons.map((item) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.label}</span>`).join("")}
+        ${structure.introns.map((item) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.label}</span>`).join("")}
+      </div>
+      <div style="font-size:11px;color:#667085;font-weight:700;margin-bottom:6px;">Guides, edits, donors, and primers</div>
+      <div style="position:relative;height:14px;border-radius:999px;background:#E5E7EB;overflow:hidden;margin-bottom:14px;">
+        ${items.map((item) => `<div title="${item.label}: ${item.detail || ""}" style="position:absolute;left:${item.left}%;width:${item.width}%;top:0;bottom:0;background:${item.color};opacity:${item.kind === "cut" ? 0.95 : 0.7};"></div>`).join("")}
+      </div>
+      <div style="display:grid;gap:8px;">
+        ${items.map((item) => `<div style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#344054;"><span style="display:inline-flex;width:10px;height:10px;border-radius:999px;background:${item.color};margin-top:3px;flex:0 0 auto;"></span><span><strong>${item.label}</strong>${item.detail ? `: ${item.detail}` : ""}</span></div>`).join("")}
+      </div>
+    </div>
+  `;
+}
+
 function buildInternalProteinHtml(result) {
   const preview = result?.codingPreview;
   if (!preview) return "";
@@ -2146,6 +2645,8 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const brunelloReferenceGuideSet = getBrunelloReferenceGuideSet(result, brunelloLibrary);
   const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
   const additionalInfoSectionNumber = reviewSectionNumber + 1;
+  const readinessBlock = buildDesignReadinessHtml(result);
+  const locusMapBlock = buildLocusMapHtml(result);
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
@@ -2183,6 +2684,8 @@ p{font-size:13px;line-height:1.45}
   <h2>3. Validation Primers</h2>
   <table>${tableHtml([["Name", "Sequence"]], true)}${tableHtml(primerRows)}</table>
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
+  ${readinessBlock}
+  ${locusMapBlock}
   <h2>4. ${resolvedSectionTitle}</h2>
   <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
@@ -2481,6 +2984,121 @@ function KnockinQcSummaryCard({ result }) {
   );
 }
 
+function DesignReadinessCard({ result }) {
+  const checks = buildDesignReadinessChecks(result);
+  if (!checks.length) return null;
+  const styleFor = (status) => status === "pass"
+    ? { color: COLORS.success, background: "#D1FAE5", label: "Pass" }
+    : status === "warn"
+      ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
+      : { color: "#475467", background: "#EAECF0", label: "N/A" };
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Design readiness</div>
+      {checks.map((check, index) => {
+        const badge = styleFor(check.status);
+        return (
+          <div key={`${check.label}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", padding: "8px 0", borderTop: "1px solid #E5E7EB" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{check.label}</div>
+              <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{check.detail}</div>
+            </div>
+            <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: badge.color, background: badge.background }}>
+              {badge.label}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function LocusMapCard({ result }) {
+  const window = normalizeLocusWindow(result);
+  if (!window) return null;
+  const structure = buildLocusStructureItems(result, window);
+  const items = buildLocusMapItems(result, window);
+  if (!items.length) return null;
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Target region map</div>
+      <div style={{ fontSize: 12, color: "#555", marginBottom: 10 }}>Showing {window.start + 1}-{window.end} on the uploaded reference sequence.</div>
+      <div style={{ fontSize: 11, color: "#667085", fontWeight: 700, marginBottom: 6 }}>Exon / intron structure</div>
+      <div style={{ position: "relative", height: 18, borderRadius: 999, background: "#E5E7EB", overflow: "hidden", marginBottom: 10 }}>
+        {structure.introns.map((item, index) => (
+          <div
+            key={`intron-${item.label}-${index}`}
+            title={item.label}
+            style={{
+              position: "absolute",
+              left: `${item.left}%`,
+              width: `${item.width}%`,
+              top: 7,
+              height: 4,
+              background: item.color,
+              opacity: 0.9,
+            }}
+          />
+        ))}
+        {structure.exons.map((item, index) => (
+          <div
+            key={`exon-${item.label}-${index}`}
+            title={item.label}
+            style={{
+              position: "absolute",
+              left: `${item.left}%`,
+              width: `${item.width}%`,
+              top: 0,
+              bottom: 0,
+              background: item.color,
+              borderRadius: 999,
+              opacity: 0.85,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        {structure.exons.map((item, index) => (
+          <span key={`exon-badge-${item.label}-${index}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: item.color, background: `${item.color}14`, border: `1px solid ${item.color}33` }}>
+            {item.label}
+          </span>
+        ))}
+        {structure.introns.map((item, index) => (
+          <span key={`intron-badge-${item.label}-${index}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: item.color, background: `${item.color}14`, border: `1px solid ${item.color}33` }}>
+            {item.label}
+          </span>
+        ))}
+      </div>
+      <div style={{ fontSize: 11, color: "#667085", fontWeight: 700, marginBottom: 6 }}>Guides, edits, donors, and primers</div>
+      <div style={{ position: "relative", height: 14, borderRadius: 999, background: "#E5E7EB", overflow: "hidden", marginBottom: 14 }}>
+        {items.map((item, index) => (
+          <div
+            key={`${item.label}-${index}`}
+            title={`${item.label}${item.detail ? `: ${item.detail}` : ""}`}
+            style={{
+              position: "absolute",
+              left: `${item.left}%`,
+              width: `${item.width}%`,
+              top: 0,
+              bottom: 0,
+              background: item.color,
+              opacity: item.kind === "cut" ? 0.95 : 0.7,
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {items.map((item, index) => (
+          <div key={`${item.label}-legend-${index}`} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: "#344054" }}>
+            <span style={{ display: "inline-flex", width: 10, height: 10, borderRadius: 999, background: item.color, marginTop: 3, flex: "0 0 auto" }} />
+            <span><strong>{item.label}</strong>{item.detail ? `: ${item.detail}` : ""}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function InternalDonorPreview({ donor }) {
   const strands = buildInternalStrandModels(donor);
   return (
@@ -2635,14 +3253,24 @@ export default function App() {
     () => getBrunelloReferenceGuideSet(selectedEntry?.result, brunelloLookup.data),
     [selectedEntry, brunelloLookup.data],
   );
-  const brunelloPairCandidates = useMemo(
-    () => buildKoReferencePairCandidates(selectedEntry?.result, selectedEntry?.row, brunelloReferenceGuideSet?.guides, buildBrunelloGuideOverride, "Brunello"),
+  const brunelloPairDiagnostics = useMemo(
+    () => buildKoReferencePairDiagnostics(selectedEntry?.result, selectedEntry?.row, brunelloReferenceGuideSet?.guides, buildBrunelloGuideOverride, "Brunello"),
     [selectedEntry, brunelloReferenceGuideSet],
   );
-  const casDatabasePairCandidates = useMemo(
-    () => buildKoReferencePairCandidates(selectedEntry?.result, selectedEntry?.row, casDbLookup.data?.targets, buildCasDatabaseGuideOverride, "Cas-Database"),
+  const casDatabasePairDiagnostics = useMemo(
+    () => buildKoReferencePairDiagnostics(selectedEntry?.result, selectedEntry?.row, casDbLookup.data?.targets, buildCasDatabaseGuideOverride, "Cas-Database"),
     [selectedEntry, casDbLookup.data],
   );
+  const brunelloPairCandidates = brunelloPairDiagnostics.included;
+  const casDatabasePairCandidates = casDatabasePairDiagnostics.included;
+  const brunelloFilteredPairs = brunelloPairDiagnostics.filtered;
+  const casDatabaseFilteredPairs = casDatabasePairDiagnostics.filtered;
+  const brunelloLocalCandidates = useMemo(() => brunelloPairCandidates.filter((candidate) => candidate.candidateMode === "nearby" || candidate.candidateMode === "local"), [brunelloPairCandidates]);
+  const brunelloCrossExonCandidates = useMemo(() => brunelloPairCandidates.filter((candidate) => candidate.candidateMode === "cross-exon"), [brunelloPairCandidates]);
+  const brunelloDeletionCandidates = useMemo(() => brunelloPairCandidates.filter((candidate) => candidate.candidateMode === "deletion-screen"), [brunelloPairCandidates]);
+  const casDatabaseLocalCandidates = useMemo(() => casDatabasePairCandidates.filter((candidate) => candidate.candidateMode === "nearby" || candidate.candidateMode === "local"), [casDatabasePairCandidates]);
+  const casDatabaseCrossExonCandidates = useMemo(() => casDatabasePairCandidates.filter((candidate) => candidate.candidateMode === "cross-exon"), [casDatabasePairCandidates]);
+  const casDatabaseDeletionCandidates = useMemo(() => casDatabasePairCandidates.filter((candidate) => candidate.candidateMode === "deletion-screen"), [casDatabasePairCandidates]);
   const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
   const additionalInfoSectionNumber = reviewSectionNumber + 1;
   const reviewItems = useMemo(
@@ -2920,6 +3548,7 @@ export default function App() {
   useEffect(() => {
     if (!batchFolderEntries.length) return;
     setBatchRows((current) => current.map((row) => {
+      if (row.referenceSource === "raw") return row;
       if (row.gbRaw && row.fileName) return row;
       const match = batchFolderLibrary.byGene.get(normalizeGeneToken(row.gene));
       if (!match) return row;
@@ -2949,7 +3578,7 @@ export default function App() {
           nextRow.tag = CASSETTES[row.tag] ? row.tag : "N:EGFP-Linker";
         }
       }
-      if (key === "gene" && !nextRow.fileName && batchFolderLibrary.byGene.has(normalizeGeneToken(value))) {
+      if (key === "gene" && nextRow.referenceSource !== "raw" && !nextRow.fileName && batchFolderLibrary.byGene.has(normalizeGeneToken(value))) {
         const match = batchFolderLibrary.byGene.get(normalizeGeneToken(value));
         nextRow.gbRaw = match.gbRaw;
         nextRow.fileName = match.fileName;
@@ -3130,30 +3759,46 @@ export default function App() {
     setBatchError("");
     setBatchResults([]);
     setBatchCopyState("");
-    const activeRows = batchRows.filter((row) => row.gbRaw || (row.projectType === "ko" && row.gene));
+    const activeRows = batchRows.filter((row) => hasSequenceBackedReference(row) || (row.projectType === "ko" && row.gene && !parseCustomGuideInput(row.customGuides).length));
     if (!activeRows.length) {
-      setBatchError("Upload at least one GenBank file, or provide at least one knockout row with a gene name for gene-list KO mode.");
+      setBatchError("Add at least one usable reference sequence, or provide at least one knockout row with a gene name for gene-list KO mode.");
       return;
     }
     const nextResults = await Promise.all(batchRows.map(async (row, index) => {
       const slot = index + 1;
-      if (!row.gbRaw && !(row.projectType === "ko" && row.gene)) return { slot, rowId: row.id, row, status: "empty" };
+      if (!hasSequenceBackedReference(row) && !(row.projectType === "ko" && row.gene && !parseCustomGuideInput(row.customGuides).length)) return { slot, rowId: row.id, row, status: "empty" };
       try {
-        if (row.projectType === "ko" && !row.gbRaw) {
+        if (row.projectType === "ko" && !hasSequenceBackedReference(row)) {
+          if (parseCustomGuideInput(row.customGuides).length) {
+            return {
+              slot,
+              rowId: row.id,
+              row,
+              status: "error",
+              error: "Upload a GenBank file to use pasted custom knockout guides.",
+              debug: "",
+            };
+          }
           const organismId = "1";
           const [brunello, casDb] = await Promise.allSettled([
             fetchJsonOrThrow(`/api/brunello?gene=${encodeURIComponent(row.gene)}`, "Brunello"),
             fetchJsonOrThrow(`/api/cas-database?gene=${encodeURIComponent(row.gene)}&organism=${encodeURIComponent(organismId)}`, "Cas-Database"),
           ]);
           const brunelloGuides = brunello.status === "fulfilled"
-            ? brunello.value.guides.slice(0, 2).map((guide, slotIndex) => buildBrunelloGuideOverride(guide, slotIndex, {}))
+            ? brunello.value.guides.slice(0, 3)
             : [];
           const casDbGuides = casDb.status === "fulfilled"
-            ? casDb.value.targets.slice(0, 2).map((target, slotIndex) => buildCasDatabaseGuideOverride(target, slotIndex, {}))
+            ? casDb.value.targets.slice(0, 3)
             : [];
-          const primarySource = brunelloGuides.length >= 2 ? "Brunello" : casDbGuides.length >= 2 ? "Cas-Database" : "";
-          const guides = primarySource === "Brunello" ? brunelloGuides : primarySource === "Cas-Database" ? casDbGuides : [];
-          if (guides.length < 2) {
+          const referenceOnlySeedResult = { type: "ko", gene: normalizeGeneToken(row.gene), gs: [], ps: [], amp: "n/a", exon: "Reference-only KO shortlist", referenceOnly: true };
+          const brunelloCandidates = brunelloGuides.length >= 2
+            ? buildKoReferencePairCandidates(referenceOnlySeedResult, row, brunelloGuides, buildBrunelloGuideOverride, "Brunello")
+            : [];
+          const casDbCandidates = casDbGuides.length >= 2
+            ? buildKoReferencePairCandidates(referenceOnlySeedResult, row, casDbGuides, buildCasDatabaseGuideOverride, "Cas-Database")
+            : [];
+          const primaryCandidate = brunelloCandidates[0] || casDbCandidates[0] || null;
+          if (!primaryCandidate) {
             const errorParts = [
               brunello.status === "rejected" ? brunello.reason?.message : "",
               casDb.status === "rejected" ? casDb.reason?.message : "",
@@ -3169,8 +3814,8 @@ export default function App() {
           }
           const referenceOnlyDesign = buildReferenceOnlyKoDesignFromGuides(
             row,
-            primarySource,
-            guides,
+            primaryCandidate.source,
+            primaryCandidate.guides,
             {
               referenceSources: {
                 brunello: brunello.status === "fulfilled" ? brunello.value : null,
@@ -3181,7 +3826,16 @@ export default function App() {
           if (referenceOnlyDesign.err) return { slot, rowId: row.id, row, status: "error", error: referenceOnlyDesign.err, debug: "" };
           return { slot, rowId: row.id, row, status: "success", result: referenceOnlyDesign, debug: "" };
         }
-        const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm);
+        const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm, {
+          customGuides: parseCustomGuideInput(row.customGuides),
+          rawReference: row.referenceSource === "raw" ? {
+            gene: row.gene,
+            sequence: parseRawSequenceInput(row.rawSequence),
+            cdsStart: row.cdsStart,
+            cdsEnd: row.cdsEnd,
+            exons: parseExonCoordinateInput(row.exonCoordinates),
+          } : null,
+        });
         if (design.err) return { slot, rowId: row.id, row, status: "error", error: design.err, debug: design.dbg || "" };
         return { slot, rowId: row.id, row, status: "success", result: design, debug: design.dbg || "" };
       } catch (runError) {
@@ -3318,9 +3972,13 @@ export default function App() {
             <div style={{ flex: "1 1 620px", minWidth: 280 }}>
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900 }}>AC</div>
-                <div>
+                <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 27, fontWeight: 800, lineHeight: 1.1 }}>ASSURED CRISPR Designer</div>
-                  <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 4 }}>By Narasimha Telugu</div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 8, padding: "7px 12px", borderRadius: 999, border: "1px solid rgba(45,212,191,0.28)", background: "linear-gradient(135deg, rgba(45,212,191,0.12), rgba(245,158,11,0.08))", boxShadow: "0 10px 24px rgba(7,17,28,0.18)" }}>
+                    <span style={{ color: COLORS.accent, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Created by</span>
+                    <span style={{ width: 1, alignSelf: "stretch", background: "rgba(147,167,189,0.28)" }} />
+                    <span style={{ color: "#F8FAFC", fontSize: 15, fontWeight: 700, letterSpacing: 0.2 }}>Narasimha Telugu</span>
+                  </div>
                 </div>
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.15, maxWidth: 760, marginBottom: 10 }}>
@@ -3559,6 +4217,8 @@ export default function App() {
               const koRowCasPairs = batchStatus?.status === "success" && batchStatus.result?.type === "ko"
                 ? buildKoReferencePairCandidates(batchStatus.result, row, koRowReferences?.casDb?.targets, buildCasDatabaseGuideOverride, "Cas-Database")
                 : [];
+              const koRowTopBrunelloPair = koRowBrunelloPairs.find((candidate) => candidate.candidateMode === "nearby") || koRowBrunelloPairs.find((candidate) => candidate.candidateMode === "local") || koRowBrunelloPairs.find((candidate) => candidate.candidateMode === "cross-exon") || koRowBrunelloPairs.find((candidate) => candidate.candidateMode === "deletion-screen") || null;
+              const koRowTopCasPair = koRowCasPairs.find((candidate) => candidate.candidateMode === "nearby") || koRowCasPairs.find((candidate) => candidate.candidateMode === "local") || koRowCasPairs.find((candidate) => candidate.candidateMode === "cross-exon") || koRowCasPairs.find((candidate) => candidate.candidateMode === "deletion-screen") || null;
               const constructSelection = (row.projectType === "ct" || row.projectType === "nt")
                 ? resolveConstructBuilderSelection(row.tag, row.projectType)
                 : null;
@@ -3568,13 +4228,14 @@ export default function App() {
               const constructHelp = constructSelection
                 ? getConstructBuilderHelp(row.projectType, constructSelection.architecture)
                 : "";
-              const rowReady = !row.parseIssue && (row.projectType === "ko" ? !!row.gene : !!row.gbRaw);
+              const rowReady = !row.parseIssue && (row.projectType === "ko" ? (!!row.gene || hasSequenceBackedReference(row)) : hasSequenceBackedReference(row));
               return (
                 <div key={row.id} style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
                     <div style={{ fontWeight: 700 }}>Design {slot}</div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      {row.fileName && <Badge color={COLORS.success}>{row.fileName}</Badge>}
+                      {row.referenceSource === "raw" && hasRawReference(row) && <Badge color={COLORS.success}>Raw DNA reference</Badge>}
+                      {row.referenceSource !== "raw" && row.fileName && <Badge color={COLORS.success}>{row.fileName}</Badge>}
                       {row.parseIssue && <Badge color={COLORS.accentAlt}>{row.parseIssue}</Badge>}
                       {!row.parseIssue && rowReady && !batchStatus && <Badge color={COLORS.accent}>Ready to generate</Badge>}
                       {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
@@ -3598,17 +4259,54 @@ export default function App() {
                     <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Design type</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={FIELD_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                   </Grid>
 
+                  <label style={{ display: "block", marginTop: 12 }}>
+                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference source</div>
+                    <select value={row.referenceSource} onChange={(event) => updateBatchRow(index, "referenceSource", event.target.value)} style={FIELD_STYLE}>
+                      <option value="genbank">GenBank file</option>
+                      <option value="raw">Raw DNA + CDS coordinates</option>
+                    </select>
+                  </label>
+
                   <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Requested edit summary</div><input value={row.editSummary} onChange={(event) => updateBatchRow(index, "editSummary", event.target.value)} style={FIELD_STYLE} placeholder="APOE2 (p.Arg176Cys) SNP knockin" /></label>
                   <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Notes / assumptions</div><textarea value={row.notes} onChange={(event) => updateBatchRow(index, "notes", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 84, resize: "vertical" }} placeholder="Transcript assumptions, strand notes, delivery mode, client constraints..." /></label>
-
                   <label style={{ display: "block", marginTop: 12 }}>
-                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference GenBank {row.projectType === "ko" ? "(optional for gene-list KO mode)" : ""}</div>
-                    <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                      <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
-                      <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
-                      <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
-                    </label>
+                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Custom gRNAs (optional)</div>
+                    <textarea
+                      value={row.customGuides}
+                      onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
+                      style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
+                      placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
+                    />
+                    <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                      If provided, the app maps these spacers onto the uploaded reference and uses them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
+                    </div>
                   </label>
+
+                  {row.referenceSource === "raw" ? (
+                    <>
+                      <label style={{ display: "block", marginTop: 12 }}>
+                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference DNA</div>
+                        <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA sequence using A/C/G/T only" />
+                      </label>
+                      <Grid>
+                        <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>CDS start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
+                        <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>CDS end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
+                      </Grid>
+                      <label style={{ display: "block", marginTop: 12 }}>
+                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Exon coordinates (optional)</div>
+                        <textarea value={row.exonCoordinates} onChange={(event) => updateBatchRow(index, "exonCoordinates", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder={"One exon per line, 1-based inclusive\n101-240\n301-512"} />
+                      </label>
+                    </>
+                  ) : (
+                    <label style={{ display: "block", marginTop: 12 }}>
+                      <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference GenBank {row.projectType === "ko" ? "(optional for gene-list KO mode)" : ""}</div>
+                      <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                        <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
+                        <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
+                        <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
+                      </label>
+                    </label>
+                  )}
 
                   {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Mutation</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
                   {row.projectType === "it" && (
@@ -3746,7 +4444,7 @@ export default function App() {
                       </div>
                     </>
                   )}
-                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 12 }}>KO can run from gene name alone for high-throughput reference-guide mode, or use an uploaded GenBank for sequence-backed spacing and primer design.</div>}
+                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 12 }}>KO can run from gene name alone for high-throughput reference-guide mode, or use an uploaded GenBank for sequence-backed spacing and primer design. Custom pasted guides require GenBank so the app can remap cut sites and rebuild the centered amplicon.</div>}
 
                   {batchStatus?.status === "error" && (
                     <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>
@@ -3770,31 +4468,31 @@ export default function App() {
                       {koRowReferences?.error && (
                         <div style={{ color: "#B42318", fontSize: 12, marginBottom: 8 }}>{koRowReferences.error}</div>
                       )}
-                      {koRowBrunelloPairs[0] && (
+                      {koRowTopBrunelloPair && (
                         <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FED7AA" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                             <div>
-                              <div style={{ color: "#9A3412", fontWeight: 700, fontSize: 12 }}>Top Brunello nearby pair</div>
+                              <div style={{ color: "#9A3412", fontWeight: 700, fontSize: 12 }}>{koRowTopBrunelloPair.candidateMode === "deletion-screen" ? "Top Brunello deletion-screen pair" : koRowTopBrunelloPair.candidateMode === "cross-exon" ? "Top Brunello cross-exon pair" : "Top Brunello local pair"}</div>
                               <div style={{ color: "#7C2D12", fontSize: 12, marginTop: 4 }}>
-                                {koRowBrunelloPairs[0].exonLabel} | {Number.isFinite(koRowBrunelloPairs[0].spacing) ? `${koRowBrunelloPairs[0].spacing} bp spacing` : "spacing n/a"} | {koRowBrunelloPairs[0].result.amp || "amplicon n/a"}
+                                {koRowTopBrunelloPair.exonLabel} | {Number.isFinite(koRowTopBrunelloPair.spacing) ? `${koRowTopBrunelloPair.spacing} bp ${koRowTopBrunelloPair.candidateMode === "deletion-screen" ? "deletion" : "spacing"}` : "spacing n/a"} | {koRowTopBrunelloPair.result.amp || "amplicon n/a"}
                               </div>
                             </div>
-                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowBrunelloPairs[0])} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowTopBrunelloPair)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                               Apply Brunello pair
                             </button>
                           </div>
                         </div>
                       )}
-                      {koRowCasPairs[0] && (
+                      {koRowTopCasPair && (
                         <div style={{ padding: 10, borderRadius: 10, background: "#ffffff", border: "1px solid #D0D5DD" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                             <div>
-                              <div style={{ color: "#111827", fontWeight: 700, fontSize: 12 }}>Top Cas-Database nearby pair</div>
+                              <div style={{ color: "#111827", fontWeight: 700, fontSize: 12 }}>{koRowTopCasPair.candidateMode === "deletion-screen" ? "Top Cas-Database deletion-screen pair" : koRowTopCasPair.candidateMode === "cross-exon" ? "Top Cas-Database cross-exon pair" : "Top Cas-Database local pair"}</div>
                               <div style={{ color: "#475467", fontSize: 12, marginTop: 4 }}>
-                                {koRowCasPairs[0].exonLabel} | {Number.isFinite(koRowCasPairs[0].spacing) ? `${koRowCasPairs[0].spacing} bp spacing` : "spacing n/a"} | {koRowCasPairs[0].result.amp || "amplicon n/a"}
+                                {koRowTopCasPair.exonLabel} | {Number.isFinite(koRowTopCasPair.spacing) ? `${koRowTopCasPair.spacing} bp ${koRowTopCasPair.candidateMode === "deletion-screen" ? "deletion" : "spacing"}` : "spacing n/a"} | {koRowTopCasPair.result.amp || "amplicon n/a"}
                               </div>
                             </div>
-                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowCasPairs[0])} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowTopCasPair)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                               Apply Cas-Database pair
                             </button>
                           </div>
@@ -3989,6 +4687,9 @@ export default function App() {
                 </table>
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {selectedEntry.result.amp || "n/a"}</div>
 
+                <DesignReadinessCard result={selectedEntry.result} />
+                <LocusMapCard result={selectedEntry.result} />
+
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
                 {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} />)}
                 {selectedEntry.result.type === "ko" && (
@@ -4042,18 +4743,18 @@ export default function App() {
                             ))}
                           </tbody>
                         </table>
-                        {!!brunelloPairCandidates.length && (
+                        {!!brunelloLocalCandidates.length && (
                           <div style={{ marginTop: 14 }}>
-                            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Nearby pair designs from the top 3 Brunello guides</div>
+                            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Local pair designs from the top 3 Brunello guides</div>
                             <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
-                              These pairs are remapped onto your uploaded GenBank, then spacing and centered validation primers are calculated automatically.
+                              These pairs are remapped onto your selected reference. Preferred same-exon pairs in the 40-140 bp window are listed first, and other local same-exon pairs are kept for manual review with recalculated primers.
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead>
                                 <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
                               </thead>
                               <tbody>
-                                {brunelloPairCandidates.map((candidate) => (
+                                {brunelloLocalCandidates.map((candidate) => (
                                   <tr key={candidate.id}>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
                                       <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
@@ -4061,7 +4762,9 @@ export default function App() {
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                     </td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp` : "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      {Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp${candidate.candidateMode === "local" ? " (review)" : ""}` : "n/a"}
+                                    </td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                       <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
@@ -4076,6 +4779,93 @@ export default function App() {
                                 ))}
                               </tbody>
                             </table>
+                          </div>
+                        )}
+                        {!!brunelloDeletionCandidates.length && (
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Long-range deletion-screen pairs from the top 3 Brunello guides</div>
+                            <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                              These guide pairs are far apart on your selected reference, so the app designs flanking junction-PCR primers to amplify the deletion band and reports the expected deletion size.
+                            </div>
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr>{["Pair", "Exon location", "Deletion size", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                              </thead>
+                              <tbody>
+                                {brunelloDeletionCandidates.map((candidate) => (
+                                  <tr key={candidate.id}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
+                                      <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
+                                      <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.deletionSize) ? `~${candidate.deletionSize} bp` : "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
+                                      <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
+                                      <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                        Use pair
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {!!brunelloCrossExonCandidates.length && (
+                          <div style={{ marginTop: 14 }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Cross-exon review pairs from the top 3 Brunello guides</div>
+                            <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                              These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and validation primers, but are not preferred default KO pairs.
+                            </div>
+                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead>
+                                <tr>{["Pair", "Exon location", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                              </thead>
+                              <tbody>
+                                {brunelloCrossExonCandidates.map((candidate) => (
+                                  <tr key={candidate.id}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
+                                      <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
+                                      <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp (review)` : "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
+                                      <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
+                                      <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
+                                    </td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                      <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                        Use pair
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                        {!!brunelloFilteredPairs.length && (
+                          <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FDBA74", color: "#7C2D12", fontSize: 12, lineHeight: 1.6 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 6 }}>Filtered Brunello pairs</div>
+                            {brunelloFilteredPairs.map((candidate) => (
+                              <div key={candidate.id}>
+                                {candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}: {candidate.reason}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {!brunelloLocalCandidates.length && !brunelloDeletionCandidates.length && hasSequenceBackedReference(selectedEntry.row) && (
+                          <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FDBA74", color: "#7C2D12", fontSize: 12, lineHeight: 1.5 }}>
+                            No same-exon local Brunello guide pairs within 40-140 bp were found after remapping onto your selected reference.
                           </div>
                         )}
                       </div>
@@ -4114,8 +4904,8 @@ export default function App() {
                           {!casDbLookup.data.targets?.length && (
                             <div style={{ color: "#667085", fontSize: 13 }}>No reference guides were returned for the selected filter tiers.</div>
                           )}
-                          {!!casDbLookup.data.targets?.length && (
-                            <>
+                              {!!casDbLookup.data.targets?.length && (
+                                <>
                               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                 <thead>
                                   <tr>{["Spacer", "PAM", "Location", "Strand", "Off-targets (0/1/2)", "OOF", "Coverage", "Best CDS %", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
@@ -4145,18 +4935,18 @@ export default function App() {
                                   ))}
                                 </tbody>
                               </table>
-                              {!!casDatabasePairCandidates.length && (
+                              {!!casDatabaseLocalCandidates.length && (
                                 <div style={{ marginTop: 14 }}>
-                                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Nearby pair designs from the top 3 Cas-Database guides</div>
+                                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Local pair designs from the top 3 Cas-Database guides</div>
                                   <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
-                                    These nearby pairs are remapped onto your uploaded GenBank and the validation primers are centered automatically on the chosen deletion window.
+                                    These pairs are remapped onto your selected reference. Preferred same-exon pairs in the 40-140 bp window are listed first, and other local same-exon pairs are kept for manual review with recalculated primers.
                                   </div>
                                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                     <thead>
                                       <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
                                     </thead>
                                     <tbody>
-                                      {casDatabasePairCandidates.map((candidate) => (
+                                      {casDatabaseLocalCandidates.map((candidate) => (
                                         <tr key={candidate.id}>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
                                             <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
@@ -4164,7 +4954,9 @@ export default function App() {
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                           </td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp` : "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            {Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp${candidate.candidateMode === "local" ? " (review)" : ""}` : "n/a"}
+                                          </td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                             <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
@@ -4181,6 +4973,93 @@ export default function App() {
                                   </table>
                                 </div>
                               )}
+                              {!!casDatabaseDeletionCandidates.length && (
+                                <div style={{ marginTop: 14 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Long-range deletion-screen pairs from the top 3 Cas-Database guides</div>
+                                  <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                    These guide pairs are far apart on your selected reference, so the app designs flanking junction-PCR primers to amplify the deletion band and reports the expected deletion size.
+                                  </div>
+                                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                    <thead>
+                                      <tr>{["Pair", "Exon location", "Deletion size", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                    </thead>
+                                    <tbody>
+                                      {casDatabaseDeletionCandidates.map((candidate) => (
+                                        <tr key={candidate.id}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
+                                            <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
+                                            <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
+                                          </td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.deletionSize) ? `~${candidate.deletionSize} bp` : "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
+                                            <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
+                                            <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
+                                          </td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                              Use pair
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              {!!casDatabaseCrossExonCandidates.length && (
+                                <div style={{ marginTop: 14 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Cross-exon review pairs from the top 3 Cas-Database guides</div>
+                                  <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                    These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and validation primers, but are not preferred default KO pairs.
+                                  </div>
+                                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                    <thead>
+                                      <tr>{["Pair", "Exon location", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                    </thead>
+                                    <tbody>
+                                      {casDatabaseCrossExonCandidates.map((candidate) => (
+                                        <tr key={candidate.id}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
+                                            <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
+                                            <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
+                                          </td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp (review)` : "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
+                                            <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
+                                            <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
+                                          </td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                            <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                              Use pair
+                                            </button>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                              {!!casDatabaseFilteredPairs.length && (
+                                <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", color: "#475467", fontSize: 12, lineHeight: 1.6 }}>
+                                  <div style={{ fontWeight: 700, marginBottom: 6, color: "#111827" }}>Filtered Cas-Database pairs</div>
+                                  {casDatabaseFilteredPairs.map((candidate) => (
+                                    <div key={candidate.id}>
+                                      {candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}: {candidate.reason}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {!casDatabaseLocalCandidates.length && !casDatabaseDeletionCandidates.length && hasSequenceBackedReference(selectedEntry.row) && (
+                                <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", color: "#475467", fontSize: 12, lineHeight: 1.5 }}>
+                                  No same-exon local Cas-Database guide pairs within 40-140 bp were found after remapping onto your selected reference.
+                                </div>
+                              )}
                             </>
                           )}
                         </>
@@ -4190,7 +5069,6 @@ export default function App() {
                 )}
                 {selectedEntry.result.type === "it" && (
                   <>
-                    <KnockinQcSummaryCard result={selectedEntry.result} />
                     <InternalProteinPreviewCard result={selectedEntry.result} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
                     {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} />)}
@@ -4198,7 +5076,6 @@ export default function App() {
                 )}
                 {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (
                   <>
-                    <KnockinQcSummaryCard result={selectedEntry.result} />
                     <KnockinProteinPreviewCard preview={selectedEntry.result.proteinPreview} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
                     <AnnotatedDonor sequence={selectedEntry.result.donor} annotations={selectedEntry.result.donorAnnotations} />

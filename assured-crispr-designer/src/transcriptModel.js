@@ -204,6 +204,30 @@ export function normalizeNcbiToTranscriptModel(payload) {
   });
 }
 
+export function normalizeRawSequenceToTranscriptModel(payload) {
+  const genomicSequence = String(payload?.sequence || "").toUpperCase().replace(/[^ACGT]/g, "");
+  const cdsStartInput = Number(payload?.cdsStart);
+  const cdsEndInput = Number(payload?.cdsEnd);
+  if (!genomicSequence || !Number.isFinite(cdsStartInput) || !Number.isFinite(cdsEndInput)) return null;
+  const cdsStart = Math.max(0, Math.floor(cdsStartInput) - 1);
+  const cdsEnd = Math.min(genomicSequence.length, Math.floor(cdsEndInput));
+  if (cdsEnd <= cdsStart) return null;
+  const exons = Array.isArray(payload?.exons) && payload.exons.length
+    ? payload.exons
+    : [{ start: cdsStart, end: cdsEnd, exonNumber: 1, label: "Exon 1" }];
+  return buildTranscriptModel({
+    gene: payload?.gene || payload?.geneSymbol || "Gene",
+    transcriptId: payload?.transcriptId || "",
+    genomicSequence,
+    cdsSegments: [[cdsStart, cdsEnd]],
+    exons,
+    strand: 1,
+    source: "raw-sequence",
+    assembly: payload?.assembly || "",
+    rawFeatures: [],
+  });
+}
+
 export function codingPosToGenomic(model, codingPos) {
   const segments = getCdsSegments(model);
   let cursor = 0;
@@ -312,6 +336,79 @@ export function describeKoGenomicContextFromModel(model, cut) {
     label: "downstream of CDS",
     detail: `${cut - lastRegion.end} bp downstream of exon ${lastRegion.exonNumber}`,
   };
+}
+
+export function describeGuidePlacementFromModel(model, guide) {
+  const exons = getExonsFromModel(model);
+  const segments = getCdsSegments(model);
+  const regions = exons.length
+    ? exons.map((exon) => ({ start: exon.start, end: exon.end, exonNumber: exon.exonNumber }))
+    : segments.map(([start, end], index) => ({ start, end, exonNumber: index + 1 }));
+  if (!regions.length || !Number.isFinite(guide?.ps)) {
+    return { label: "context unavailable", detail: "Guide placement could not be resolved on the reference." };
+  }
+
+  const guideStart = guide.ps;
+  const guideEnd = guide.ps + 23;
+  const overlappingExons = regions.filter((region) => guideStart < region.end && guideEnd > region.start);
+
+  if (overlappingExons.length === 1) {
+    const exon = overlappingExons[0];
+    const fullyInside = guideStart >= exon.start && guideEnd <= exon.end;
+    if (fullyInside) {
+      return {
+        label: `exonic (exon ${exon.exonNumber})`,
+        detail: `Guide spans ${guideEnd - guideStart} bp within exon ${exon.exonNumber}.`,
+      };
+    }
+    return {
+      label: `crosses exon ${exon.exonNumber} boundary`,
+      detail: `Guide overlaps exon ${exon.exonNumber} and adjacent noncoding sequence.`,
+    };
+  }
+
+  if (overlappingExons.length > 1) {
+    const first = overlappingExons[0];
+    const last = overlappingExons[overlappingExons.length - 1];
+    return {
+      label: `crosses exon boundary`,
+      detail: `Guide spans exon ${first.exonNumber} to exon ${last.exonNumber}.`,
+    };
+  }
+
+  if (guideEnd <= regions[0].start) {
+    return {
+      label: "upstream of CDS",
+      detail: `Guide lies upstream of exon ${regions[0].exonNumber}.`,
+    };
+  }
+
+  for (let index = 0; index < regions.length - 1; index += 1) {
+    const left = regions[index];
+    const right = regions[index + 1];
+    if (guideStart >= left.end && guideEnd <= right.start) {
+      return {
+        label: `intronic`,
+        detail: `Guide lies in the intron between exon ${left.exonNumber} and exon ${right.exonNumber}.`,
+      };
+    }
+    if (guideStart < right.start && guideEnd > left.end) {
+      return {
+        label: "crosses exon boundary",
+        detail: `Guide spans the intron between exon ${left.exonNumber} and exon ${right.exonNumber}.`,
+      };
+    }
+  }
+
+  const lastRegion = regions[regions.length - 1];
+  if (guideStart >= lastRegion.end) {
+    return {
+      label: "downstream of CDS",
+      detail: `Guide lies downstream of exon ${lastRegion.exonNumber}.`,
+    };
+  }
+
+  return { label: "context unavailable", detail: "Guide placement could not be resolved on the reference." };
 }
 
 export function extractCodingDonorWindowFromModel(model, donorStart, donorEnd, payload) {
