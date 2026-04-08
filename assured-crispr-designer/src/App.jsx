@@ -212,10 +212,31 @@ const CONSTRUCT_BUILDER_OPTIONS = {
       payloads: [
         { cassette: "N:EGFP-Linker", label: "EGFP", kind: "reporter" },
         { cassette: "N:mStayGold2-Linker", label: "mStayGold2", kind: "reporter" },
-        { cassette: "N:SD40-Linker", label: "SD40", kind: "tag" },
-        { cassette: "N:dTAG-Linker", label: "dTAG", kind: "tag" },
-        { cassette: "N:mAID-Linker", label: "mAID", kind: "tag" },
-        { cassette: "N:2xHA-dTAG-Linker", label: "2xHA-dTAG", kind: "tag" },
+        { cassette: "N:dTAG-V5", label: "dTAG-V5", kind: "tag" },
+        { cassette: "N:dTAG-HA", label: "dTAG-HA", kind: "tag" },
+        { cassette: "N:SD40-V5", label: "SD40-V5", kind: "tag" },
+        { cassette: "N:SD40-HA", label: "SD40-HA", kind: "tag" },
+        { cassette: "N:miniIAA7-V5", label: "miniIAA7-V5", kind: "tag" },
+        { cassette: "N:miniIAA7-HA", label: "miniIAA7-HA", kind: "tag" },
+      ],
+    },
+    {
+      id: "tag_p2a_selection",
+      label: "Tag + P2A selection",
+      help: "N-terminal fusion tag followed by a cleavable P2A antibiotic selection cassette.",
+      payloads: [
+        { cassette: "N:dTAG-V5-P2A-BlastiR", label: "dTAG-V5 + BlastiR", kind: "selection" },
+        { cassette: "N:dTAG-V5-P2A-HygroR", label: "dTAG-V5 + HygroR", kind: "selection" },
+        { cassette: "N:dTAG-HA-P2A-BlastiR", label: "dTAG-HA + BlastiR", kind: "selection" },
+        { cassette: "N:dTAG-HA-P2A-HygroR", label: "dTAG-HA + HygroR", kind: "selection" },
+        { cassette: "N:SD40-V5-P2A-BlastiR", label: "SD40-V5 + BlastiR", kind: "selection" },
+        { cassette: "N:SD40-V5-P2A-HygroR", label: "SD40-V5 + HygroR", kind: "selection" },
+        { cassette: "N:SD40-HA-P2A-BlastiR", label: "SD40-HA + BlastiR", kind: "selection" },
+        { cassette: "N:SD40-HA-P2A-HygroR", label: "SD40-HA + HygroR", kind: "selection" },
+        { cassette: "N:miniIAA7-V5-P2A-BlastiR", label: "miniIAA7-V5 + BlastiR", kind: "selection" },
+        { cassette: "N:miniIAA7-V5-P2A-HygroR", label: "miniIAA7-V5 + HygroR", kind: "selection" },
+        { cassette: "N:miniIAA7-HA-P2A-BlastiR", label: "miniIAA7-HA + BlastiR", kind: "selection" },
+        { cassette: "N:miniIAA7-HA-P2A-HygroR", label: "miniIAA7-HA + HygroR", kind: "selection" },
       ],
     },
     {
@@ -245,10 +266,31 @@ const CONSTRUCT_BUILDER_OPTIONS = {
       label: "Fusion / linker",
       help: "Tag is fused directly at the C-terminus with the built-in linker.",
       payloads: [
-        { cassette: "2xHA-only", label: "2xHA", kind: "tag" },
-        { cassette: "SD40-2xHA", label: "SD40-2xHA", kind: "tag" },
-        { cassette: "dTAG-2xHA", label: "dTAG-2xHA", kind: "tag" },
-        { cassette: "mAID-2xHA", label: "mAID-2xHA", kind: "tag" },
+        { cassette: "dTAG-V5", label: "dTAG-V5", kind: "tag" },
+        { cassette: "dTAG-HA", label: "dTAG-HA", kind: "tag" },
+        { cassette: "SD40-V5", label: "SD40-V5", kind: "tag" },
+        { cassette: "SD40-HA", label: "SD40-HA", kind: "tag" },
+        { cassette: "miniIAA7-V5", label: "miniIAA7-V5", kind: "tag" },
+        { cassette: "miniIAA7-HA", label: "miniIAA7-HA", kind: "tag" },
+      ],
+    },
+    {
+      id: "tag_p2a_selection",
+      label: "Tag + P2A selection",
+      help: "C-terminal fusion tag followed by a cleavable P2A antibiotic selection cassette.",
+      payloads: [
+        { cassette: "dTAG-V5-P2A-BlastiR", label: "dTAG-V5 + BlastiR", kind: "selection" },
+        { cassette: "dTAG-V5-P2A-HygroR", label: "dTAG-V5 + HygroR", kind: "selection" },
+        { cassette: "dTAG-HA-P2A-BlastiR", label: "dTAG-HA + BlastiR", kind: "selection" },
+        { cassette: "dTAG-HA-P2A-HygroR", label: "dTAG-HA + HygroR", kind: "selection" },
+        { cassette: "SD40-V5-P2A-BlastiR", label: "SD40-V5 + BlastiR", kind: "selection" },
+        { cassette: "SD40-V5-P2A-HygroR", label: "SD40-V5 + HygroR", kind: "selection" },
+        { cassette: "SD40-HA-P2A-BlastiR", label: "SD40-HA + BlastiR", kind: "selection" },
+        { cassette: "SD40-HA-P2A-HygroR", label: "SD40-HA + HygroR", kind: "selection" },
+        { cassette: "miniIAA7-V5-P2A-BlastiR", label: "miniIAA7-V5 + BlastiR", kind: "selection" },
+        { cassette: "miniIAA7-V5-P2A-HygroR", label: "miniIAA7-V5 + HygroR", kind: "selection" },
+        { cassette: "miniIAA7-HA-P2A-BlastiR", label: "miniIAA7-HA + BlastiR", kind: "selection" },
+        { cassette: "miniIAA7-HA-P2A-HygroR", label: "miniIAA7-HA + HygroR", kind: "selection" },
       ],
     },
     {
@@ -955,7 +997,7 @@ function createBatchRow(index) {
     projectType: "pm",
     referenceSource: "genbank",
     mutation: "",
-    tag: "SD40-2xHA",
+    tag: "dTAG-V5",
     homologyArm: "250",
     customGuides: "",
     gbRaw: "",
@@ -1255,10 +1297,10 @@ function parseRequestLine(line, index, folderLibrary) {
     projectType,
     mutation: projectType === "pm" ? mutation : projectType === "it" ? internalSite : "",
     tag: projectType === "ct" || projectType === "nt"
-      ? (cassetteKey || (projectType === "nt" ? "N:EGFP-Linker" : "SD40-2xHA"))
+      ? (cassetteKey || (projectType === "nt" ? "N:dTAG-V5" : "dTAG-V5"))
       : projectType === "it"
         ? (cassetteKey || "SPOT")
-        : "SD40-2xHA",
+        : "dTAG-V5",
     homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
     customGuides: "",
     gbRaw: fileEntry?.gbRaw || "",
@@ -3878,7 +3920,7 @@ export default function App() {
           label: definition.label || fileEntry.fileName.replace(/\.[^.]+$/, ""),
           projectType: definition.projectType,
           mutation: definition.projectType === "pm" ? definition.modification : definition.projectType === "it" ? internalSpec.site : "",
-          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : "SD40-2xHA",
+          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : "dTAG-V5",
           homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "250") : "250",
           gbRaw: fileEntry.gbRaw,
           fileName: fileEntry.fileName,
@@ -4332,7 +4374,15 @@ export default function App() {
                           </select>
                         </label>
                         <label>
-                          <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>{constructSelection?.architecture === "fusion" ? "Reporter / tag" : constructSelection?.architecture === "tag_p2a_reporter" ? "Tag + reporter" : "Reporter"}</div>
+                          <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>
+                            {constructSelection?.architecture === "fusion"
+                              ? "Reporter / tag"
+                              : constructSelection?.architecture === "tag_p2a_reporter"
+                                ? "Tag + reporter"
+                                : constructSelection?.architecture === "tag_p2a_selection"
+                                  ? "Tag + selection"
+                                  : "Reporter"}
+                          </div>
                           <select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>
                             {constructPayloads.map((option) => <option key={option.cassette} value={option.cassette}>{option.label} ({getCassetteSequenceLength(option.cassette, row.projectType)} bp)</option>)}
                           </select>
