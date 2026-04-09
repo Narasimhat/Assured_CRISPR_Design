@@ -3,14 +3,14 @@
 :root {
   color-scheme: dark;
 
-  --bg: #07111c;
-  --panel: #0f1c2e;
-  --panel-alt: #14243b;
-  --border: #213754;
-  --text: #e5eef7;
-  --muted: #93a7bd;
-  --accent: #2dd4bf;
-  --danger: #fb7185;
+  --bg: #08131f;
+  --panel: #102234;
+  --panel-alt: #173149;
+  --border: #27435f;
+  --text: #f2f7fb;
+  --muted: #d2deea;
+  --accent: #59c7bd;
+  --danger: #f07a7a;
 }
 
 html,

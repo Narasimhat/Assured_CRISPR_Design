@@ -4,17 +4,19 @@ import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBank
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
 const COLORS = {
-  bg: "#07111c",
-  panel: "#0f1c2e",
-  panelAlt: "#14243b",
-  border: "#213754",
-  accent: "#2dd4bf",
-  accentAlt: "#f59e0b",
-  success: "#34d399",
-  danger: "#fb7185",
-  text: "#e5eef7",
-  muted: "#93a7bd",
-  dim: "#5f748c",
+  bg: "#08131f",
+  panel: "#102234",
+  panelAlt: "#173149",
+  border: "#27435f",
+  borderSoft: "rgba(199, 213, 228, 0.22)",
+  accent: "#59c7bd",
+  accentAlt: "#f0b458",
+  success: "#42c98f",
+  danger: "#f07a7a",
+  text: "#f2f7fb",
+  muted: "#d2deea",
+  dim: "#a8b8ca",
+  paper: "#f6f7f4",
 };
 
 const PROJECT_TYPES = [
@@ -37,18 +39,35 @@ const FIELD_STYLE = {
   width: "100%",
   padding: "10px 12px",
   borderRadius: 10,
-  border: `1px solid ${COLORS.border}`,
-  background: COLORS.panelAlt,
+  border: `1px solid ${COLORS.borderSoft}`,
+  background: "rgba(10, 20, 34, 0.78)",
   color: COLORS.text,
-  fontSize: 13,
+  fontSize: 14,
+  minHeight: 44,
+  lineHeight: 1.35,
   boxSizing: "border-box",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+};
+
+const SELECT_STYLE = {
+  ...FIELD_STYLE,
+  appearance: "none",
+  WebkitAppearance: "none",
+  MozAppearance: "none",
+  paddingRight: 36,
+  backgroundImage: 'linear-gradient(45deg, transparent 50%, #93a7bd 50%), linear-gradient(135deg, #93a7bd 50%, transparent 50%)',
+  backgroundPosition: "calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px)",
+  backgroundSize: "6px 6px, 6px 6px",
+  backgroundRepeat: "no-repeat",
 };
 
 const CARD_STYLE = {
-  background: COLORS.panel,
+  background: "linear-gradient(180deg, rgba(15,28,46,0.98), rgba(12,23,38,0.96))",
   border: `1px solid ${COLORS.border}`,
   borderRadius: 18,
   padding: 18,
+  boxShadow: "0 22px 50px rgba(2, 8, 23, 0.28)",
+  backdropFilter: "blur(10px)",
 };
 
 const CODON_TABLE = {
@@ -378,6 +397,32 @@ function normalizeReporterName(value) {
 
 function getOrderReadyReporterKey(name) {
   return ORDER_READY_REPORTER_NAME_MAP[normalizeReporterName(name)] || "";
+}
+
+function detectReporterMentionKey(text) {
+  const normalized = normalizeReporterName(text);
+  for (const [alias, key] of Object.entries(ORDER_READY_REPORTER_NAME_MAP)) {
+    if (normalized.includes(alias)) return key;
+  }
+  return "";
+}
+
+function detectArchitectureHint(text) {
+  const lower = String(text || "").toLowerCase();
+  if (/\bp2a\b/.test(lower)) return "p2a";
+  if (/\bt2a\b/.test(lower)) return "t2a";
+  if (/\bfusion\b|\blink(?:er)?\b|\bdirect\b/.test(lower)) return "fusion";
+  return "";
+}
+
+function resolveReporterCassette(reporterKey, projectType, architectureHint = "") {
+  const options = (ORDER_READY_REPORTER_CASSETTES[reporterKey]?.[projectType] || []).filter((option) => CASSETTES[option]);
+  if (!options.length) return "";
+  if (!architectureHint) return options.length === 1 ? options[0] : "";
+  if (architectureHint === "fusion") return options.find((option) => option.includes("Linker")) || "";
+  if (architectureHint === "t2a") return options.find((option) => option.includes("T2A")) || "";
+  if (architectureHint === "p2a") return options.find((option) => option.includes("P2A")) || "";
+  return "";
 }
 
 function getReporterActionOptions(reporterName, projectType) {
@@ -996,6 +1041,7 @@ function createBatchRow(index) {
     notes: "",
     projectType: "pm",
     referenceSource: "genbank",
+    requestedReporter: "",
     mutation: "",
     tag: "dTAG-V5",
     homologyArm: "250",
@@ -1007,6 +1053,27 @@ function createBatchRow(index) {
     cdsEnd: "",
     exonCoordinates: "",
   };
+}
+
+function applyBatchRowChange(row, key, value, folderLibrary) {
+  const nextRow = { ...row, [key]: value };
+  if (key === "projectType") {
+    if (value === "it") {
+      nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
+      nextRow.mutation = row.mutation && /^[A-Z]?\d+$/i.test(row.mutation) ? row.mutation : "";
+    } else if (value === "ct") {
+      nextRow.tag = CASSETTES[row.tag] && !row.tag.startsWith("N:") ? row.tag : "SD40-2xHA";
+    } else if (value === "nt") {
+      nextRow.tag = CASSETTES[row.tag] ? row.tag : "N:EGFP-Linker";
+    }
+  }
+  if (key === "gene" && nextRow.referenceSource !== "raw" && !nextRow.fileName && folderLibrary.byGene.has(normalizeGeneToken(value))) {
+    const match = folderLibrary.byGene.get(normalizeGeneToken(value));
+    nextRow.gbRaw = match.gbRaw;
+    nextRow.fileName = match.fileName;
+  }
+  nextRow.parseIssue = summarizeRowParseIssue(nextRow);
+  return nextRow;
 }
 
 function resizeBatchRows(rows, size) {
@@ -1214,8 +1281,8 @@ function detectProjectTypeFromText(text, mutation, internalSite, cassetteKey) {
   const lower = String(text || "").toLowerCase();
   if (/\b(ko|knockout)\b/.test(lower)) return "ko";
   if (/\b(internal|in-frame|inframe)\b/.test(lower)) return "it";
-  if (/\b(c[\s-]?term(?:inal)?|ct)\b/.test(lower)) return "ct";
-  if (/\b(n[\s-]?term(?:inal)?|nt)\b/.test(lower)) return "nt";
+  if (/\b(c[\s-]?(?:term(?:inal|inus)?)|ct)\b/.test(lower)) return "ct";
+  if (/\b(n[\s-]?(?:term(?:inal|inus)?)|nt)\b/.test(lower)) return "nt";
   if (internalSite && cassetteKey && INTERNAL_TAGS[cassetteKey]) return "it";
   if (cassetteKey?.startsWith("N:")) return "nt";
   if (cassetteKey) return "ct";
@@ -1228,6 +1295,12 @@ function detectCassetteKey(text, targetType = "") {
   const normalizedLine = String(text || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   const aliasedKey = CASSETTE_ALIASES[normalizedLine];
   if (aliasedKey) return aliasedKey;
+  if (targetType === "nt" || targetType === "ct") {
+    const reporterKey = detectReporterMentionKey(text);
+    const architectureHint = detectArchitectureHint(text);
+    const reporterCassette = resolveReporterCassette(reporterKey, targetType, architectureHint);
+    if (reporterCassette) return reporterCassette;
+  }
   if (!targetType || targetType === "it") {
     const internalKeys = Object.keys(INTERNAL_TAGS).sort((a, b) => b.length - a.length);
     for (const key of internalKeys) {
@@ -1258,21 +1331,36 @@ function detectGeneToken(text, cellLine, mutation, cassetteKey) {
   const raw = String(text || "").replace(/[,;]+/g, " ").trim();
   const tokens = raw.split(/\s+/).filter(Boolean);
   const stopTokens = new Set([
-    "ko", "knockout", "ct", "nt", "cterminal", "nterminal", "c-terminal", "n-terminal",
-    "c", "n", "term", "terminal", "in", "with", "internal", "inframe", "after",
+    "ko", "knockout", "ct", "nt", "cterminal", "nterminal", "cterminus", "nterminus", "c-terminal", "n-terminal", "c-terminus", "n-terminus",
+    "c", "n", "term", "terminal", "terminus", "in", "with", "internal", "inframe", "after",
+    "make", "design", "create", "add", "insert", "generate", "build", "edit", "tag",
+    "please", "help", "want", "need", "show", "draft", "use", "switch", "set",
+    "i", "me", "my", "we", "us", "a", "an", "the", "to", "of", "for",
   ]);
   const mutationLower = mutation.toLowerCase();
   const cellLineLower = String(cellLine || "").toLowerCase();
   const cassettePieces = new Set(String(cassetteKey || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean));
-  const token = tokens.find((value) => {
+  const reporterPieces = new Set(
+    Object.keys(ORDER_READY_REPORTER_NAME_MAP)
+      .concat(Object.values(ORDER_READY_REPORTER_NAME_MAP).map((value) => String(value).toLowerCase()))
+      .concat(["egfp", "mcherry", "mscarlet", "mscarleti3", "mstaygold2"])
+  );
+  const isValidGeneToken = (value) => {
     const lower = value.toLowerCase();
     if (!/[a-z]/i.test(value)) return false;
     if (stopTokens.has(lower)) return false;
     if (cellLineLower && lower === cellLineLower) return false;
     if (mutation && lower === mutationLower) return false;
     if (cassettePieces.has(lower)) return false;
+    if (reporterPieces.has(lower.replace(/[^a-z0-9]+/g, ""))) return false;
     return true;
-  });
+  };
+  const ofMatch = raw.match(/\bof\s+([A-Za-z0-9._-]+)\b/i);
+  if (ofMatch) {
+    const candidate = ofMatch[1];
+    if (isValidGeneToken(candidate)) return normalizeGeneToken(candidate);
+  }
+  const token = tokens.find((value) => isValidGeneToken(value));
   return token ? normalizeGeneToken(token) : "";
 }
 
@@ -1283,6 +1371,7 @@ function parseRequestLine(line, index, folderLibrary) {
   const mutation = detectMutationToken(trimmed);
   const internalSite = detectInternalSiteToken(trimmed);
   const projectType = detectProjectTypeFromText(trimmed, mutation, internalSite, initialCassette);
+  const requestedReporter = (projectType === "ct" || projectType === "nt") ? detectReporterMentionKey(trimmed) : "";
   const cassetteKey = detectCassetteKey(trimmed, projectType) || ((projectType === "ct" || projectType === "nt" || projectType === "it") ? initialCassette : "");
   const cellLine = detectCellLineToken(trimmed);
   const gene = detectGeneToken(trimmed, cellLine, mutation, cassetteKey);
@@ -1295,9 +1384,10 @@ function parseRequestLine(line, index, folderLibrary) {
     gene,
     cellLine,
     projectType,
+    requestedReporter,
     mutation: projectType === "pm" ? mutation : projectType === "it" ? internalSite : "",
     tag: projectType === "ct" || projectType === "nt"
-      ? (cassetteKey || (projectType === "nt" ? "N:dTAG-V5" : "dTAG-V5"))
+      ? (cassetteKey || "")
       : projectType === "it"
         ? (cassetteKey || "SPOT")
         : "dTAG-V5",
@@ -1316,6 +1406,14 @@ function parseRequestText(text, folderLibrary) {
     .split(/\r?\n/)
     .map((line, index) => parseRequestLine(line, index, folderLibrary))
     .filter(Boolean);
+}
+
+function formatProjectTypeLabel(projectType) {
+  return PROJECT_TYPES.find((entry) => entry.id === projectType)?.label || "Unclassified design";
+}
+function detectInternalTagKey(text) {
+  const lower = String(text || "").toLowerCase();
+  return Object.keys(INTERNAL_TAGS).find((key) => lower.includes(key.toLowerCase())) || "";
 }
 
 function parseWorkspaceProjectFolderEntries(entries, folderLibrary) {
@@ -2195,7 +2293,7 @@ function buildKnockinQcSummaryHtml(result) {
   const checks = buildKnockinQcChecks(result);
   if (!checks.length) return "";
   const styleFor = (status) => status === "pass"
-    ? { color: "#047857", background: "#D1FAE5", label: "Pass" }
+    ? { color: "#8a5a12", background: "#D1FAE5", label: "Pass" }
     : status === "warn"
       ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
       : { color: "#475467", background: "#EAECF0", label: "N/A" };
@@ -2342,7 +2440,7 @@ function buildDesignReadinessHtml(result) {
   const checks = buildDesignReadinessChecks(result);
   if (!checks.length) return "";
   const styleFor = (status) => status === "pass"
-    ? { color: "#047857", background: "#D1FAE5", label: "Pass" }
+    ? { color: "#8a5a12", background: "#D1FAE5", label: "Pass" }
     : status === "warn"
       ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
       : { color: "#475467", background: "#EAECF0", label: "N/A" };
@@ -2743,15 +2841,77 @@ p{font-size:13px;line-height:1.45}
 }
 
 function Badge({ children, color = COLORS.accent }) {
-  return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color, background: `${color}12`, border: `1px solid ${color}33` }}>{children}</span>;
+  return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, fontSize: 13, fontWeight: 700, color, background: `${color}12`, border: `1px solid ${color}33` }}>{children}</span>;
 }
 
 function SectionTitle({ children }) {
-  return <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.8, color: COLORS.accent, textTransform: "uppercase", marginBottom: 10 }}>{children}</div>;
+  return <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: 0.2, color: COLORS.accent, marginBottom: 10 }}>{children}</div>;
 }
 
 function Grid({ children }) {
   return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>{children}</div>;
+}
+
+function QuickMetric({ label, value, tone = "default" }) {
+  const toneColor = tone === "accent" ? COLORS.accent : tone === "warm" ? COLORS.accentAlt : tone === "success" ? COLORS.success : COLORS.text;
+  return (
+    <div
+      style={{
+        minWidth: 120,
+        padding: "12px 14px",
+        borderRadius: 14,
+        border: `1px solid ${toneColor}33`,
+        background: `linear-gradient(180deg, ${toneColor}10, rgba(15,28,46,0.82))`,
+      }}
+    >
+      <div style={{ color: COLORS.muted, fontSize: 13, fontWeight: 700, letterSpacing: 0.1, marginBottom: 4 }}>{label}</div>
+      <div style={{ color: toneColor, fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{value}</div>
+    </div>
+  );
+}
+
+function FormSection({ title, hint, children, tone = "default" }) {
+  const accent = tone === "accent" ? COLORS.accent : tone === "warm" ? COLORS.accentAlt : COLORS.borderSoft;
+  return (
+    <div
+      style={{
+        marginTop: 12,
+        padding: 14,
+        borderRadius: 14,
+        border: `1px solid ${accent === COLORS.borderSoft ? COLORS.borderSoft : `${accent}44`}`,
+        background: tone === "default" ? "rgba(8,18,32,0.34)" : `linear-gradient(180deg, ${accent}10, rgba(8,18,32,0.42))`,
+      }}
+    >
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ color: accent === COLORS.borderSoft ? COLORS.text : accent, fontSize: 15, fontWeight: 800 }}>{title}</div>
+        {hint && <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.55, marginTop: 4 }}>{hint}</div>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function TopLevelTabButton({ active, children, onClick, tone = "default" }) {
+  const toneColor = tone === "accent" ? COLORS.accent : tone === "warm" ? COLORS.accentAlt : COLORS.text;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        padding: "10px 14px",
+        borderRadius: 12,
+        border: active ? `1px solid ${toneColor}66` : `1px solid ${COLORS.borderSoft}`,
+        background: active ? `linear-gradient(180deg, ${toneColor}14, rgba(12,23,38,0.84))` : "rgba(8,18,32,0.24)",
+        color: active ? toneColor : COLORS.text,
+        fontSize: 14,
+        fontWeight: 700,
+        cursor: "pointer",
+        boxShadow: active ? "0 10px 24px rgba(2,8,23,0.16)" : "none",
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
 function SequenceDiffRow({ label, sequence, diffIndexes, mode }) {
@@ -2897,18 +3057,18 @@ function PmDonorPreview({ donor }) {
           </div>
           <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-            {strand.regions.map((region) => <span key={`${strand.key}-${region.label}-${region.start}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: region.color }}>{region.label} ({region.end - region.start} nt)</span>)}
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_EDIT_COLORS.desired }}>Desired edit</span>
-            {!!strand.silentIndexes?.length && <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#7F1D1D", background: PM_EDIT_COLORS.silent }}>Silent mutation</span>}
+            {strand.regions.map((region) => <span key={`${strand.key}-${region.label}-${region.start}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#1f2937", background: region.color }}>{region.label} ({region.end - region.start} nt)</span>)}
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#92400E", background: PM_EDIT_COLORS.desired }}>Desired edit</span>
+            {!!strand.silentIndexes?.length && <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#7F1D1D", background: PM_EDIT_COLORS.silent }}>Silent mutation</span>}
           </div>
           <PmAnnotatedSequenceRow label="WT" sequence={strand.wt} diffIndexes={strand.diffIndexes} mode="wt" regions={strand.regions} guide={strand.guide} desiredIndexes={strand.desiredIndexes} silentIndexes={strand.silentIndexes} />
           <PmAnnotatedSequenceRow label="Donor" sequence={strand.donor} diffIndexes={strand.diffIndexes} mode="donor" regions={strand.regions} guide={strand.guide} desiredIndexes={strand.desiredIndexes} silentIndexes={strand.silentIndexes} />
         </div>
       ))}
       <div style={{ marginTop: 10, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-        <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
+        <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
         <AlignedTokenRow label="WT codons" prefix={comparison.wt.prefix} tokens={comparison.wt.codons} suffix={comparison.wt.suffix} diffIndexes={comparison.diffCodonIndexes} mode="wt" />
         <AlignedTokenRow label="Donor codons" prefix={comparison.donor.prefix} tokens={comparison.donor.codons} suffix={comparison.donor.suffix} diffIndexes={comparison.diffCodonIndexes} mode="donor" />
         <AlignedTokenRow label="WT amino acids" tokens={comparison.wtAa} diffIndexes={comparison.diffAaIndexes} mode="wt" />
@@ -2923,10 +3083,10 @@ function InternalProteinPreviewCard({ result }) {
   if (!preview) return null;
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
       <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>Insert {result.tag} after {result.wA}{result.an}, before {result.nextAA}{result.an + 1}.</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag codons / amino acids</span>
+        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag codons / amino acids</span>
       </div>
       <AlignedTokenRow label="WT codons" tokens={preview.wtCodons} />
       <AlignedTokenRow label="Donor codons" tokens={preview.donorCodons} diffIndexes={Array.from({ length: preview.insertCodonLength }, (_, index) => preview.insertCodonStart + index)} mode="donor" />
@@ -2961,10 +3121,10 @@ function InsertValidationCard({ validation }) {
   }
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Insert identity check</div>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Insert identity check</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
         {badges.map((badge) => (
-          <span key={badge.label} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: badge.color, background: badge.background }}>
+          <span key={badge.label} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: badge.color, background: badge.background }}>
             {badge.label}
           </span>
         ))}
@@ -2982,7 +3142,7 @@ function InsertValidationCard({ validation }) {
         <div key={check.label} style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #E5E7EB" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 6 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{check.label}</span>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: check.matches ? "#047857" : "#B42318", background: check.matches ? "#D1FAE5" : "#FEE4E2" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: check.matches ? "#047857" : "#B42318", background: check.matches ? "#D1FAE5" : "#FEE4E2" }}>
               {check.matches ? "Protein matches reference" : "Protein mismatch"}
             </span>
           </div>
@@ -3007,7 +3167,7 @@ function KnockinQcSummaryCard({ result }) {
       : { color: "#475467", background: "#EAECF0", label: "N/A" };
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Knock-in QC summary</div>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Knock-in QC summary</div>
       {checks.map((check, index) => {
         const badge = styleFor(check.status);
         return (
@@ -3016,7 +3176,7 @@ function KnockinQcSummaryCard({ result }) {
               <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{check.label}</div>
               <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{check.detail}</div>
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: badge.color, background: badge.background }}>
+            <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: badge.color, background: badge.background }}>
               {badge.label}
             </span>
           </div>
@@ -3036,7 +3196,7 @@ function DesignReadinessCard({ result }) {
       : { color: "#475467", background: "#EAECF0", label: "N/A" };
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Design readiness</div>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Design readiness</div>
       {checks.map((check, index) => {
         const badge = styleFor(check.status);
         return (
@@ -3045,7 +3205,7 @@ function DesignReadinessCard({ result }) {
               <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>{check.label}</div>
               <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>{check.detail}</div>
             </div>
-            <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: badge.color, background: badge.background }}>
+            <span style={{ display: "inline-flex", alignItems: "center", whiteSpace: "nowrap", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: badge.color, background: badge.background }}>
               {badge.label}
             </span>
           </div>
@@ -3063,7 +3223,7 @@ function LocusMapCard({ result }) {
   if (!items.length) return null;
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Target region map</div>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Target region map</div>
       <div style={{ fontSize: 12, color: "#555", marginBottom: 10 }}>Showing {window.start + 1}-{window.end} on the uploaded reference sequence.</div>
       <div style={{ fontSize: 11, color: "#667085", fontWeight: 700, marginBottom: 6 }}>Exon / intron structure</div>
       <div style={{ position: "relative", height: 18, borderRadius: 999, background: "#E5E7EB", overflow: "hidden", marginBottom: 10 }}>
@@ -3101,12 +3261,12 @@ function LocusMapCard({ result }) {
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
         {structure.exons.map((item, index) => (
-          <span key={`exon-badge-${item.label}-${index}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: item.color, background: `${item.color}14`, border: `1px solid ${item.color}33` }}>
+          <span key={`exon-badge-${item.label}-${index}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: item.color, background: `${item.color}14`, border: `1px solid ${item.color}33` }}>
             {item.label}
           </span>
         ))}
         {structure.introns.map((item, index) => (
-          <span key={`intron-badge-${item.label}-${index}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: item.color, background: `${item.color}14`, border: `1px solid ${item.color}33` }}>
+          <span key={`intron-badge-${item.label}-${index}`} style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: item.color, background: `${item.color}14`, border: `1px solid ${item.color}33` }}>
             {item.label}
           </span>
         ))}
@@ -3160,9 +3320,9 @@ function InternalDonorPreview({ donor }) {
           </div>
           <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
-            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
-            {!!strand.silentIndexes?.length && <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#7F1D1D", background: PM_EDIT_COLORS.silent }}>Silent mutation</span>}
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#1f2937", background: PM_GUIDE_COLORS.site }}>gRNA site</span>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#92400E", background: PM_GUIDE_COLORS.pam }}>PAM</span>
+            {!!strand.silentIndexes?.length && <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#7F1D1D", background: PM_EDIT_COLORS.silent }}>Silent mutation</span>}
             {[...new Map((strand.annotations || []).map((item) => [`${item.badgeLabel || item.label}|${item.color}`, item])).values()].map((item) => <Badge key={`${item.badgeLabel || item.label}-${item.color}`} color={item.color}>{item.badgeLabel || item.label}</Badge>)}
           </div>
           <InternalSequenceRow label="WT context" sequence={strand.wt} guideSiteIndexes={strand.wtGuideSiteIndexes} guidePamIndexes={strand.wtGuidePamIndexes} mode="wt" />
@@ -3178,10 +3338,10 @@ function KnockinProteinPreviewCard({ preview }) {
   if (preview.wtCodons && preview.donorCodons && preview.wtAas && preview.donorAas) {
     return (
       <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-        <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
+        <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
         <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{preview.note}</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag / reporter codons and amino acids</span>
+          <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag / reporter codons and amino acids</span>
         </div>
         <AlignedTokenRow label="WT codons" tokens={preview.wtCodons} />
         <AlignedTokenRow label="Donor codons" tokens={preview.donorCodons} diffIndexes={Array.from({ length: preview.insertCodonLength }, (_, index) => preview.insertCodonStart + index)} mode="donor" />
@@ -3193,10 +3353,10 @@ function KnockinProteinPreviewCard({ preview }) {
   const insertEnd = preview.insertStart + preview.insertLength;
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Protein translation view</div>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Protein translation view</div>
       <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{preview.note}</div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 11, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag / reporter</span>
+        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: "#92400E", background: "#FDE68A" }}>Inserted tag / reporter</span>
       </div>
       <AlignedTokenRow label={preview.wtLabel} tokens={preview.wtTokens} />
       <div style={{ marginBottom: 8 }}>
@@ -3256,6 +3416,7 @@ export default function App() {
   const [workspaceFolders, setWorkspaceFolders] = useState([]);
   const [selectedWorkspaceFolders, setSelectedWorkspaceFolders] = useState([]);
   const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
+  const [activeTab, setActiveTab] = useState("workspace");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
   const [requestText, setRequestText] = useState("");
@@ -3607,27 +3768,9 @@ export default function App() {
   }, [batchFolderEntries, batchFolderLibrary]);
 
   const updateBatchRow = (index, key, value) => {
-    setBatchRows((current) => current.map((row, rowIndex) => {
-      if (rowIndex !== index) return row;
-      const nextRow = { ...row, [key]: value };
-      if (key === "projectType") {
-        if (value === "it") {
-          nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
-          nextRow.mutation = row.mutation && /^[A-Z]?\d+$/i.test(row.mutation) ? row.mutation : "";
-        } else if (value === "ct") {
-          nextRow.tag = CASSETTES[row.tag] && !row.tag.startsWith("N:") ? row.tag : "SD40-2xHA";
-        } else if (value === "nt") {
-          nextRow.tag = CASSETTES[row.tag] ? row.tag : "N:EGFP-Linker";
-        }
-      }
-      if (key === "gene" && nextRow.referenceSource !== "raw" && !nextRow.fileName && batchFolderLibrary.byGene.has(normalizeGeneToken(value))) {
-        const match = batchFolderLibrary.byGene.get(normalizeGeneToken(value));
-        nextRow.gbRaw = match.gbRaw;
-        nextRow.fileName = match.fileName;
-      }
-      nextRow.parseIssue = summarizeRowParseIssue(nextRow);
-      return nextRow;
-    }));
+    setBatchRows((current) => current.map((row, rowIndex) => (
+      rowIndex !== index ? row : applyBatchRowChange(row, key, value, batchFolderLibrary)
+    )));
     setBatchResults([]);
     setBatchError("");
     setBatchCopyState("");
@@ -3885,7 +4028,11 @@ export default function App() {
       }
     }));
     setBatchResults(nextResults);
-    if (!nextResults.some((entry) => entry.status === "success")) setBatchError("No batch designs were generated successfully.");
+    if (nextResults.some((entry) => entry.status === "success")) {
+      setActiveTab("report");
+    } else {
+      setBatchError("No batch designs were generated successfully.");
+    }
   };
 
   const applyBatchDefinitions = () => {
@@ -4006,124 +4153,85 @@ export default function App() {
     if (!fileName) return;
     setCopyState(`Downloaded ${fileName}.`);
   };
+
+  const readyRowCount = batchRows.filter((row) => !row.parseIssue && (row.projectType === "ko" ? (!!row.gene || hasSequenceBackedReference(row)) : hasSequenceBackedReference(row))).length;
+  const reviewRowCount = Math.max(0, batchRows.length - readyRowCount);
+
   return (
-    <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top, #16314d 0%, ${COLORS.bg} 42%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "28px 18px 40px" }}>
-        <div style={{ ...CARD_STYLE, marginBottom: 18, background: "linear-gradient(135deg, rgba(45,212,191,0.16), rgba(245,158,11,0.12) 54%, rgba(15,28,46,0.92))", padding: 22 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 24, alignItems: "flex-start" }}>
-            <div style={{ flex: "1 1 620px", minWidth: 280 }}>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900 }}>AC</div>
+    <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top left, rgba(45,212,191,0.10), transparent 24%), radial-gradient(circle at top right, rgba(245,158,11,0.10), transparent 22%), linear-gradient(180deg, #0a1626 0%, ${COLORS.bg} 36%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
+      <div style={{ width: "min(1560px, calc(100vw - 32px))", margin: "0 auto", padding: "20px 16px 40px" }}>
+        <div style={{ ...CARD_STYLE, marginBottom: 14, background: "linear-gradient(135deg, rgba(45,212,191,0.16), rgba(245,158,11,0.08) 48%, rgba(15,28,46,0.96))", padding: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, alignItems: "stretch" }}>
+            <div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900, boxShadow: "0 10px 22px rgba(0,0,0,0.18)" }}>AC</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 27, fontWeight: 800, lineHeight: 1.1 }}>ASSURED CRISPR Designer</div>
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 8, padding: "7px 12px", borderRadius: 999, border: "1px solid rgba(45,212,191,0.28)", background: "linear-gradient(135deg, rgba(45,212,191,0.12), rgba(245,158,11,0.08))", boxShadow: "0 10px 24px rgba(7,17,28,0.18)" }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.05 }}>ASSURED CRISPR Designer</div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6, padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(45,212,191,0.18)", background: "rgba(7,17,28,0.28)" }}>
                     <span style={{ color: COLORS.accent, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Created by</span>
                     <span style={{ width: 1, alignSelf: "stretch", background: "rgba(147,167,189,0.28)" }} />
-                    <span style={{ color: "#F8FAFC", fontSize: 15, fontWeight: 700, letterSpacing: 0.2 }}>Narasimha Telugu</span>
+                    <span style={{ color: "#F8FAFC", fontSize: 14, fontWeight: 700 }}>Narasimha Telugu</span>
                   </div>
                 </div>
               </div>
-              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.15, maxWidth: 760, marginBottom: 10 }}>
-                Design CRISPR edits, review donor architecture, and export order-ready reports from one browser workflow.
+              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.08, maxWidth: 880, marginBottom: 10 }}>
+                Genome editing design, donor review, and ordering exports in one clean workspace.
               </div>
-              <div style={{ color: COLORS.muted, fontSize: 14, lineHeight: 1.65, maxWidth: 760, marginBottom: 16 }}>
-                Built for SNP knock-ins, knockouts, internal in-frame tags, N-terminal tags, and C-terminal tags. The app turns a request plus GenBank reference into a scientist-readable report and vendor-neutral ordering exports.
+              <div style={{ color: COLORS.muted, fontSize: 14, lineHeight: 1.6, maxWidth: 920, marginBottom: 14 }}>
+                Built for knockouts, SNP knock-ins, internal in-frame tags, and terminal reporters. Start from a request, a GenBank file, or raw sequence, then move directly into a scientist-readable report and export package.
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                {["Batch design in one run", "Annotated donor and protein views", "Spreadsheet-ready exports", "Scientist-friendly review report"].map((item) => (
-                  <div key={item} style={{ padding: "8px 12px", borderRadius: 999, border: `1px solid ${COLORS.border}`, background: "rgba(15,28,46,0.75)", color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+                {["Knockout, SNP, internal, N-term, C-term", "Annotated donor and protein views", "Spreadsheet-ready exports"].map((item) => (
+                  <div key={item} style={{ padding: "7px 11px", borderRadius: 999, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(7,17,28,0.28)", color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
                     {item}
                   </div>
                 ))}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 800, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none" }}>
+                <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 800, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none", boxShadow: "0 12px 24px rgba(0,0,0,0.16)" }}>
                   Load sample requests
                 </button>
                 <button
                   type="button"
                   onClick={() => document.getElementById("design-requests")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "rgba(7,17,28,0.28)" }}
                 >
                   Jump to design requests
                 </button>
               </div>
             </div>
-            <div style={{ flex: "0 1 320px", minWidth: 260, ...CARD_STYLE, padding: 16, background: "rgba(15,28,46,0.72)" }}>
-              <div style={{ color: COLORS.accent, fontSize: 12, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.8, marginBottom: 8 }}>Why it matters</div>
-              <div style={{ color: COLORS.text, fontSize: 16, fontWeight: 700, lineHeight: 1.4, marginBottom: 10 }}>
-                Faster path from edit request to an order-ready design package.
+            <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
+              <div style={{ ...CARD_STYLE, padding: 14, background: "rgba(7,17,28,0.30)", border: `1px solid ${COLORS.borderSoft}` }}>
+                <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, lineHeight: 1.4, marginBottom: 6 }}>
+                  Faster path from edit request to order-ready design package.
+                </div>
+                <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.555 }}>
+                  One place for guides, donor geometry, protein impact, QC checkpoints, and export files.
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+                  <a
+                    href={REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", background: "rgba(7,17,28,0.22)" }}
+                  >
+                    View repository
+                  </a>
+                </div>
               </div>
-              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.6 }}>
-                Instead of stitching together guide design, donor review, protein interpretation, and vendor upload sheets manually, the app packages them into one consistent output.
-              </div>
-              <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
-                <div style={{ color: COLORS.text, fontSize: 12, fontWeight: 700 }}>Hosted workflow highlights</div>
-                {["Browser-based workflow", "Batch designs in one run", "Export-ready reports and spreadsheet templates"].map((item) => (
-                  <div key={item} style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
-                    - {item}
-                  </div>
-                ))}
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
-                <button
-                  type="button"
-                  onClick={loadSampleRequests}
-                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}
-                >
-                  Try sample workflow
-                </button>
-                <a
-                  href={REPO_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center" }}
-                >
-                  View repository
-                </a>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+                <QuickMetric label="Design rows" value={batchRows.length} tone="accent" />
+                <QuickMetric label="Ready now" value={readyRowCount} tone="success" />
+                <QuickMetric label="GenBank files" value={batchFolderEntries.length} tone="warm" />
               </div>
             </div>
           </div>
         </div>
-
-        <div style={{ ...CARD_STYLE, marginBottom: 18, padding: 12, background: "rgba(15,28,46,0.68)" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {[
-              "Built for genome engineering workflows",
-              "Supports KO, SNP, internal, N-terminal, and C-terminal designs",
-              "Hosted browser experience with order-ready exports",
-            ].map((item) => (
-              <div key={item} style={{ padding: "8px 12px", borderRadius: 999, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt, color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
-                {item}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div style={{ ...CARD_STYLE, marginBottom: 18, padding: 14, background: "rgba(15,28,46,0.82)" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-            {[
-              ["1. Upload", "Upload a GenBank folder once, or attach a GenBank file directly to a design row."],
-              ["2. Describe", "Paste natural-language edit requests instead of filling every field manually."],
-              ["3. Generate", "Review only flagged rows, then generate designs in one run."],
-              ["4. Export", "Download HTML reports plus separate CRISPR, donor, and primer spreadsheet templates."],
-            ].map(([title, text]) => (
-              <div key={title} style={{ border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: 12, background: COLORS.panelAlt }}>
-                <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.5, color: COLORS.accent, textTransform: "uppercase", marginBottom: 6 }}>{title}</div>
-                <div style={{ fontSize: 13, color: COLORS.muted, lineHeight: 1.5 }}>{text}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 10, lineHeight: 1.5 }}>
-            Each fresh open starts with a clean workspace. Load sample requests or upload your own GenBank files to begin.
-          </div>
-        </div>
-
-        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+        <div style={{ ...CARD_STYLE, marginTop: 8, marginBottom: 14, padding: 12, background: "rgba(10,20,34,0.52)", border: `1px solid ${COLORS.borderSoft}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 18, fontWeight: 700 }}>Optional workspace integration</div>
-              <div style={{ color: COLORS.muted, fontSize: 13, marginTop: 4, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Advanced: workspace integration</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, marginTop: 4, lineHeight: 1.55 }}>
                 Use this only if you want to import local project folders and save generated files back into those folders.
               </div>
             </div>
@@ -4159,7 +4267,7 @@ export default function App() {
               </div>
               {workspaceFolders.length > 0 && (
                 <div style={{ marginBottom: 12, maxWidth: 860 }}>
-                  <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Project folders to import</div>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project folders to import</div>
                   <div style={{ ...FIELD_STYLE, background: COLORS.panelAlt, padding: 12, maxHeight: 220, overflowY: "auto" }}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                       <button type="button" onClick={() => setSelectedWorkspaceFolders(workspaceFolders.map((entry) => entry.name))} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
@@ -4186,62 +4294,90 @@ export default function App() {
                       ))}
                     </div>
                   </div>
-                  <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 6, lineHeight: 1.5 }}>
+                  <div style={{ color: COLORS.dim, fontSize: 13, marginTop: 6, lineHeight: 1.5 }}>
                     If nothing is checked, all detected project folders will be imported.
                   </div>
                 </div>
               )}
-              <div style={{ color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+              <div style={{ color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
                 Linked root: {workspaceHandle?.name || "none"}
                 {!supportsWorkspaceAccess && " | Direct project-folder access is unavailable in this browser."}
               </div>
-              {workspaceStatus && <div style={{ marginTop: 12, color: COLORS.success, fontSize: 12 }}>{workspaceStatus}</div>}
+              {workspaceStatus && <div style={{ marginTop: 12, color: COLORS.success, fontSize: 13 }}>{workspaceStatus}</div>}
             </>
           )}
         </div>
 
-        <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
-          <SectionTitle>1. Design Requests</SectionTitle>
-          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Paste one request per line, upload a GenBank folder once, and review only the rows that still need input.
-          </div>
-          <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, border: `1px solid ${COLORS.border}`, background: "rgba(20,36,59,0.78)" }}>
-            <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>New to the app?</div>
-            <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.6 }}>
-              Load sample requests to populate representative SNP, knockout, internal in-frame tag, and terminal tag projects, then click <strong>Generate designs</strong>.
-            </div>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
-            <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
-              <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
-              <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
-            </label>
-            <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Load sample requests</button>
-            <button type="button" onClick={parseRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Parse requests</button>
-            <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Add design</button>
-          </div>
-          {batchFolderEntries.length > 0 && (
-            <div style={{ color: COLORS.success, fontSize: 12, marginBottom: 12 }}>
-              Folder ready: {batchFolderEntries.length} GenBank file{batchFolderEntries.length === 1 ? "" : "s"} loaded for automatic matching.
-            </div>
-          )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
+          <TopLevelTabButton active={activeTab === "workspace"} onClick={() => setActiveTab("workspace")} tone="accent">
+            Workspace
+          </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "report"} onClick={() => setActiveTab("report")} tone="warm">
+            Report
+          </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
+            Exports
+          </TopLevelTabButton>
+        </div>
 
-          <div style={{ ...CARD_STYLE, background: COLORS.panelAlt, padding: 14, marginBottom: 14 }}>
-            <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Paste requests</div>
-            <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-              Use short natural-language lines. The parser will infer KO, SNP, internal in-frame tags, C-terminal, or N-terminal designs and match GenBank files by gene where possible.
+        {activeTab === "workspace" && (
+        <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+            <div>
+              <SectionTitle>1. Design Requests</SectionTitle>
+              <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>Build the project workspace</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.55, maxWidth: 760 }}>
+                Start from a batch list or create rows manually. Each card below is organized into project setup, reference sequence, edit design, and optional notes.
+              </div>
             </div>
-            <label style={{ display: "block" }}>
-              <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Request lines</div>
-              <textarea
-                value={requestText}
-                onChange={(event) => setRequestText(event.target.value)}
-                style={{ ...FIELD_STYLE, minHeight: 126, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
-                placeholder={SAMPLE_REQUEST_TEXT}
-              />
-            </label>
-            <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
-              Best format: `GENE edit cell-line`. For internal tags, use lines like `SCN5A internal SPOT after P155 BIHi005-A`. If a line cannot infer gene, cell line, mutation/site, tag, or GenBank file, that row will be flagged for review.
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              <Badge color={COLORS.accent}>{batchRows.length} rows</Badge>
+              <Badge color={readyRowCount ? COLORS.success : COLORS.muted}>{readyRowCount} ready</Badge>
+              <Badge color={reviewRowCount ? COLORS.accentAlt : COLORS.muted}>{reviewRowCount} need review</Badge>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.30)" }}>
+              <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Batch input</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
+                Paste one request per line if you want to generate rows quickly, or skip this and build rows manually.
+              </div>
+              <label style={{ display: "block" }}>
+                <textarea
+                  value={requestText}
+                  onChange={(event) => setRequestText(event.target.value)}
+                  style={{ ...FIELD_STYLE, minHeight: 146, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
+                  placeholder={SAMPLE_REQUEST_TEXT}
+                />
+              </label>
+            </div>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.24)" }}>
+              <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Actions</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
+                <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
+                  <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
+                  <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
+                </label>
+                <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Load sample requests</button>
+                <button type="button" onClick={parseRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Parse requests</button>
+                <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Add design</button>
+              </div>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(7,17,28,0.24)", border: `1px solid ${COLORS.borderSoft}` }}>
+                  <div style={{ color: COLORS.muted, fontSize: 12, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 4 }}>Current workspace</div>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{batchRows.length} design row{batchRows.length === 1 ? "" : "s"}</div>
+                </div>
+                {batchFolderEntries.length > 0 ? (
+                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(16,185,129,0.10)", border: "1px solid rgba(16,185,129,0.30)", color: COLORS.success, fontSize: 13, lineHeight: 1.55 }}>
+                    Folder ready: {batchFolderEntries.length} GenBank file{batchFolderEntries.length === 1 ? "" : "s"} loaded for automatic matching.
+                  </div>
+                ) : (
+                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(7,17,28,0.24)", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
+                    No GenBank folder loaded yet. KO can still start from gene name alone, but sequence-backed designs benefit from a GenBank file or raw DNA.
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -4272,9 +4408,17 @@ export default function App() {
                 : "";
               const rowReady = !row.parseIssue && (row.projectType === "ko" ? (!!row.gene || hasSequenceBackedReference(row)) : hasSequenceBackedReference(row));
               return (
-                <div key={row.id} style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.border}`, background: COLORS.panelAlt }}>
+                <div key={row.id} style={{ padding: 16, borderRadius: 18, border: `1px solid ${COLORS.borderSoft}`, background: "linear-gradient(180deg, rgba(20,36,59,0.86), rgba(10,20,34,0.76))", boxShadow: "0 18px 34px rgba(2, 8, 23, 0.18)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-                    <div style={{ fontWeight: 700 }}>Design {slot}</div>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ fontWeight: 800, fontSize: 17 }}>Design {slot}</div>
+                        <Badge color={getProjectTypeMeta(row.projectType)?.id === "ko" ? COLORS.accentAlt : COLORS.accent}>{getProjectTypeMeta(row.projectType)?.label}</Badge>
+                      </div>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginTop: 5, lineHeight: 1.5 }}>
+                        {row.gene || "Gene needed"}{row.cellLine ? ` • ${row.cellLine}` : " • Cell line needed"}{row.label ? ` • ${row.label}` : ""}
+                      </div>
+                    </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       {row.referenceSource === "raw" && hasRawReference(row) && <Badge color={COLORS.success}>Raw DNA reference</Badge>}
                       {row.referenceSource !== "raw" && row.fileName && <Badge color={COLORS.success}>{row.fileName}</Badge>}
@@ -4292,89 +4436,94 @@ export default function App() {
                     </div>
                   </div>
 
-                  <Grid>
-                    <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>IRIS ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
-                    <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Group</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal / sponsor name" /></label>
-                    <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Gene / locus</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
-                    <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="BIHi005-A" /></label>
-                    <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Project label</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Project ${slot}`} /></label>
-                    <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Design type</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={FIELD_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
-                  </Grid>
+                  <FormSection title="Project setup" hint="Define the gene, cell line, and core project identity.">
+                    <Grid>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>IRIS ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Group</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal / sponsor name" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene / locus</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="BIHi005-A" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project label</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Project ${slot}`} /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Design type</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+                    </Grid>
+                  </FormSection>
 
-                  <label style={{ display: "block", marginTop: 12 }}>
-                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference source</div>
-                    <select value={row.referenceSource} onChange={(event) => updateBatchRow(index, "referenceSource", event.target.value)} style={FIELD_STYLE}>
-                      <option value="genbank">GenBank file</option>
-                      <option value="raw">Raw DNA + CDS coordinates</option>
-                    </select>
-                  </label>
-
-                  <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Requested edit summary</div><input value={row.editSummary} onChange={(event) => updateBatchRow(index, "editSummary", event.target.value)} style={FIELD_STYLE} placeholder="APOE2 (p.Arg176Cys) SNP knockin" /></label>
-                  <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Notes / assumptions</div><textarea value={row.notes} onChange={(event) => updateBatchRow(index, "notes", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 84, resize: "vertical" }} placeholder="Transcript assumptions, strand notes, delivery mode, client constraints..." /></label>
-                  <label style={{ display: "block", marginTop: 12 }}>
-                    <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Custom gRNAs (optional)</div>
-                    <textarea
-                      value={row.customGuides}
-                      onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
-                      style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
-                      placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
-                    />
-                    <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
-                      If provided, the app maps these spacers onto the uploaded reference and uses them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
-                    </div>
-                  </label>
-
-                  {row.referenceSource === "raw" ? (
-                    <>
-                      <label style={{ display: "block", marginTop: 12 }}>
-                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference DNA</div>
-                        <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA sequence using A/C/G/T only" />
-                      </label>
-                      <Grid>
-                        <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>CDS start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
-                        <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>CDS end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
-                      </Grid>
-                      <label style={{ display: "block", marginTop: 12 }}>
-                        <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Exon coordinates (optional)</div>
-                        <textarea value={row.exonCoordinates} onChange={(event) => updateBatchRow(index, "exonCoordinates", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder={"One exon per line, 1-based inclusive\n101-240\n301-512"} />
-                      </label>
-                    </>
-                  ) : (
-                    <label style={{ display: "block", marginTop: 12 }}>
-                      <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Reference GenBank {row.projectType === "ko" ? "(optional for gene-list KO mode)" : ""}</div>
-                      <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                        <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
-                        <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
-                        <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
-                      </label>
+                  <FormSection title="Reference sequence" hint="Choose whether this row is sequence-backed by a GenBank file or raw DNA with CDS coordinates." tone="accent">
+                    <label style={{ display: "block", marginBottom: 12 }}>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Reference source</div>
+                      <select value={row.referenceSource} onChange={(event) => updateBatchRow(index, "referenceSource", event.target.value)} style={SELECT_STYLE}>
+                        <option value="genbank">GenBank file</option>
+                        <option value="raw">Raw DNA + CDS coordinates</option>
+                      </select>
                     </label>
-                  )}
 
-                  {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Mutation</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
+                    {row.referenceSource === "raw" ? (
+                      <>
+                        <label style={{ display: "block", marginBottom: 12 }}>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Reference DNA</div>
+                          <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA sequence using A/C/G/T only" />
+                        </label>
+                        <Grid>
+                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>CDS start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
+                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>CDS end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
+                        </Grid>
+                        <label style={{ display: "block", marginTop: 12 }}>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Exon coordinates (optional)</div>
+                          <textarea value={row.exonCoordinates} onChange={(event) => updateBatchRow(index, "exonCoordinates", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder={"One exon per line, 1-based inclusive\n101-240\n301-512"} />
+                        </label>
+                      </>
+                    ) : (
+                      <label style={{ display: "block" }}>
+                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Reference GenBank {row.projectType === "ko" ? "(optional for gene-list KO mode)" : ""}</div>
+                        <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                          <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
+                          <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
+                          <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
+                        </label>
+                      </label>
+                    )}
+
+                    <label style={{ display: "block", marginTop: 12 }}>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Custom gRNAs (optional)</div>
+                      <textarea
+                        value={row.customGuides}
+                        onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
+                        style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
+                        placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
+                      />
+                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
+                        If provided, the app maps these spacers onto the uploaded reference and uses them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
+                      </div>
+                    </label>
+                  </FormSection>
+
+                  <FormSection title="Design details" hint="Capture the requested edit, reporter, or tag configuration for this row." tone="warm">
+                    <label style={{ display: "block", marginBottom: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Requested edit summary</div><input value={row.editSummary} onChange={(event) => updateBatchRow(index, "editSummary", event.target.value)} style={FIELD_STYLE} placeholder="APOE2 (p.Arg176Cys) SNP knockin" /></label>
+
+                  {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Mutation</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
                   {row.projectType === "it" && (
                     <Grid>
-                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Internal tag</div><select value={INTERNAL_TAGS[row.tag] ? row.tag : "SPOT"} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>{internalTagOptions.map((option) => <option key={option} value={option}>{option} ({INTERNAL_TAGS[option].seq.length} bp)</option>)}</select></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Insert after residue</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="P155" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal tag</div><select value={INTERNAL_TAGS[row.tag] ? row.tag : "SPOT"} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={SELECT_STYLE}>{internalTagOptions.map((option) => <option key={option} value={option}>{option} ({INTERNAL_TAGS[option].seq.length} bp)</option>)}</select></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Insert after residue</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="P155" /></label>
                     </Grid>
                   )}
                   {(row.projectType === "ct" || row.projectType === "nt") && (
                     <>
                       <Grid>
                         <label>
-                          <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Architecture</div>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Architecture</div>
                           <select
                             value={constructSelection?.architecture || ""}
                             onChange={(event) => {
                               const payloads = getConstructBuilderPayloads(row.projectType, event.target.value);
                               if (payloads.length) updateBatchRow(index, "tag", payloads[0].cassette);
                             }}
-                            style={FIELD_STYLE}
+                            style={SELECT_STYLE}
                           >
                             {getConstructBuilderGroups(row.projectType).map((group) => <option key={group.id} value={group.id}>{group.label}</option>)}
                           </select>
                         </label>
                         <label>
-                          <div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>
                             {constructSelection?.architecture === "fusion"
                               ? "Reporter / tag"
                               : constructSelection?.architecture === "tag_p2a_reporter"
@@ -4383,33 +4532,33 @@ export default function App() {
                                   ? "Tag + selection"
                                   : "Reporter"}
                           </div>
-                          <select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={FIELD_STYLE}>
+                          <select value={row.tag} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={SELECT_STYLE}>
                             {constructPayloads.map((option) => <option key={option.cassette} value={option.cassette}>{option.label} ({getCassetteSequenceLength(option.cassette, row.projectType)} bp)</option>)}
                           </select>
                         </label>
-                        <label><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 6 }}>Homology arm</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={FIELD_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
+                        <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Homology arm</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={SELECT_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
                       </Grid>
-                      <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
+                      <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                         {row.projectType === "nt"
                           ? "N-terminal convention: fusion designs use reporter-linker or tag-linker. Cleavable designs use reporter-T2A or reporter-P2A."
                           : "C-terminal convention: fusion designs use linker-tag. Cleavable designs use T2A-reporter or P2A-reporter."}
                       </div>
                       {constructHelp && (
-                        <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                        <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
                           {constructHelp}
                         </div>
                       )}
-                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
                         Resolved cassette: <span style={{ fontFamily: "Consolas, monospace", color: COLORS.text }}>{row.tag}</span>
                       </div>
-                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 12, lineHeight: 1.5 }}>
+                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
                         Reporter inserts come from the built-in FPbase-backed reporter library, so you do not need to paste reporter DNA manually.
                       </div>
                       <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #D7DEE7", background: "#F8FAFC" }}>
                         <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 8 }}>
                           <div>
                             <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>FPbase reporter catalog</div>
-                            <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5 }}>Search all FPbase reporters, then apply curated order-ready reporters directly into this {row.projectType === "nt" ? "N-terminal" : "C-terminal"} design.</div>
+                            <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55 }}>Search all FPbase reporters, then apply curated order-ready reporters directly into this {row.projectType === "nt" ? "N-terminal" : "C-terminal"} design.</div>
                           </div>
                           <button type="button" onClick={() => toggleFpbaseRow(row.id)} style={{ padding: "8px 12px", borderRadius: 10, border: "1px solid #D0D5DD", background: "#fff", color: "#111827", fontWeight: 700, cursor: "pointer" }}>
                             {fpbaseRowId === row.id ? "Hide FPbase reporters" : "Browse FPbase reporters"}
@@ -4433,14 +4582,14 @@ export default function App() {
                               <Badge color="#EAECF0">Reference only: visible from FPbase, not yet curated for donor design</Badge>
                             </div>
                             {fpbaseLookup.status === "loading" && (
-                              <div style={{ color: "#667085", fontSize: 12 }}>Loading FPbase reporters...</div>
+                              <div style={{ color: "#667085", fontSize: 13 }}>Loading FPbase reporters...</div>
                             )}
                             {fpbaseLookup.status === "error" && (
-                              <div style={{ padding: 10, borderRadius: 10, background: "#FEE4E2", color: "#B42318", fontSize: 12 }}>{fpbaseLookup.error}</div>
+                              <div style={{ padding: 10, borderRadius: 10, background: "#FEE4E2", color: "#B42318", fontSize: 13 }}>{fpbaseLookup.error}</div>
                             )}
                             {fpbaseLookup.status === "success" && (
                               <div style={{ display: "grid", gap: 10 }}>
-                                <div style={{ color: "#667085", fontSize: 12 }}>
+                                <div style={{ color: "#667085", fontSize: 13 }}>
                                   {fpbaseLookup.data?.count || fpbaseLookup.data?.reporters?.length || 0} FPbase reporters found.
                                   {fpbaseLookup.data?.sourceUrl ? <> Source: <a href={fpbaseLookup.data.sourceUrl} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>{fpbaseLookup.data.sourceUrl}</a></> : null}
                                 </div>
@@ -4454,10 +4603,10 @@ export default function App() {
                                         <div style={{ fontWeight: 700, color: "#111827" }}>{reporter.name}</div>
                                         <Badge color={actionOptions.length ? "#D1FAE5" : "#EAECF0"}>{actionOptions.length ? "Order-ready" : "Reference only"}</Badge>
                                       </div>
-                                      <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}>
+                                      <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 6 }}>
                                         {formatFpbaseReporterSummary(reporter) || "FPbase reporter entry"}
                                       </div>
-                                      <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                      <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                                         {reporter.aaLength ? `${reporter.aaLength} aa` : "AA length n/a"}
                                         {reporter.genbank ? ` • GenBank ${reporter.genbank}` : ""}
                                         {builtInReporter?.sourceUrl ? <> • <a href={builtInReporter.sourceUrl} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>FPbase entry</a></> : reporter.url ? <> • <a href={reporter.url} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>FPbase entry</a></> : null}
@@ -4494,7 +4643,15 @@ export default function App() {
                       </div>
                     </>
                   )}
-                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 12 }}>KO can run from gene name alone for high-throughput reference-guide mode, or use an uploaded GenBank for sequence-backed spacing and primer design. Custom pasted guides require GenBank so the app can remap cut sites and rebuild the centered amplicon.</div>}
+                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 13 }}>KO can run from gene name alone for high-throughput reference-guide mode, or use an uploaded GenBank for sequence-backed spacing and primer design. Custom pasted guides require GenBank so the app can remap cut sites and rebuild the centered amplicon.</div>}
+                  </FormSection>
+
+                  <FormSection title="Context and notes" hint="Use this space for assumptions, transcript choices, or delivery constraints.">
+                    <label style={{ display: "block" }}>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Notes / assumptions</div>
+                      <textarea value={row.notes} onChange={(event) => updateBatchRow(index, "notes", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 84, resize: "vertical" }} placeholder="Transcript assumptions, strand notes, delivery mode, client constraints..." />
+                    </label>
+                  </FormSection>
 
                   {batchStatus?.status === "error" && (
                     <div style={{ marginTop: 10, padding: 10, borderRadius: 10, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>
@@ -4502,18 +4659,18 @@ export default function App() {
                     </div>
                   )}
                   {batchStatus?.status === "success" && (
-                    <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
+                    <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                       {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" || batchStatus.result.type === "it" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
                     </div>
                   )}
                   {batchStatus?.status === "success" && batchStatus.result?.type === "ko" && (
                     <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
                       <div style={{ color: "#111827", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>High-throughput KO pair suggestions</div>
-                      <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 10 }}>
+                      <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
                         For KO rows, the app can suggest nearby pairs from the top 3 Brunello and Cas-Database guides, then center validation primers automatically.
                       </div>
                       {koRowReferences?.status === "loading" && (
-                        <div style={{ color: "#667085", fontSize: 12 }}>Loading KO reference pairs...</div>
+                        <div style={{ color: "#667085", fontSize: 13 }}>Loading KO reference pairs...</div>
                       )}
                       {koRowReferences?.error && (
                         <div style={{ color: "#B42318", fontSize: 12, marginBottom: 8 }}>{koRowReferences.error}</div>
@@ -4522,7 +4679,7 @@ export default function App() {
                         <div style={{ marginBottom: 8, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FED7AA" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                             <div>
-                              <div style={{ color: "#9A3412", fontWeight: 700, fontSize: 12 }}>{koRowTopBrunelloPair.candidateMode === "deletion-screen" ? "Top Brunello deletion-screen pair" : koRowTopBrunelloPair.candidateMode === "cross-exon" ? "Top Brunello cross-exon pair" : "Top Brunello local pair"}</div>
+                              <div style={{ color: "#9A3412", fontWeight: 700, fontSize: 13 }}>{koRowTopBrunelloPair.candidateMode === "deletion-screen" ? "Top Brunello deletion-screen pair" : koRowTopBrunelloPair.candidateMode === "cross-exon" ? "Top Brunello cross-exon pair" : "Top Brunello local pair"}</div>
                               <div style={{ color: "#7C2D12", fontSize: 12, marginTop: 4 }}>
                                 {koRowTopBrunelloPair.exonLabel} | {Number.isFinite(koRowTopBrunelloPair.spacing) ? `${koRowTopBrunelloPair.spacing} bp ${koRowTopBrunelloPair.candidateMode === "deletion-screen" ? "deletion" : "spacing"}` : "spacing n/a"} | {koRowTopBrunelloPair.result.amp || "amplicon n/a"}
                               </div>
@@ -4537,7 +4694,7 @@ export default function App() {
                         <div style={{ padding: 10, borderRadius: 10, background: "#ffffff", border: "1px solid #D0D5DD" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                             <div>
-                              <div style={{ color: "#111827", fontWeight: 700, fontSize: 12 }}>{koRowTopCasPair.candidateMode === "deletion-screen" ? "Top Cas-Database deletion-screen pair" : koRowTopCasPair.candidateMode === "cross-exon" ? "Top Cas-Database cross-exon pair" : "Top Cas-Database local pair"}</div>
+                              <div style={{ color: "#111827", fontWeight: 700, fontSize: 13 }}>{koRowTopCasPair.candidateMode === "deletion-screen" ? "Top Cas-Database deletion-screen pair" : koRowTopCasPair.candidateMode === "cross-exon" ? "Top Cas-Database cross-exon pair" : "Top Cas-Database local pair"}</div>
                               <div style={{ color: "#475467", fontSize: 12, marginTop: 4 }}>
                                 {koRowTopCasPair.exonLabel} | {Number.isFinite(koRowTopCasPair.spacing) ? `${koRowTopCasPair.spacing} bp ${koRowTopCasPair.candidateMode === "deletion-screen" ? "deletion" : "spacing"}` : "spacing n/a"} | {koRowTopCasPair.result.amp || "amplicon n/a"}
                               </div>
@@ -4563,35 +4720,37 @@ export default function App() {
           </div>
           {batchError && <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{batchError}</div>}
         </div>
+        )}
 
-        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+        {activeTab === "report" && (
+        <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(240,228,204,0.12), rgba(16,34,52,0.90))", border: `1px solid ${COLORS.borderSoft}` }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Review the selected design, then either save it into the linked project folder or download the HTML/browser export fallback.
           </div>
           {workspaceHandle && selectedEntry?.result && (
-            <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: "#ECFDF3", border: "1px solid #A7F3D0" }}>
-              <div style={{ color: "#047857", fontSize: 12, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 6 }}>Recommended Save Path</div>
+            <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: "#f6efe2", border: "1px solid #dec8a5" }}>
+              <div style={{ color: "#8a5a12", fontSize: 12, fontWeight: 800, letterSpacing: 0.3, marginBottom: 6 }}>Recommended Save Path</div>
               <div style={{ color: "#111827", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
                 Save the selected report and order files into the linked project folder. The HTML report is the editable version; open it in Word if you want to revise it, then export PDF from Word only for a final fixed copy.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                <button type="button" onClick={saveSelectedToWorkspace} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "#D1FAE5", border: "1px solid #86EFAC", color: "#065F46" }}>
+                <button type="button" onClick={saveSelectedToWorkspace} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "#f1debb", border: "1px solid #cfb07a", color: "#7a4d10" }}>
                   Save selected report + order files to project folder
                 </button>
                 <button
                   type="button"
                   onClick={saveAllToWorkspace}
                   disabled={!batchSuccessfulResults.length}
-                  style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#ffffff", border: "1px solid #86EFAC", color: "#065F46" }}
+                  style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length ? "pointer" : "not-allowed", fontWeight: 700, background: "#fffdf8", border: "1px solid #cfb07a", color: "#7a4d10" }}
                 >
                   Save all reports + order files to project folders
                 </button>
               </div>
             </div>
           )}
-          <div style={{ color: COLORS.dim, fontSize: 12, marginBottom: 10, lineHeight: 1.5 }}>
-            Browser Download Fallback
+          <div style={{ color: COLORS.dim, fontSize: 13, marginBottom: 10, lineHeight: 1.55 }}>
+            Browser download fallback
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
             <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report to browser Downloads</button>
@@ -4601,7 +4760,7 @@ export default function App() {
           </div>
 
           {selectedEntry?.result && (
-            <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: COLORS.panelAlt, border: `1px solid ${COLORS.border}` }}>
+            <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: "linear-gradient(180deg, rgba(240, 228, 204, 0.10), rgba(16,34,52,0.70))", border: `1px solid ${COLORS.borderSoft}` }}>
               <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Selected Design Order Export</div>
               <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
                 Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. The generated files remain compatible with your current upload workflow.
@@ -4620,10 +4779,10 @@ export default function App() {
             </div>
           )}
 
-          <div style={{ padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", minHeight: 380 }}>
+          <div style={{ padding: 14, borderRadius: 12, background: "linear-gradient(180deg, #fbf8f1, #f4efe4)", color: "#2c3340", border: "1px solid #d8cfbf", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)", minHeight: 380 }}>
             {!selectedEntry?.result && (
-              <div style={{ color: "#667085", maxWidth: 640 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "#111827", marginBottom: 8 }}>No design report yet</div>
+              <div style={{ color: "#6b7280", maxWidth: 640 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: "#2c3340", marginBottom: 8 }}>No design report yet</div>
                 <div style={{ fontSize: 14, lineHeight: 1.6, marginBottom: 10 }}>
                   Use the Design Requests section to upload GenBank files, paste request lines, and generate designs. Once at least one design succeeds, the full report preview will appear here.
                 </div>
@@ -4642,17 +4801,17 @@ export default function App() {
                     </div>
                     <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
                       <thead>
-                        <tr>{["Design", "IRIS ID", "Gene", "Cell line", "Edit", "Status"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                        <tr>{["Design", "IRIS ID", "Gene", "Cell line", "Edit", "Status"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                       </thead>
                       <tbody>
                         {batchSuccessfulResults.map((entry) => (
                           <tr key={entry.rowId} onClick={() => setSelectedProjectId(entry.rowId)} style={{ cursor: "pointer" }}>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{entry.slot}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{entry.row.irisId || "n/a"}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{entry.result.gene || entry.row.gene || "n/a"}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{entry.row.cellLine || "n/a"}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{formatBatchDesignLabel({ ...entry.row, slot: entry.slot }, entry.result)}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: entry.rowId === selectedEntry.rowId ? "#ECFDF3" : "#ffffff", fontWeight: 700 }}>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{entry.slot}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{entry.row.irisId || "n/a"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{entry.result.gene || entry.row.gene || "n/a"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{entry.row.cellLine || "n/a"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{formatBatchDesignLabel({ ...entry.row, slot: entry.slot }, entry.result)}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: entry.rowId === selectedEntry.rowId ? "#f6efe2" : "#ffffff", fontWeight: 700 }}>
                               {entry.rowId === selectedEntry.rowId ? "Shown below" : "Also generated"}
                             </td>
                           </tr>
@@ -4662,17 +4821,17 @@ export default function App() {
                   </>
                 )}
                 {batchSuccessfulResults.length > 1 && (
-                  <div style={{ marginBottom: 16, padding: 14, borderRadius: 12, background: "#ECFDF3", border: "1px solid #A7F3D0" }}>
+                  <div style={{ marginBottom: 16, padding: 14, borderRadius: 12, background: "#f6efe2", border: "1px solid #dec8a5" }}>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                       <div>
-                        <div style={{ color: "#047857", fontSize: 12, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 4 }}>Detailed Report</div>
+                        <div style={{ color: "#8a5a12", fontSize: 12, fontWeight: 800, letterSpacing: 0.2, marginBottom: 4 }}>Detailed Report</div>
                         <div style={{ color: "#111827", fontSize: 14, fontWeight: 700 }}>Choose which generated design is shown in full below</div>
                       </div>
-                      <div style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: 999, background: "#D1FAE5", color: "#065F46", fontSize: 12, fontWeight: 700 }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: 999, background: "#f1debb", color: "#7a4d10", fontSize: 12, fontWeight: 700 }}>
                         Showing: {formatBatchDesignLabel({ ...selectedEntry.row, slot: selectedEntry.slot }, selectedEntry.result)}
                       </div>
                     </div>
-                    <select value={selectedEntry.rowId} onChange={(event) => setSelectedProjectId(event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#86EFAC", fontWeight: 700 }}>
+                    <select value={selectedEntry.rowId} onChange={(event) => setSelectedProjectId(event.target.value)} style={{ ...SELECT_STYLE, backgroundColor: "#fffdf8", color: "#2c3340", borderColor: "#cfb07a", fontWeight: 700, backgroundImage: "linear-gradient(45deg, transparent 50%, #8a5a12 50%), linear-gradient(135deg, #8a5a12 50%, transparent 50%)" }}>
                       {batchSuccessfulResults.map((entry) => (
                         <option key={entry.rowId} value={entry.rowId}>{formatBatchDesignLabel({ ...entry.row, slot: entry.slot }, entry.result)}</option>
                       ))}
@@ -4686,8 +4845,8 @@ export default function App() {
                       ["IRIS ID", selectedRowMeta.irisId || "[to be assigned]"],
                     ].map(([label, value]) => (
                       <tr key={label}>
-                        <td style={{ width: 180, padding: "8px 10px", border: "1px solid #bbbbbb", background: "#F0F4F8", fontWeight: 700 }}>{label}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{value}</td>
+                        <td style={{ width: 180, padding: "8px 10px", border: "1px solid #cfc5b4", background: "#F4EFE4", fontWeight: 700 }}>{label}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{value}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4701,8 +4860,8 @@ export default function App() {
                   <tbody>
                     {buildGeneInfoRows(selectedRowMeta, selectedEntry.result, selectedEntry.row?.fileName).map(([label, value]) => (
                       <tr key={label}>
-                        <td style={{ width: 180, padding: "8px 10px", border: "1px solid #bbbbbb", background: "#F0F4F8", fontWeight: 700 }}>{label}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{value}</td>
+                        <td style={{ width: 180, padding: "8px 10px", border: "1px solid #cfc5b4", background: "#F4EFE4", fontWeight: 700 }}>{label}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{value}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4711,16 +4870,16 @@ export default function App() {
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>2. gRNA Sequences</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
                   <thead>
-                    <tr>{["Name", "Sequence", "Strand", "GC", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                    <tr>{["Name", "Sequence", "Strand", "GC", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                   </thead>
                   <tbody>
                     {(selectedEntry.result?.gs || []).map((guide, rowIndex) => (
                       <tr key={rowIndex}>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.n}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm)}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.str} strand</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.gc}%</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{guide.arm || guide.note || ""}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.n}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm)}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.str} strand</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.gc}%</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.arm || guide.note || ""}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -4729,10 +4888,10 @@ export default function App() {
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>3. Validation Primers</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
                   <thead>
-                    <tr>{["Name", "Sequence"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                    <tr>{["Name", "Sequence"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                   </thead>
                   <tbody>
-                    {buildPrimerRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
+                    {buildPrimerRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
                   </tbody>
                 </table>
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {selectedEntry.result.amp || "n/a"}</div>
@@ -4768,18 +4927,18 @@ export default function App() {
                         </div>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
-                            <tr>{["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                            <tr>{["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                           </thead>
                           <tbody>
                             {brunelloReferenceGuideSet.guides.map((guide) => (
                               <tr key={guide.spacer}>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{guide.spacer}</td>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{guide.pam}</td>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>Exon {guide.exon}</td>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{guide.ruleSet2}</td>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{guide.transcript}</td>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{guide.strand}</td>
-                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 13 }}>{guide.spacer}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 13 }}>{guide.pam}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>Exon {guide.exon}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{guide.ruleSet2}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{guide.transcript}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{guide.strand}</td>
+                                <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                     <button type="button" onClick={() => applyBrunelloGuideToSelectedKo(0, guide)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                       Use as gRNA1
@@ -4796,31 +4955,31 @@ export default function App() {
                         {!!brunelloLocalCandidates.length && (
                           <div style={{ marginTop: 14 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Local pair designs from the top 3 Brunello guides</div>
-                            <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                            <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                               These pairs are remapped onto your selected reference. Preferred same-exon pairs in the 40-140 bp window are listed first, and other local same-exon pairs are kept for manual review with recalculated primers.
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead>
-                                <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                               </thead>
                               <tbody>
                                 {brunelloLocalCandidates.map((candidate) => (
                                   <tr key={candidate.id}>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{candidate.exonLabel}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       {Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp${candidate.candidateMode === "local" ? " (review)" : ""}` : "n/a"}
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{candidate.result.amp || "n/a"}</td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                       <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
                                       <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                         Use pair
                                       </button>
@@ -4834,29 +4993,29 @@ export default function App() {
                         {!!brunelloDeletionCandidates.length && (
                           <div style={{ marginTop: 14 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Long-range deletion-screen pairs from the top 3 Brunello guides</div>
-                            <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                            <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                               These guide pairs are far apart on your selected reference, so the app designs flanking junction-PCR primers to amplify the deletion band and reports the expected deletion size.
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead>
-                                <tr>{["Pair", "Exon location", "Deletion size", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                <tr>{["Pair", "Exon location", "Deletion size", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                               </thead>
                               <tbody>
                                 {brunelloDeletionCandidates.map((candidate) => (
                                   <tr key={candidate.id}>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.deletionSize) ? `~${candidate.deletionSize} bp` : "n/a"}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{candidate.exonLabel}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{Number.isFinite(candidate.deletionSize) ? `~${candidate.deletionSize} bp` : "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{candidate.result.amp || "n/a"}</td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                       <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
                                       <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                         Use pair
                                       </button>
@@ -4870,29 +5029,29 @@ export default function App() {
                         {!!brunelloCrossExonCandidates.length && (
                           <div style={{ marginTop: 14 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Cross-exon review pairs from the top 3 Brunello guides</div>
-                            <div style={{ color: "#7C2D12", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                            <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                               These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and validation primers, but are not preferred default KO pairs.
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead>
-                                <tr>{["Pair", "Exon location", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                <tr>{["Pair", "Exon location", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#FFEDD5", color: "#7C2D12", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                               </thead>
                               <tbody>
                                 {brunelloCrossExonCandidates.map((candidate) => (
                                   <tr key={candidate.id}>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
                                       <div style={{ fontFamily: "Consolas, monospace", color: "#7C2D12", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp (review)` : "n/a"}</td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{candidate.exonLabel}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp (review)` : "n/a"}</td>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{candidate.result.amp || "n/a"}</td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                       <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
                                       <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                     </td>
-                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 12 }}>
+                                    <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                       <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                         Use pair
                                       </button>
@@ -4914,7 +5073,7 @@ export default function App() {
                           </div>
                         )}
                         {!brunelloLocalCandidates.length && !brunelloDeletionCandidates.length && hasSequenceBackedReference(selectedEntry.row) && (
-                          <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FDBA74", color: "#7C2D12", fontSize: 12, lineHeight: 1.5 }}>
+                          <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FDBA74", color: "#7C2D12", fontSize: 13, lineHeight: 1.55 }}>
                             No same-exon local Brunello guide pairs within 40-140 bp were found after remapping onto your selected reference.
                           </div>
                         )}
@@ -4927,8 +5086,8 @@ export default function App() {
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end", marginBottom: 10 }}>
                         <label>
-                          <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Cas-Database organism</div>
-                          <select value={casDbOrganismId} onChange={(event) => setCasDbOrganismId(event.target.value)} style={{ ...FIELD_STYLE, width: 240, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                          <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>Cas-Database organism</div>
+                          <select value={casDbOrganismId} onChange={(event) => setCasDbOrganismId(event.target.value)} style={{ ...SELECT_STYLE, width: 240, backgroundColor: "#ffffff", color: "#111827", borderColor: "#d7dee7", backgroundImage: "linear-gradient(45deg, transparent 50%, #667085 50%), linear-gradient(135deg, #667085 50%, transparent 50%)" }}>
                             {CAS_DATABASE_ORGANISM_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
                           </select>
                         </label>
@@ -4958,20 +5117,20 @@ export default function App() {
                                 <>
                               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                 <thead>
-                                  <tr>{["Spacer", "PAM", "Location", "Strand", "Off-targets (0/1/2)", "OOF", "Coverage", "Best CDS %", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                  <tr>{["Spacer", "PAM", "Location", "Strand", "Off-targets (0/1/2)", "OOF", "Coverage", "Best CDS %", "Use"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                                 </thead>
                                 <tbody>
                                   {casDbLookup.data.targets.map((target) => (
                                     <tr key={target.id}>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.spacer}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12 }}>{target.pam || "n/a"}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.location || "n/a"}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.strand || "n/a"}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.offTargetCounts.join("/")}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.oofScore.toFixed(2)}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.coverage}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{target.bestCdsPercentage === null ? "n/a" : `${target.bestCdsPercentage.toFixed(2)}%`}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 13 }}>{target.spacer}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 13 }}>{target.pam || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.location || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.strand || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.offTargetCounts.join("/")}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.oofScore.toFixed(2)}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.coverage}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.bestCdsPercentage === null ? "n/a" : `${target.bestCdsPercentage.toFixed(2)}%`}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                                           <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(0, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                             Use as gRNA1
@@ -4988,31 +5147,31 @@ export default function App() {
                               {!!casDatabaseLocalCandidates.length && (
                                 <div style={{ marginTop: 14 }}>
                                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Local pair designs from the top 3 Cas-Database guides</div>
-                                  <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                  <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                                     These pairs are remapped onto your selected reference. Preferred same-exon pairs in the 40-140 bp window are listed first, and other local same-exon pairs are kept for manual review with recalculated primers.
                                   </div>
                                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                     <thead>
-                                      <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                      <tr>{["Pair", "Exon", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                                     </thead>
                                     <tbody>
                                       {casDatabaseLocalCandidates.map((candidate) => (
                                         <tr key={candidate.id}>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{candidate.exonLabel}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             {Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp${candidate.candidateMode === "local" ? " (review)" : ""}` : "n/a"}
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{candidate.result.amp || "n/a"}</td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                             <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
                                             <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                               Use pair
                                             </button>
@@ -5026,29 +5185,29 @@ export default function App() {
                               {!!casDatabaseDeletionCandidates.length && (
                                 <div style={{ marginTop: 14 }}>
                                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Long-range deletion-screen pairs from the top 3 Cas-Database guides</div>
-                                  <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                  <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                                     These guide pairs are far apart on your selected reference, so the app designs flanking junction-PCR primers to amplify the deletion band and reports the expected deletion size.
                                   </div>
                                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                     <thead>
-                                      <tr>{["Pair", "Exon location", "Deletion size", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                      <tr>{["Pair", "Exon location", "Deletion size", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                                     </thead>
                                     <tbody>
                                       {casDatabaseDeletionCandidates.map((candidate) => (
                                         <tr key={candidate.id}>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.deletionSize) ? `~${candidate.deletionSize} bp` : "n/a"}</td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{candidate.exonLabel}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{Number.isFinite(candidate.deletionSize) ? `~${candidate.deletionSize} bp` : "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{candidate.result.amp || "n/a"}</td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                             <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
                                             <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                               Use pair
                                             </button>
@@ -5062,29 +5221,29 @@ export default function App() {
                               {!!casDatabaseCrossExonCandidates.length && (
                                 <div style={{ marginTop: 14 }}>
                                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Cross-exon review pairs from the top 3 Cas-Database guides</div>
-                                  <div style={{ color: "#667085", fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                                  <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                                     These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and validation primers, but are not preferred default KO pairs.
                                   </div>
                                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                     <thead>
-                                      <tr>{["Pair", "Exon location", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                                      <tr>{["Pair", "Exon location", "Spacing", "Amplicon", "Primers", "Apply"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 13 }}>{label}</th>)}</tr>
                                     </thead>
                                     <tbody>
                                       {casDatabaseCrossExonCandidates.map((candidate) => (
                                         <tr key={candidate.id}>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             <div style={{ fontWeight: 700 }}>{candidate.sourceIndexes[0]} + {candidate.sourceIndexes[1]}</div>
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[0]?.sp}</div>
                                             <div style={{ fontFamily: "Consolas, monospace", color: "#334155", fontSize: 11 }}>{candidate.result.gs?.[1]?.sp}</div>
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.exonLabel}</td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp (review)` : "n/a"}</td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>{candidate.result.amp || "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{candidate.exonLabel}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{Number.isFinite(candidate.spacing) ? `${candidate.spacing} bp (review)` : "n/a"}</td>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{candidate.result.amp || "n/a"}</td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 11, fontFamily: "Consolas, monospace" }}>
                                             <div>Fw: {candidate.result.ps?.[0]?.s || "n/a"}</div>
                                             <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                           </td>
-                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 12 }}>
+                                          <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                             <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
                                               Use pair
                                             </button>
@@ -5106,7 +5265,7 @@ export default function App() {
                                 </div>
                               )}
                               {!casDatabaseLocalCandidates.length && !casDatabaseDeletionCandidates.length && hasSequenceBackedReference(selectedEntry.row) && (
-                                <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", color: "#475467", fontSize: 12, lineHeight: 1.5 }}>
+                                <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", color: "#475467", fontSize: 13, lineHeight: 1.55 }}>
                                   No same-exon local Cas-Database guide pairs within 40-140 bp were found after remapping onto your selected reference.
                                 </div>
                               )}
@@ -5138,21 +5297,21 @@ export default function App() {
                     <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>5. Matched Historical Records</div>
                     <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
                       <thead>
-                        <tr>{["Gene", "Parental line", "Established line", "Used gRNAs", "Used donor", "Guide overlap"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                        <tr>{["Gene", "Parental line", "Established line", "Used gRNAs", "Used donor", "Guide overlap"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                       </thead>
                       <tbody>
                         {historicalContext.topMatches.map((record) => (
                           <tr key={record.projectId}>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.targetGene || "n/a"}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.parentalLine || "n/a"}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.establishedLine || "n/a"}</td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{record.targetGene || "n/a"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{record.parentalLine || "n/a"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{record.establishedLine || "n/a"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>
                               {(record.guides || []).map((guide) => guide.sequence).filter(Boolean).join(" | ") || "n/a"}
                             </td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 12, wordBreak: "break-all" }}>
                               {record.donorSequence || "N/A"}
                             </td>
-                            <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{record.guideOverlap ? `${record.guideOverlap} exact` : "none"}</td>
+                            <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{record.guideOverlap ? `${record.guideOverlap} exact` : "none"}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -5178,7 +5337,9 @@ export default function App() {
             )}
           </div>
         </div>
+        )}
 
+        {activeTab === "exports" && (
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>3. Order Exports</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
@@ -5192,7 +5353,7 @@ export default function App() {
           {batchError && <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{batchError}</div>}
 
           {batchSuccessfulResults.length > 0 && (
-            <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#f8fafc", color: "#333", border: "1px solid #d7dee7", overflowX: "auto" }}>
+            <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "linear-gradient(180deg, #fbf8f1, #f4efe4)", color: "#2c3340", border: "1px solid #d8cfbf", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)", overflowX: "auto" }}>
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Spreadsheet Template Export</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
                 These downloads match the headers in your current upload templates:
@@ -5201,23 +5362,23 @@ export default function App() {
               <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
                 <Grid>
                   <label>
-                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>CRISPR scale</div>
+                    <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>CRISPR scale</div>
                     <input value={idtDefaults.crisprScale} onChange={(event) => updateIdtDefault("crisprScale", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="25nm" />
                   </label>
                   <label>
-                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Primer scale</div>
+                    <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>Primer scale</div>
                     <input value={idtDefaults.oligoScale} onChange={(event) => updateIdtDefault("oligoScale", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="25nm" />
                   </label>
                   <label>
-                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>Primer purification</div>
+                    <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>Primer purification</div>
                     <input value={idtDefaults.oligoPurification} onChange={(event) => updateIdtDefault("oligoPurification", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="STD" />
                   </label>
                   <label>
-                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>HDR scale</div>
+                    <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>HDR scale</div>
                     <input value={idtDefaults.hdrScale} onChange={(event) => updateIdtDefault("hdrScale", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="4nmU" />
                   </label>
                   <label>
-                    <div style={{ color: "#667085", fontSize: 12, marginBottom: 6 }}>HDR modification</div>
+                    <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>HDR modification</div>
                     <input value={idtDefaults.hdrModification} onChange={(event) => updateIdtDefault("hdrModification", event.target.value)} style={{ ...FIELD_STYLE, background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }} placeholder="None or phosphorothioate format" />
                   </label>
                 </Grid>
@@ -5240,21 +5401,21 @@ export default function App() {
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
                 <thead>
-                  <tr>{["Slot", "Design", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#2E75B6", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                  <tr>{["Slot", "Design", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {batchOrderRows.map((row, rowIndex) => (
                     <tr key={`${row.slot}-${row.itemType}-${row.name}-${rowIndex}`}>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.slot}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.designLabel}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.itemType}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.name}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace", wordBreak: "break-all" }}>{row.sequence}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: "Consolas, monospace" }}>{row.pam || "n/a"}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.strand || "n/a"}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.length}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.linkedGuide || "n/a"}</td>
-                      <td style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff" }}>{row.notes || ""}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.slot}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.designLabel}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.itemType}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.name}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: "Consolas, monospace", wordBreak: "break-all" }}>{row.sequence}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: "Consolas, monospace" }}>{row.pam || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.strand || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.length}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.linkedGuide || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.notes || ""}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -5262,6 +5423,7 @@ export default function App() {
             </div>
           )}
         </div>
+        )}
 
         <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 18, textAlign: "center", lineHeight: 1.6 }}>
           <div>{APP_FOOTER_LABEL}</div>
