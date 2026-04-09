@@ -3499,6 +3499,9 @@ export default function App() {
   const idtTemplateRows = useMemo(() => buildIdtTemplateRows(batchOrderRows, idtDefaults), [batchOrderRows, idtDefaults]);
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
   const currentHost = typeof window !== "undefined" ? window.location.host : "local";
+  const showWorkspaceIntegration = typeof window !== "undefined"
+    ? ["localhost", "127.0.0.1"].some((token) => window.location.hostname.includes(token))
+    : true;
 
   const replaceSelectedKoGuide = useCallback((slotIndex, replacementGuide) => {
     if (!selectedEntry?.result || selectedEntry.result.type !== "ko") return;
@@ -4227,6 +4230,7 @@ export default function App() {
             </div>
           </div>
         </div>
+        {showWorkspaceIntegration && (
         <div style={{ ...CARD_STYLE, marginTop: 8, marginBottom: 14, padding: 12, background: "rgba(10,20,34,0.52)", border: `1px solid ${COLORS.borderSoft}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <div>
@@ -4307,6 +4311,7 @@ export default function App() {
             </>
           )}
         </div>
+        )}
 
         <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
           <TopLevelTabButton active={activeTab === "workspace"} onClick={() => setActiveTab("workspace")} tone="accent">
