@@ -741,16 +741,196 @@ function buildGuideAnnotationsForMappedDonor(guide, guideIndex, toDonorIndex) {
   return buildGuideAnnotationsFromIndexes(guide, guideIndex, siteIndexes, pamIndexes);
 }
 
-function pickPrimerOutsideLeft(seq, boundary, primerLength = 24) {
-  const end = Math.max(0, Math.min(seq.length, boundary));
-  const start = Math.max(0, end - primerLength);
-  return seq.slice(start, end);
+const PRIMER_NN_PARAMS = {
+  AA: [-7900, -22.2], TT: [-7900, -22.2], AT: [-7200, -20.4], TA: [-7200, -21.3],
+  CA: [-8500, -22.7], TG: [-8500, -22.7], GT: [-8400, -22.4], AC: [-8400, -22.4],
+  CT: [-7800, -21.0], AG: [-7800, -21.0], GA: [-8200, -22.2], TC: [-8200, -22.2],
+  CG: [-10600, -27.2], GC: [-9800, -24.4], GG: [-8000, -19.9], CC: [-8000, -19.9],
+};
+
+const VALIDATION_PRIMER_MIN_AMP = 450;
+const VALIDATION_PRIMER_MAX_AMP = 500;
+const VALIDATION_PRIMER_TARGET_AMP = 475;
+
+function calculateNearestNeighborTm(seq, cP = 250e-9, mg = 1.5e-3, mono = 0.05) {
+  const clean = String(seq || "").toUpperCase();
+  if (!clean) return 0;
+  let dH = 200;
+  let dS = -5.7;
+  for (let index = 0; index < clean.length - 1; index += 1) {
+    const pair = clean[index] + clean[index + 1];
+    if (PRIMER_NN_PARAMS[pair]) {
+      dH += PRIMER_NN_PARAMS[pair][0];
+      dS += PRIMER_NN_PARAMS[pair][1];
+    }
+  }
+  const R = 1.987;
+  const CT4 = cP / 4;
+  const tmBase = dH / (dS + R * Math.log(CT4)) - 273.15;
+  const gcFraction = [...clean].filter((base) => base === "G" || base === "C").length / clean.length;
+  const ratio = Math.sqrt(mg) / mono;
+  let inv;
+  if (ratio < 0.22) {
+    inv = (1 / (tmBase + 273.15)) + (4.29 * gcFraction - 3.95) * 1e-5 * Math.log(mono) + 9.4e-6 * Math.log(mono) ** 2;
+  } else if (ratio < 6.0) {
+    inv = (1 / (tmBase + 273.15))
+      + 3.92e-5
+      - 9.11e-6 * Math.log(mg)
+      + gcFraction * (6.26e-5 + 1.42e-5 * Math.log(mg))
+      + (1 / (2 * Math.max(1, clean.length - 1))) * (-4.82e-4 + 5.25e-4 * Math.log(mg) + 8.31e-5 * Math.log(mg) ** 2);
+  } else {
+    inv = (1 / (tmBase + 273.15)) * (0.843 - 0.352 * Math.log(mg));
+  }
+  return Math.round(((1 / inv) - 273.15) * 10) / 10;
 }
 
-function pickPrimerOutsideRight(seq, boundary, primerLength = 24) {
-  const start = Math.max(0, Math.min(seq.length, boundary));
-  const end = Math.min(seq.length, start + primerLength);
-  return reverseComplement(seq.slice(start, end));
+function calculatePrimerGcPercent(seq) {
+  const clean = String(seq || "").toUpperCase();
+  if (!clean) return 0;
+  return Math.round(([...clean].filter((base) => base === "G" || base === "C").length / clean.length) * 1000) / 10;
+}
+
+function hasPrimerHomopolymerRun(seq, runLength = 4) {
+  const clean = String(seq || "").toUpperCase();
+  return ["A", "C", "G", "T"].some((base) => clean.includes(base.repeat(runLength)));
+}
+
+function countThreePrimeClamp(seq) {
+  return [...String(seq || "").toUpperCase().slice(-3)].filter((base) => base === "G" || base === "C").length;
+}
+
+export function buildPrimerRecord(name, sequence, extra = {}) {
+  const clean = String(sequence || "").toUpperCase();
+  return {
+    n: name,
+    s: clean,
+    len: clean.length,
+    gc: calculatePrimerGcPercent(clean),
+    tm: calculateNearestNeighborTm(clean),
+    clamp: countThreePrimeClamp(clean),
+    notes: extra.notes || "",
+  };
+}
+
+function scoreValidatedPrimerPair(forwardPrimer, reversePrimer, ampliconLength, desiredAmpliconLength = 520, extraPenalty = 0) {
+  return Math.round((-(Math.abs(forwardPrimer.tm - 60) + Math.abs(reversePrimer.tm - 60))
+    - (Math.abs(forwardPrimer.gc - 50) + Math.abs(reversePrimer.gc - 50)) / 10
+    + (forwardPrimer.clamp + reversePrimer.clamp) * 2
+    - Math.abs(ampliconLength - desiredAmpliconLength) / 100
+    - extraPenalty) * 100) / 100;
+}
+
+function buildPrimerCandidatePair(forwardPrimer, reversePrimer, extra = {}) {
+  return {
+    fw: forwardPrimer,
+    rev: reversePrimer,
+    amp: extra.amp ?? (reversePrimer.end - forwardPrimer.start),
+    wtAmpliconLength: extra.wtAmpliconLength ?? null,
+    deletionAmpliconLength: extra.deletionAmpliconLength ?? null,
+    score: extra.score ?? 0,
+  };
+}
+
+function buildFallbackPrimerPair(seq, ampliconStart, ampliconEnd, forwardName = "Fw", reverseName = "Rev") {
+  const forward = seq.slice(ampliconStart, Math.min(seq.length, ampliconStart + 24));
+  const reverse = reverseComplement(seq.slice(Math.max(0, ampliconEnd - 24), ampliconEnd));
+  return buildPrimerCandidatePair(
+    {
+      seq: forward,
+      start: ampliconStart,
+      end: ampliconStart + forward.length,
+      tm: calculateNearestNeighborTm(forward),
+      gc: calculatePrimerGcPercent(forward),
+      len: forward.length,
+      clamp: countThreePrimeClamp(forward),
+      name: forwardName,
+    },
+    {
+      seq: reverse,
+      start: Math.max(0, ampliconEnd - 24),
+      end: ampliconEnd,
+      tm: calculateNearestNeighborTm(reverse),
+      gc: calculatePrimerGcPercent(reverse),
+      len: reverse.length,
+      clamp: countThreePrimeClamp(reverse),
+      name: reverseName,
+    },
+    { amp: ampliconEnd - ampliconStart, score: -999 },
+  );
+}
+
+function serializePrimerCandidates(pairs = []) {
+  return pairs.map((pair, index) => ({
+    rank: index + 1,
+    score: pair.score,
+    ampliconLength: pair.amp ?? null,
+    wtAmpliconLength: pair.wtAmpliconLength ?? null,
+    deletionAmpliconLength: pair.deletionAmpliconLength ?? null,
+    forward: buildPrimerRecord("Fw", pair.fw?.seq || pair.forward || ""),
+    reverse: buildPrimerRecord("Rev", pair.rev?.seq || pair.reverse || ""),
+  }));
+}
+
+export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}) {
+  const {
+    minAmp = VALIDATION_PRIMER_MIN_AMP,
+    maxAmp = VALIDATION_PRIMER_MAX_AMP,
+    desiredAmp = VALIDATION_PRIMER_TARGET_AMP,
+    minLen = 18,
+    maxLen = 26,
+    tmMin = 55,
+    tmMax = 67,
+    gcMin = 38,
+    gcMax = 67,
+    tmDelta = 5,
+  } = opts;
+  const fwCandidates = [];
+  const revCandidates = [];
+
+  const fwSearchStart = Math.max(0, anchorStart - 400);
+  const fwSearchEnd = Math.max(0, anchorStart - 80);
+  for (let pos = fwSearchStart; pos < fwSearchEnd; pos += 1) {
+    for (let len = minLen; len <= maxLen; len += 1) {
+      const primer = seq.slice(pos, pos + len);
+      if (primer.length !== len || primer.includes("N")) continue;
+      const gc = calculatePrimerGcPercent(primer);
+      if (gc < gcMin || gc > gcMax || hasPrimerHomopolymerRun(primer)) continue;
+      const tm = calculateNearestNeighborTm(primer);
+      if (tm < tmMin || tm > tmMax) continue;
+      fwCandidates.push({ seq: primer, start: pos, end: pos + len, tm, gc, len, clamp: countThreePrimeClamp(primer) });
+    }
+  }
+
+  const revSearchStart = Math.min(seq.length, anchorEnd + 80);
+  const revSearchEnd = Math.min(seq.length, anchorEnd + 460);
+  for (let pos = revSearchStart; pos < revSearchEnd; pos += 1) {
+    for (let len = minLen; len <= maxLen; len += 1) {
+      if (pos + len > seq.length) break;
+      const primer = reverseComplement(seq.slice(pos, pos + len));
+      if (primer.includes("N")) continue;
+      const gc = calculatePrimerGcPercent(primer);
+      if (gc < gcMin || gc > gcMax || hasPrimerHomopolymerRun(primer)) continue;
+      const tm = calculateNearestNeighborTm(primer);
+      if (tm < tmMin || tm > tmMax) continue;
+      revCandidates.push({ seq: primer, start: pos, end: pos + len, tm, gc, len, clamp: countThreePrimeClamp(primer) });
+    }
+  }
+
+  const pairs = [];
+  for (const fw of fwCandidates) {
+    for (const rev of revCandidates) {
+      const amp = rev.end - fw.start;
+      if (amp < minAmp || amp > maxAmp) continue;
+      if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
+      if (reverseComplement(fw.seq.slice(-4)) === rev.seq.slice(-4)) continue;
+      const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp);
+      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, score }));
+    }
+  }
+  if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
+  const fallbackAmp = Math.max(48, Math.min(seq.length, desiredAmp));
+  const idealStart = Math.max(0, Math.min(Math.max(0, seq.length - fallbackAmp), Math.round(((anchorStart + anchorEnd) / 2) - fallbackAmp / 2)));
+  return [buildFallbackPrimerPair(seq, idealStart, Math.min(seq.length, idealStart + fallbackAmp))];
 }
 
 function scorePrimerSequence(primer) {
@@ -766,86 +946,141 @@ function scorePrimerSequence(primer) {
   return score;
 }
 
-function pickCenteredPrimerPair(seq, center, minAmpliconLength = 450, maxAmpliconLength = 500, primerLength = 24) {
-  const minLength = Math.max(primerLength * 2, minAmpliconLength);
-  const maxLength = Math.max(minLength, maxAmpliconLength);
-  let best = null;
-
+export function designCenteredPrimerPairs(seq, center, opts = {}) {
+  const {
+    minAmp = 430,
+    maxAmp = 650,
+    desiredAmp = 475,
+    minLen = 18,
+    maxLen = 26,
+    tmMin = 55,
+    tmMax = 67,
+    gcMin = 38,
+    gcMax = 67,
+    tmDelta = 5,
+    maxOffset = 35,
+  } = opts;
+  const minLength = Math.max(minLen * 2, minAmp);
+  const maxLength = Math.max(minLength, maxAmp);
+  const pairs = [];
   for (let ampliconLength = minLength; ampliconLength <= maxLength; ampliconLength += 1) {
     const maxStart = Math.max(0, seq.length - ampliconLength);
     const idealStart = Math.round(center - ampliconLength / 2);
-    for (const offset of [0, -1, 1, -2, 2, -3, 3, -4, 4, -5, 5]) {
+    for (let offset = -maxOffset; offset <= maxOffset; offset += 1) {
       const ampliconStart = Math.max(0, Math.min(maxStart, idealStart + offset));
       const ampliconEnd = ampliconStart + ampliconLength;
-      const forward = seq.slice(ampliconStart, ampliconStart + primerLength);
-      const reverse = reverseComplement(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd));
-      if (forward.length !== primerLength || reverse.length !== primerLength) continue;
       const ampliconCenter = ampliconStart + ampliconLength / 2;
       const centerPenalty = Math.abs(center - ampliconCenter);
-      const forwardPenalty = scorePrimerSequence(forward);
-      const reversePenalty = scorePrimerSequence(reverse);
-      const score = centerPenalty * 3 + forwardPenalty + reversePenalty + Math.abs(ampliconLength - 475) * 0.2;
-      if (!best || score < best.score) {
-        best = {
-          forward,
-          reverse,
-          ampliconLength,
-          score,
-        };
+      for (let fwLen = minLen; fwLen <= maxLen; fwLen += 1) {
+        const fwSeq = seq.slice(ampliconStart, ampliconStart + fwLen);
+        if (fwSeq.length !== fwLen || fwSeq.includes("N")) continue;
+        const fwGc = calculatePrimerGcPercent(fwSeq);
+        if (fwGc < gcMin || fwGc > gcMax || hasPrimerHomopolymerRun(fwSeq)) continue;
+        const fw = { seq: fwSeq, start: ampliconStart, end: ampliconStart + fwLen, tm: calculateNearestNeighborTm(fwSeq), gc: fwGc, len: fwLen, clamp: countThreePrimeClamp(fwSeq) };
+        if (fw.tm < tmMin || fw.tm > tmMax) continue;
+        for (let revLen = minLen; revLen <= maxLen; revLen += 1) {
+          const revStart = ampliconEnd - revLen;
+          if (revStart <= fw.end) continue;
+          const revSeq = reverseComplement(seq.slice(revStart, ampliconEnd));
+          if (revSeq.length !== revLen || revSeq.includes("N")) continue;
+          const revGc = calculatePrimerGcPercent(revSeq);
+          if (revGc < gcMin || revGc > gcMax || hasPrimerHomopolymerRun(revSeq)) continue;
+          const rev = { seq: revSeq, start: revStart, end: ampliconEnd, tm: calculateNearestNeighborTm(revSeq), gc: revGc, len: revLen, clamp: countThreePrimeClamp(revSeq) };
+          if (rev.tm < tmMin || rev.tm > tmMax) continue;
+          if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
+          if (reverseComplement(fw.seq.slice(-4)) === rev.seq.slice(-4)) continue;
+          const score = scoreValidatedPrimerPair(fw, rev, ampliconLength, desiredAmp, centerPenalty / 5);
+          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: ampliconLength, score }));
+        }
       }
     }
   }
-
-  if (best) return best;
-  const fallbackLength = Math.max(primerLength * 2, Math.min(seq.length, 480));
+  if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
+  const fallbackLength = Math.max(48, Math.min(seq.length, desiredAmp));
   const maxStart = Math.max(0, seq.length - fallbackLength);
   const ampliconStart = Math.max(0, Math.min(maxStart, Math.round(center - fallbackLength / 2)));
-  const ampliconEnd = Math.min(seq.length, ampliconStart + fallbackLength);
+  return [buildFallbackPrimerPair(seq, ampliconStart, Math.min(seq.length, ampliconStart + fallbackLength))];
+}
+
+function pickCenteredPrimerPair(seq, center, minAmpliconLength = 450, maxAmpliconLength = 500) {
+  const best = designCenteredPrimerPairs(seq, center, { minAmp: minAmpliconLength, maxAmp: maxAmpliconLength, desiredAmp: Math.round((minAmpliconLength + maxAmpliconLength) / 2) })[0];
   return {
-    forward: seq.slice(ampliconStart, ampliconStart + primerLength),
-    reverse: reverseComplement(seq.slice(Math.max(0, ampliconEnd - primerLength), ampliconEnd)),
-    ampliconLength: ampliconEnd - ampliconStart,
+    forward: best.fw.seq,
+    reverse: best.rev.seq,
+    ampliconLength: best.amp,
+    score: best.score,
+    fw: best.fw,
+    rev: best.rev,
   };
 }
 
 const KO_LONG_DELETION_THRESHOLD = 1000;
 const KO_DELETION_SCREEN_FLANK = 250;
 
-function pickDeletionScreenPrimerPair(seq, leftCut, rightCut, flank = KO_DELETION_SCREEN_FLANK, primerLength = 24) {
-  const maxStart = Math.max(0, seq.length - primerLength);
+export function designDeletionScreenPrimerPairs(seq, leftCut, rightCut, flank = KO_DELETION_SCREEN_FLANK, opts = {}) {
+  const {
+    minLen = 18,
+    maxLen = 26,
+    tmMin = 55,
+    tmMax = 67,
+    gcMin = 38,
+    gcMax = 67,
+    tmDelta = 5,
+    offsetWindow = 40,
+  } = opts;
+  const maxStart = Math.max(0, seq.length - minLen);
   const desiredForwardStart = Math.max(0, Math.min(maxStart, leftCut - flank));
-  const desiredReverseStart = Math.max(0, Math.min(maxStart, rightCut + flank - primerLength));
-  let best = null;
-  for (let forwardOffset = -20; forwardOffset <= 20; forwardOffset += 1) {
+  const desiredReverseStart = Math.max(0, Math.min(maxStart, rightCut + flank - minLen));
+  const pairs = [];
+  for (let forwardOffset = -offsetWindow; forwardOffset <= offsetWindow; forwardOffset += 1) {
     const forwardStart = Math.max(0, Math.min(maxStart, desiredForwardStart + forwardOffset));
-    const forward = seq.slice(forwardStart, forwardStart + primerLength);
-    if (forward.length !== primerLength) continue;
-    for (let reverseOffset = -20; reverseOffset <= 20; reverseOffset += 1) {
-      const reverseStart = Math.max(forwardStart + primerLength + 50, Math.min(maxStart, desiredReverseStart + reverseOffset));
-      const reverse = reverseComplement(seq.slice(reverseStart, reverseStart + primerLength));
-      if (reverse.length !== primerLength) continue;
-      const wtAmpliconLength = reverseStart + primerLength - forwardStart;
-      const deletionAmpliconLength = Math.max(primerLength * 2, (leftCut - forwardStart) + ((reverseStart + primerLength) - rightCut));
-      const leftFlankPenalty = Math.abs((leftCut - forwardStart) - flank);
-      const rightFlankPenalty = Math.abs(((reverseStart + primerLength) - rightCut) - flank);
-      const score = scorePrimerSequence(forward)
-        + scorePrimerSequence(reverse)
-        + leftFlankPenalty * 0.15
-        + rightFlankPenalty * 0.15
-        + Math.abs(deletionAmpliconLength - 500) * 0.2;
-      if (!best || score < best.score) {
-        best = { forward, reverse, wtAmpliconLength, deletionAmpliconLength, score };
+    for (let fwLen = minLen; fwLen <= maxLen; fwLen += 1) {
+      const forward = seq.slice(forwardStart, forwardStart + fwLen);
+      if (forward.length !== fwLen || forward.includes("N")) continue;
+      const fwGc = calculatePrimerGcPercent(forward);
+      if (fwGc < gcMin || fwGc > gcMax || hasPrimerHomopolymerRun(forward)) continue;
+      const fw = { seq: forward, start: forwardStart, end: forwardStart + fwLen, tm: calculateNearestNeighborTm(forward), gc: fwGc, len: fwLen, clamp: countThreePrimeClamp(forward) };
+      if (fw.tm < tmMin || fw.tm > tmMax) continue;
+      for (let reverseOffset = -offsetWindow; reverseOffset <= offsetWindow; reverseOffset += 1) {
+        for (let revLen = minLen; revLen <= maxLen; revLen += 1) {
+          const reverseStart = Math.max(fw.end + 50, Math.min(Math.max(0, seq.length - revLen), desiredReverseStart + reverseOffset));
+          const reverse = reverseComplement(seq.slice(reverseStart, reverseStart + revLen));
+          if (reverse.length !== revLen || reverse.includes("N")) continue;
+          const revGc = calculatePrimerGcPercent(reverse);
+          if (revGc < gcMin || revGc > gcMax || hasPrimerHomopolymerRun(reverse)) continue;
+          const rev = { seq: reverse, start: reverseStart, end: reverseStart + revLen, tm: calculateNearestNeighborTm(reverse), gc: revGc, len: revLen, clamp: countThreePrimeClamp(reverse) };
+          if (rev.tm < tmMin || rev.tm > tmMax) continue;
+          if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
+          const wtAmpliconLength = reverseStart + revLen - forwardStart;
+          const deletionAmpliconLength = Math.max(minLen * 2, (leftCut - forwardStart) + ((reverseStart + revLen) - rightCut));
+          const leftFlankPenalty = Math.abs((leftCut - forwardStart) - flank);
+          const rightFlankPenalty = Math.abs(((reverseStart + revLen) - rightCut) - flank);
+          const score = scoreValidatedPrimerPair(fw, rev, deletionAmpliconLength, 500, (leftFlankPenalty + rightFlankPenalty) / 20);
+          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: deletionAmpliconLength, wtAmpliconLength, deletionAmpliconLength, score }));
+        }
       }
     }
   }
-  if (best) return best;
-  const forwardStart = desiredForwardStart;
-  const reverseStart = Math.max(forwardStart + primerLength + 50, desiredReverseStart);
+  if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
+  const fallbackForwardStart = desiredForwardStart;
+  const fallbackReverseStart = Math.max(fallbackForwardStart + 74, desiredReverseStart);
+  const fallback = buildFallbackPrimerPair(seq, fallbackForwardStart, Math.min(seq.length, fallbackReverseStart + 24));
+  fallback.wtAmpliconLength = (fallback.rev?.end || 0) - (fallback.fw?.start || 0);
+  fallback.deletionAmpliconLength = Math.max(48, (leftCut - fallbackForwardStart) + ((fallback.rev?.end || fallbackReverseStart + 24) - rightCut));
+  fallback.amp = fallback.deletionAmpliconLength;
+  return [fallback];
+}
+
+function pickDeletionScreenPrimerPair(seq, leftCut, rightCut, flank = KO_DELETION_SCREEN_FLANK) {
+  const best = designDeletionScreenPrimerPairs(seq, leftCut, rightCut, flank)[0];
   return {
-    forward: seq.slice(forwardStart, forwardStart + primerLength),
-    reverse: reverseComplement(seq.slice(reverseStart, reverseStart + primerLength)),
-    wtAmpliconLength: reverseStart + primerLength - forwardStart,
-    deletionAmpliconLength: Math.max(primerLength * 2, (leftCut - forwardStart) + ((reverseStart + primerLength) - rightCut)),
+    forward: best.fw.seq,
+    reverse: best.rev.seq,
+    wtAmpliconLength: best.wtAmpliconLength,
+    deletionAmpliconLength: best.deletionAmpliconLength,
+    score: best.score,
+    fw: best.fw,
+    rev: best.rev,
   };
 }
 
@@ -1303,12 +1538,15 @@ export function designPM(gb, mutationString, options = {}) {
     if (silent) result.ss.push({ ...silent, gi: index + 1 });
   });
 
-  const primerPair = pickCenteredPrimerPair(seq, codonInfo.g, 450, 500, 24);
+  const primerPairs = designCenteredPrimerPairs(seq, codonInfo.g, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
+  const primerPair = primerPairs[0];
   result.ps = [
-    { n: makePrimerName(gb.gene, "pm", "Fw", mutationString), s: primerPair.forward },
-    { n: makePrimerName(gb.gene, "pm", "Rev", mutationString), s: primerPair.reverse },
+    buildPrimerRecord(makePrimerName(gb.gene, "pm", "Fw", mutationString), primerPair.fw.seq),
+    buildPrimerRecord(makePrimerName(gb.gene, "pm", "Rev", mutationString), primerPair.rev.seq),
   ];
-  result.amp = `~${primerPair.ampliconLength} bp`;
+  result.amp = `~${primerPair.amp} bp`;
+  result.primerStrategy = "validated-centered";
+  result.primerCandidates = serializePrimerCandidates(primerPairs);
   return result;
 }
 
@@ -1366,7 +1604,8 @@ export function designIT(gb, siteString, tag, options = {}) {
   const proteinPreview = buildInternalProteinPreview(gb, aaNumber, preset.aa);
   const codingPreview = buildInternalCodingPreview(gb, aaNumber, preset.seq, preset.aa);
   const seq = getGenomicSequence(gb);
-  const primerPair = pickCenteredPrimerPair(seq, insertionPos, 450, 500, 24);
+  const primerPairs = designCenteredPrimerPairs(seq, insertionPos, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
+  const primerPair = primerPairs[0];
   const insertValidation = donors[0]
     ? buildInsertValidation(preset.seq, donors[0].od.slice(donors[0].insertStart, donors[0].insertEnd))
     : buildInsertValidation(preset.seq, "");
@@ -1398,10 +1637,12 @@ export function designIT(gb, siteString, tag, options = {}) {
     os: donors,
     ss: allBlockingMutations,
     ps: [
-      { n: makePrimerName(gb.gene, "it", "Fw", `AFTER_${wtAA || ""}${aaNumber}`, tag), s: primerPair.forward },
-      { n: makePrimerName(gb.gene, "it", "Rev", `AFTER_${wtAA || ""}${aaNumber}`, tag), s: primerPair.reverse },
+      buildPrimerRecord(makePrimerName(gb.gene, "it", "Fw", `AFTER_${wtAA || ""}${aaNumber}`, tag), primerPair.fw.seq),
+      buildPrimerRecord(makePrimerName(gb.gene, "it", "Rev", `AFTER_${wtAA || ""}${aaNumber}`, tag), primerPair.rev.seq),
     ],
-    amp: `~${primerPair.ampliconLength} bp`,
+    amp: `~${primerPair.amp} bp`,
+    primerStrategy: "validated-centered",
+    primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }
 
@@ -1472,6 +1713,10 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
     ),
   );
   const lastAA = getCodonAtAa(gb, gb.proteinLength, toAA);
+  const primerPairs = designFlankingPrimerPairs(seq, stopStart, stopStart + 3);
+  const primerPair = primerPairs[0] || null;
+  const wtAmpliconLength = primerPair ? primerPair.amp : Math.max(48, Math.min(seq.length, 480));
+  const kiAmpliconLength = wtAmpliconLength + preset.seq.length - 3;
   const guideProtection = guides.slice(0, 2).map((guide, index) => {
     const guideIndex = index + 1;
     const mutation = silentMutations.find((entry) => entry.gi === guideIndex) || null;
@@ -1507,10 +1752,12 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
     gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: appendGuideContext(buildInsertGuideNote(guide, "stop", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
     ps: [
-      { n: makePrimerName(gb.gene, "ct", "Fw", "", tag), s: pickPrimerOutsideLeft(seq, homology5Start) },
-      { n: makePrimerName(gb.gene, "ct", "Rev", "", tag), s: pickPrimerOutsideRight(seq, homology3End) },
+      buildPrimerRecord(makePrimerName(gb.gene, "ct", "Fw", "", tag), primerPair?.fw?.seq || seq.slice(Math.max(0, stopStart - 240), Math.max(0, stopStart - 216))),
+      buildPrimerRecord(makePrimerName(gb.gene, "ct", "Rev", "", tag), primerPair?.rev?.seq || reverseComplement(seq.slice(Math.min(seq.length, stopStart + 216), Math.min(seq.length, stopStart + 240)))),
     ],
-    amp: `WT ~${homology3End + 49 - homology5Start + 50} bp | KI ~${homology3End + 49 - homology5Start + 50 + preset.seq.length} bp`,
+    amp: `WT ~${wtAmpliconLength} bp | KI ~${kiAmpliconLength} bp`,
+    primerStrategy: "validated-flanking",
+    primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }
 
@@ -1551,9 +1798,10 @@ export function designKO(gb, options = {}) {
   const cutCenter = Math.round(selectedPair.guides.reduce((sum, guide) => sum + guide.cut, 0) / selectedPair.guides.length);
   const sortedCuts = selectedPair.guides.map((guide) => guide.cut).filter(Number.isFinite).sort((left, right) => left - right);
   const longDeletion = sortedCuts.length === 2 && selectedPair.spacing > KO_LONG_DELETION_THRESHOLD;
-  const primerPair = longDeletion
-    ? pickDeletionScreenPrimerPair(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK, 24)
-    : pickCenteredPrimerPair(seq, cutCenter, 450, 500, 24);
+  const primerPairs = longDeletion
+    ? designDeletionScreenPrimerPairs(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK)
+    : designCenteredPrimerPairs(seq, cutCenter, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
+  const primerPair = primerPairs[0];
 
   return {
     type: "ko",
@@ -1576,16 +1824,17 @@ export function designKO(gb, options = {}) {
       };
     }),
     ps: [
-      { n: makePrimerName(gb.gene, "ko", "Fw"), s: primerPair.forward },
-      { n: makePrimerName(gb.gene, "ko", "Rev"), s: primerPair.reverse },
+      buildPrimerRecord(makePrimerName(gb.gene, "ko", "Fw"), primerPair.fw.seq),
+      buildPrimerRecord(makePrimerName(gb.gene, "ko", "Rev"), primerPair.rev.seq),
     ],
     amp: longDeletion
       ? `WT ~${primerPair.wtAmpliconLength} bp | deletion ~${primerPair.deletionAmpliconLength} bp`
-      : `~${primerPair.ampliconLength} bp`,
+      : `~${primerPair.amp} bp`,
     strat: longDeletion
       ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
       : "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
-    primerStrategy: longDeletion ? "deletion-screen" : "centered",
+    primerStrategy: longDeletion ? "validated-deletion-screen" : "validated-centered",
+    primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }
 
@@ -1662,6 +1911,7 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
       protected: !!mutation || byInsertion,
     };
   });
+  const primerPairs = designFlankingPrimerPairs(seq, startCodonPos, startCodonPos + 3);
   return {
     type: "nt",
     gene: gb.gene,
@@ -1682,11 +1932,24 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
     guideProtection,
     gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: appendGuideContext(buildInsertGuideNote(guide, "start codon replacement site", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
-    ps: [
-      { n: makePrimerName(gb.gene, "nt", "Fw", "", tag), s: pickPrimerOutsideLeft(seq, homology5Start) },
-      { n: makePrimerName(gb.gene, "nt", "Rev", "", tag), s: pickPrimerOutsideRight(seq, homology3End) },
-    ],
-    amp: `WT ~${homology3End + 49 - homology5Start + 50} bp | KI ~${homology3End + 49 - homology5Start + 50 + preset.seq.length - 3} bp`,
+    ps: (() => {
+      const primerPair = primerPairs[0] || null;
+      const fallbackFwStart = Math.max(0, startCodonPos - 240);
+      const fallbackFwEnd = Math.min(seq.length, fallbackFwStart + 24);
+      const fallbackRevStart = Math.min(seq.length, startCodonPos + 216);
+      const fallbackRevEnd = Math.min(seq.length, fallbackRevStart + 24);
+      return [
+        buildPrimerRecord(makePrimerName(gb.gene, "nt", "Fw", "", tag), primerPair?.fw?.seq || seq.slice(fallbackFwStart, fallbackFwEnd)),
+        buildPrimerRecord(makePrimerName(gb.gene, "nt", "Rev", "", tag), primerPair?.rev?.seq || reverseComplement(seq.slice(fallbackRevStart, fallbackRevEnd))),
+      ];
+    })(),
+    amp: (() => {
+      const primerPair = primerPairs[0] || null;
+      const wtAmpliconLength = primerPair ? primerPair.amp : Math.max(48, Math.min(seq.length, 480));
+      return `WT ~${wtAmpliconLength} bp | KI ~${wtAmpliconLength + preset.seq.length - 3} bp`;
+    })(),
+    primerStrategy: "validated-flanking",
+    primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CASSETTES, INTERNAL_TAGS, REPORTERS, getCassetteSequenceLength, parseGB, runDesign } from "./designEngine";
+import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, getCassetteSequenceLength, parseGB, runDesign } from "./designEngine";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
@@ -779,9 +779,10 @@ function finalizeKoResultWithGuides(result, row, guides) {
     : null;
   const sortedCuts = mappedGuides.map((guide) => guide.cut).filter(Number.isFinite).sort((left, right) => left - right);
   const longDeletion = sortedCuts.length === 2 && Number.isFinite(pairSpacing) && pairSpacing > KO_LONG_DELETION_THRESHOLD;
-  const primerPair = longDeletion
-    ? pickDeletionScreenPrimerPairLocal(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK, 24)
-    : (Number.isFinite(cutCenter) ? pickCenteredPrimerPairLocal(seq, cutCenter, 450, 500, 24) : null);
+  const primerPairs = longDeletion
+    ? designDeletionScreenPrimerPairs(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK)
+    : (Number.isFinite(cutCenter) ? designCenteredPrimerPairs(seq, cutCenter, { minAmp: 450, maxAmp: 500, desiredAmp: 475 }) : []);
+  const primerPair = primerPairs[0] || null;
 
   const exonNumbers = [...new Set(mappedGuides.map((guide) => guide.exonNumber).filter(Number.isFinite))];
   let exonLabel = result.exon;
@@ -795,18 +796,19 @@ function finalizeKoResultWithGuides(result, row, guides) {
     exon: exonLabel,
     gs: updatedGuides,
     ps: primerPair ? [
-      { ...result.ps?.[0], s: primerPair.forward },
-      { ...result.ps?.[1], s: primerPair.reverse },
+      buildPrimerRecord(result.ps?.[0]?.n || "Fw", primerPair.fw.seq),
+      buildPrimerRecord(result.ps?.[1]?.n || "Rev", primerPair.rev.seq),
     ] : result.ps,
+    primerCandidates: primerPairs.length ? serializePrimerCandidatesLocal(primerPairs) : (result.primerCandidates || []),
     amp: primerPair
       ? (longDeletion
         ? `WT ~${primerPair.wtAmpliconLength} bp | deletion ~${primerPair.deletionAmpliconLength} bp`
-        : `~${primerPair.ampliconLength} bp`)
+        : `~${primerPair.amp} bp`)
       : result.amp,
     strat: longDeletion
       ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
       : result.strat,
-    primerStrategy: longDeletion ? "deletion-screen" : (result.primerStrategy || "centered"),
+    primerStrategy: longDeletion ? "validated-deletion-screen" : "validated-centered",
   };
 }
 
@@ -1016,7 +1018,41 @@ function renderGuideSequence(spacer, pam, html = false) {
 }
 
 function buildPrimerRows(result) {
-  return (result?.ps || []).map((primer) => [primer.n, primer.s]);
+  return (result?.ps || []).map((primer) => [
+    primer.n,
+    primer.s,
+    primer.len ? `${primer.len} nt` : "n/a",
+    Number.isFinite(primer.tm) ? `${primer.tm.toFixed(1)} C` : "n/a",
+    Number.isFinite(primer.gc) ? `${primer.gc}%` : "n/a",
+    Number.isFinite(primer.clamp) ? `${primer.clamp}/3` : "n/a",
+  ]);
+}
+
+function buildPrimerCandidateRows(result) {
+  return (result?.primerCandidates || []).slice(1).map((candidate) => [
+    `#${candidate.rank}`,
+    candidate.forward?.s || "n/a",
+    Number.isFinite(candidate.forward?.tm) ? `${candidate.forward.tm.toFixed(1)} C` : "n/a",
+    Number.isFinite(candidate.forward?.gc) ? `${candidate.forward.gc}%` : "n/a",
+    Number.isFinite(candidate.forward?.clamp) ? `${candidate.forward.clamp}/3` : "n/a",
+    candidate.reverse?.s || "n/a",
+    Number.isFinite(candidate.reverse?.tm) ? `${candidate.reverse.tm.toFixed(1)} C` : "n/a",
+    Number.isFinite(candidate.reverse?.gc) ? `${candidate.reverse.gc}%` : "n/a",
+    Number.isFinite(candidate.reverse?.clamp) ? `${candidate.reverse.clamp}/3` : "n/a",
+    Number.isFinite(candidate.ampliconLength) ? `${candidate.ampliconLength} bp` : (Number.isFinite(candidate.deletionAmpliconLength) ? `del ~${candidate.deletionAmpliconLength} bp` : "n/a"),
+  ]);
+}
+
+function serializePrimerCandidatesLocal(pairs = []) {
+  return pairs.map((pair, index) => ({
+    rank: index + 1,
+    score: pair.score,
+    ampliconLength: pair.amp ?? null,
+    wtAmpliconLength: pair.wtAmpliconLength ?? null,
+    deletionAmpliconLength: pair.deletionAmpliconLength ?? null,
+    forward: buildPrimerRecord("Fw", pair.fw?.seq || pair.forward || ""),
+    reverse: buildPrimerRecord("Rev", pair.rev?.seq || pair.reverse || ""),
+  }));
 }
 
 function buildSsOdnNotes(result) {
@@ -2387,7 +2423,7 @@ function buildDesignReadinessChecks(result) {
         label: "Primer strategy ready",
         status: primerReady ? "pass" : result.referenceOnly ? "na" : "warn",
         detail: primerReady
-          ? `${result.primerStrategy === "deletion-screen" ? "Deletion-junction" : "Validation"} primers are ready (${result.amp}).`
+          ? `${String(result.primerStrategy || "").includes("deletion-screen") ? "Deletion-junction" : "Validation"} primers are ready (${result.amp}).`
           : result.referenceOnly
             ? "Primer design is deferred until a GenBank reference is uploaded."
             : "Validation primers are incomplete.",
@@ -2779,6 +2815,7 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const geneRows = buildGeneInfoRows(meta, result, fileName);
   const guideRows = (result?.gs || []).map((guide) => [guide.n, renderGuideSequence(guide.sp, guide.pm, true), `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
   const primerRows = buildPrimerRows(result);
+  const primerCandidateRows = buildPrimerCandidateRows(result);
   const ssOdnNotes = buildSsOdnNotes(result);
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const hasHistoricalMatches = Boolean(historicalContext?.topMatches?.length);
@@ -2822,8 +2859,10 @@ p{font-size:13px;line-height:1.45}
   <h2>2. gRNA Sequences</h2>
   <table>${tableHtml([["Name", "Sequence", "Strand", "GC", "Notes"]], true)}${tableHtml(guideRows)}</table>
   <h2>3. Validation Primers</h2>
-  <table>${tableHtml([["Name", "Sequence"]], true)}${tableHtml(primerRows)}</table>
+  <table>${tableHtml([["Name", "Sequence", "Length", "Tm", "GC", "Clamp"]], true)}${tableHtml(primerRows)}</table>
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
+  ${result.primerStrategy ? `<p class="sub">Primer strategy: ${result.primerStrategy}</p>` : ""}
+  ${primerCandidateRows.length ? `<h3>Alternative Validated Primer Pairs</h3><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table>` : ""}
   ${readinessBlock}
   ${locusMapBlock}
   <h2>4. ${resolvedSectionTitle}</h2>
@@ -4893,13 +4932,27 @@ export default function App() {
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>3. Validation Primers</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
                   <thead>
-                    <tr>{["Name", "Sequence"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                    <tr>{["Name", "Sequence", "Length", "Tm", "GC", "Clamp"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                   </thead>
                   <tbody>
                     {buildPrimerRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
                   </tbody>
                 </table>
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {selectedEntry.result.amp || "n/a"}</div>
+                {!!selectedEntry.result?.primerStrategy && <div style={{ color: "#555", fontSize: 13, marginBottom: 12 }}>Primer strategy: {selectedEntry.result.primerStrategy}</div>}
+                {!!buildPrimerCandidateRows(selectedEntry.result).length && (
+                  <>
+                    <div style={{ fontSize: 15, fontWeight: 700, margin: "4px 0 8px 0" }}>Alternative validated primer pairs</div>
+                    <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
+                      <thead>
+                        <tr>{["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {buildPrimerCandidateRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: cellIndex === 1 || cellIndex === 5 ? "Consolas, monospace" : "inherit", fontSize: 12 }}>{cell}</td>)}</tr>)}
+                      </tbody>
+                    </table>
+                  </>
+                )}
 
                 <DesignReadinessCard result={selectedEntry.result} />
                 <LocusMapCard result={selectedEntry.result} />
