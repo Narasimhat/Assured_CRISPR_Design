@@ -1,0 +1,11 @@
+{
+  "gene_symbol": "SCN5A",
+  "ensembl_id": "ENSG00000183873",
+  "mutation": "",
+  "edit_type": "knockout",
+  "species": "human",
+  "cell_line": "",
+  "extra": {
+    "reference_file": "../../scn5a-ensg00000183873.gb"
+  }
+}
