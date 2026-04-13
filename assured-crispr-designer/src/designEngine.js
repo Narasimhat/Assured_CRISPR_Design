@@ -12,7 +12,7 @@ import {
   normalizeGenBankToTranscriptModel,
   normalizeRawSequenceToTranscriptModel,
   selectNearbyGuidesForModel,
-} from "./transcriptModel";
+} from "./transcriptModel.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",

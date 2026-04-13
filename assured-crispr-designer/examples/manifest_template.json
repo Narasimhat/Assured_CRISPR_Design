@@ -1,0 +1,15 @@
+{
+  "gene_symbol": "GENE_SYMBOL",
+  "ensembl_id": "ENSG00000000000",
+  "mutation": "",
+  "edit_type": "knockout",
+  "species": "human",
+  "cell_line": "",
+  "extra": {
+    "reference_file": "C:/absolute/path/to/reference.gb",
+    "tag": "",
+    "homology_arm_length": 250,
+    "custom_guides": [],
+    "design_options": {}
+  }
+}
