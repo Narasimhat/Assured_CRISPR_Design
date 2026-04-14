@@ -2922,7 +2922,6 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const guideRows = (result?.gs || []).map((guide) => [guide.n, renderGuideSequence(guide.sp, guide.pm, true), `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
   const primerRows = buildPrimerRows(result);
   const primerCandidateRows = buildPrimerCandidateRows(result);
-  const primerSpecificity = getPrimerSpecificitySummary(result);
   const ssOdnNotes = buildSsOdnNotes(result);
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const hasHistoricalMatches = Boolean(historicalContext?.topMatches?.length);
@@ -2969,7 +2968,6 @@ p{font-size:13px;line-height:1.45}
   <table>${tableHtml([["Name", "Sequence", "Length", "Tm", "GC", "Clamp"]], true)}${tableHtml(primerRows)}</table>
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
   ${result.primerStrategy ? `<p class="sub">Primer strategy: ${result.primerStrategy}</p>` : ""}
-  ${primerSpecificity ? `<p class="sub">Primer specificity (${primerSpecificity.genome}): ${primerSpecificity.label} | Forward exact loci ${primerSpecificity.forwardExact} | Reverse exact loci ${primerSpecificity.reverseExact}</p>` : ""}
   ${primerCandidateRows.length ? `<h3>Alternative Validated Primer Pairs</h3><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table>` : ""}
   ${readinessBlock}
   ${locusMapBlock}
