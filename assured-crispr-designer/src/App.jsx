@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, getCassetteSequenceLength, parseGB, runDesign } from "./designEngine";
+import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, summarizePrimerPairQuality } from "./designEngine";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 
@@ -555,6 +555,8 @@ function buildDesignSummary(result) {
   lines.push("Validation primers:");
   result.ps.forEach((primer) => lines.push(`- ${primer.n}: ${primer.s}`));
   if (result.amp) lines.push(`Expected amplicon: ${result.amp}`);
+  const primerQuality = getPrimerQualitySummary(result);
+  if (primerQuality) lines.push(`Primer QC: ${primerQuality.confidence} confidence | pair penalty ${primerQuality.penalty} | Tm delta ${primerQuality.tmDelta} C`);
   return lines.join("\n");
 }
 
@@ -1043,6 +1045,55 @@ function buildPrimerCandidateRows(result) {
   ]);
 }
 
+function getPrimerQualitySummary(result) {
+  const forward = result?.ps?.[0]?.s || "";
+  const reverse = result?.ps?.[1]?.s || "";
+  if (!forward || !reverse) return null;
+  return summarizePrimerPairQuality(forward, reverse);
+}
+
+function PrimerQualityCard({ result }) {
+  const summary = getPrimerQualitySummary(result);
+  if (!summary) return null;
+  const tone = summary.confidence === "high"
+    ? { badge: "High confidence", color: COLORS.success, background: "#D1FAE5" }
+    : summary.confidence === "medium"
+      ? { badge: "Medium confidence", color: "#B54708", background: "#FEF0C7" }
+      : { badge: "Needs review", color: "#B42318", background: "#FEE4E2" };
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>Primer QC</div>
+        <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, fontSize: 12, fontWeight: 700, color: tone.color, background: tone.background }}>
+          {tone.badge}
+        </span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10 }}>
+        <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>Pair penalty: {summary.penalty}</div>
+        <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>Tm delta: {summary.tmDelta} C</div>
+        <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>Hetero-dimer run: {summary.heteroDimerRun} bp</div>
+        <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>3' hetero-dimer run: {summary.heteroThreePrimeRun} bp</div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+        <div style={{ padding: "10px 12px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>
+          <div style={{ fontWeight: 700, fontSize: 12, color: "#111827", marginBottom: 4 }}>Forward primer</div>
+          <div style={{ fontSize: 12, color: "#475467" }}>Penalty {summary.forward.penalty} | self-dimer {summary.forward.selfDimerRun} | hairpin {summary.forward.hairpinRun}</div>
+        </div>
+        <div style={{ padding: "10px 12px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>
+          <div style={{ fontWeight: 700, fontSize: 12, color: "#111827", marginBottom: 4 }}>Reverse primer</div>
+          <div style={{ fontSize: 12, color: "#475467" }}>Penalty {summary.reverse.penalty} | self-dimer {summary.reverse.selfDimerRun} | hairpin {summary.reverse.hairpinRun}</div>
+        </div>
+      </div>
+      {!!summary.warnings.length && (
+        <div style={{ marginTop: 10, color: "#B42318", fontSize: 12, lineHeight: 1.5 }}>
+          Warnings: {summary.warnings.join(" | ")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function serializePrimerCandidatesLocal(pairs = []) {
   return pairs.map((pair, index) => ({
     rank: index + 1,
@@ -1088,6 +1139,61 @@ function createBatchRow(index) {
     cdsStart: "",
     cdsEnd: "",
     exonCoordinates: "",
+  };
+}
+
+function createPrimerToolState() {
+  return {
+    sourceType: "selected",
+    sequenceName: "",
+    gbRaw: "",
+    fileName: "",
+    rawSequence: "",
+    primerNamePrefix: "Primer",
+    mode: "centered",
+    center: "",
+    intervalStart: "",
+    intervalEnd: "",
+    leftCut: "",
+    rightCut: "",
+    minAmp: "450",
+    maxAmp: "500",
+    desiredAmp: "475",
+    flank: "250",
+  };
+}
+
+function cleanDnaSequence(value) {
+  return String(value || "").toUpperCase().replace(/[^ACGTN]/g, "");
+}
+
+function resolvePrimerToolReference(primerTool, selectedEntry) {
+  if (primerTool.sourceType === "selected") {
+    const model = selectedEntry?.result?.gb || null;
+    const sequence = cleanDnaSequence(getGenomicSequence(model));
+    if (!sequence) return { err: "Choose a generated design with a loaded reference, or switch the primer tool to raw DNA or GenBank input." };
+    return {
+      sequence,
+      sourceLabel: `Selected design reference${selectedEntry?.result?.gene ? `: ${selectedEntry.result.gene}` : ""}`,
+      sequenceName: selectedEntry?.result?.gene || selectedEntry?.row?.gene || "Selected design",
+    };
+  }
+  if (primerTool.sourceType === "genbank") {
+    const parsed = parseGB(primerTool.gbRaw || "");
+    const sequence = cleanDnaSequence(parsed?.seq || "");
+    if (!sequence) return { err: "Upload a GenBank file with a readable DNA sequence first." };
+    return {
+      sequence,
+      sourceLabel: `GenBank reference${primerTool.fileName ? `: ${primerTool.fileName}` : ""}`,
+      sequenceName: primerTool.sequenceName || parsed?.gene || primerTool.fileName?.replace(/\.[^.]+$/, "") || "GenBank",
+    };
+  }
+  const sequence = cleanDnaSequence(primerTool.rawSequence);
+  if (!sequence) return { err: "Paste a DNA sequence first." };
+  return {
+    sequence,
+    sourceLabel: primerTool.sequenceName ? `Raw DNA: ${primerTool.sequenceName}` : "Raw DNA sequence",
+    sequenceName: primerTool.sequenceName || "RawDNA",
   };
 }
 
@@ -2816,6 +2922,7 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const guideRows = (result?.gs || []).map((guide) => [guide.n, renderGuideSequence(guide.sp, guide.pm, true), `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
   const primerRows = buildPrimerRows(result);
   const primerCandidateRows = buildPrimerCandidateRows(result);
+  const primerSpecificity = getPrimerSpecificitySummary(result);
   const ssOdnNotes = buildSsOdnNotes(result);
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const hasHistoricalMatches = Boolean(historicalContext?.topMatches?.length);
@@ -2862,6 +2969,7 @@ p{font-size:13px;line-height:1.45}
   <table>${tableHtml([["Name", "Sequence", "Length", "Tm", "GC", "Clamp"]], true)}${tableHtml(primerRows)}</table>
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
   ${result.primerStrategy ? `<p class="sub">Primer strategy: ${result.primerStrategy}</p>` : ""}
+  ${primerSpecificity ? `<p class="sub">Primer specificity (${primerSpecificity.genome}): ${primerSpecificity.label} | Forward exact loci ${primerSpecificity.forwardExact} | Reverse exact loci ${primerSpecificity.reverseExact}</p>` : ""}
   ${primerCandidateRows.length ? `<h3>Alternative Validated Primer Pairs</h3><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table>` : ""}
   ${readinessBlock}
   ${locusMapBlock}
@@ -2887,8 +2995,8 @@ function SectionTitle({ children }) {
   return <div style={{ fontSize: 14, fontWeight: 800, letterSpacing: 0.2, color: COLORS.accent, marginBottom: 10 }}>{children}</div>;
 }
 
-function Grid({ children }) {
-  return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>{children}</div>;
+function Grid({ children, style = {} }) {
+  return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, ...style }}>{children}</div>;
 }
 
 function QuickMetric({ label, value, tone = "default" }) {
@@ -3457,6 +3565,9 @@ export default function App() {
   const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
   const [activeTab, setActiveTab] = useState("workspace");
   const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [primerTool, setPrimerTool] = useState(() => createPrimerToolState());
+  const [primerToolResult, setPrimerToolResult] = useState(null);
+  const [primerToolError, setPrimerToolError] = useState("");
   const [batchFolderEntries, setBatchFolderEntries] = useState([]);
   const [requestText, setRequestText] = useState("");
   const [batchDefinitionText, setBatchDefinitionText] = useState("");
@@ -3817,6 +3928,11 @@ export default function App() {
     setBatchError("");
     setBatchCopyState("");
   };
+  const updatePrimerTool = useCallback((key, value) => {
+    setPrimerTool((current) => ({ ...current, [key]: value }));
+    setPrimerToolResult(null);
+    setPrimerToolError("");
+  }, []);
   const setProjectCount = (nextSize) => {
     const parsed = Number(nextSize);
     const safeSize = Number.isFinite(parsed) ? Math.max(1, Math.min(48, Math.floor(parsed))) : 1;
@@ -3957,6 +4073,74 @@ export default function App() {
     reader.onerror = () => setBatchError(`Failed to read ${file.name}.`);
     reader.readAsText(file);
   }, []);
+
+  const onPrimerToolFile = useCallback((event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (readerEvent) => {
+      const content = readerEvent.target?.result || "";
+      setPrimerTool((current) => ({
+        ...current,
+        sourceType: "genbank",
+        gbRaw: content,
+        fileName: file.name,
+        sequenceName: current.sequenceName || file.name.replace(/\.[^.]+$/, ""),
+      }));
+      setPrimerToolResult(null);
+      setPrimerToolError("");
+    };
+    reader.onerror = () => setPrimerToolError(`Failed to read ${file.name}.`);
+    reader.readAsText(file);
+  }, []);
+
+  const runPrimerToolDesign = useCallback(() => {
+    const reference = resolvePrimerToolReference(primerTool, selectedEntry);
+    if (reference.err) {
+      setPrimerToolError(reference.err);
+      setPrimerToolResult(null);
+      return;
+    }
+    const result = designPrimerTool(reference.sequence, {
+      mode: primerTool.mode,
+      center: primerTool.center,
+      intervalStart: primerTool.intervalStart,
+      intervalEnd: primerTool.intervalEnd,
+      leftCut: primerTool.leftCut,
+      rightCut: primerTool.rightCut,
+      minAmp: primerTool.minAmp,
+      maxAmp: primerTool.maxAmp,
+      desiredAmp: primerTool.desiredAmp,
+      flank: primerTool.flank,
+      primerNamePrefix: (primerTool.primerNamePrefix || reference.sequenceName || "Primer").replace(/\s+/g, "_"),
+    });
+    if (result.err) {
+      setPrimerToolError(result.err);
+      setPrimerToolResult(null);
+      return;
+    }
+    setPrimerToolError("");
+    setPrimerToolResult({ ...result, sourceLabel: reference.sourceLabel });
+  }, [primerTool, selectedEntry]);
+
+  const applyPrimerToolToSelectedDesign = useCallback(() => {
+    if (!selectedEntry?.rowId || !primerToolResult?.ps?.length) return;
+    setBatchResults((current) => current.map((entry) => {
+      if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || !entry.result) return entry;
+      return {
+        ...entry,
+        result: {
+          ...entry.result,
+          ps: primerToolResult.ps,
+          amp: primerToolResult.amp,
+          primerCandidates: primerToolResult.primerCandidates || [],
+          primerStrategy: `${primerToolResult.strategy} | ${primerToolResult.targetSummary}`,
+        },
+      };
+    }));
+    setBatchCopyState("Primer tool sequences applied to the selected design report and exports.");
+    setActiveTab("report");
+  }, [primerToolResult, selectedEntry]);
 
   const onBatchFolder = useCallback(async (event) => {
     const files = Array.from(event.target.files || []);
@@ -4358,6 +4542,9 @@ export default function App() {
           </TopLevelTabButton>
           <TopLevelTabButton active={activeTab === "report"} onClick={() => setActiveTab("report")} tone="warm">
             Report
+          </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "primers"} onClick={() => setActiveTab("primers")} tone="accent">
+            Primer Tool
           </TopLevelTabButton>
           <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
             Exports
@@ -4938,6 +5125,7 @@ export default function App() {
                     {buildPrimerRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
                   </tbody>
                 </table>
+                <PrimerQualityCard result={selectedEntry.result} />
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {selectedEntry.result.amp || "n/a"}</div>
                 {!!selectedEntry.result?.primerStrategy && <div style={{ color: "#555", fontSize: 13, marginBottom: 12 }}>Primer strategy: {selectedEntry.result.primerStrategy}</div>}
                 {!!buildPrimerCandidateRows(selectedEntry.result).length && (
@@ -5397,9 +5585,201 @@ export default function App() {
         </div>
         )}
 
+        {activeTab === "primers" && (
+        <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(14,42,46,0.96), rgba(12,23,38,0.96))" }}>
+          <SectionTitle>3. Primer Tool</SectionTitle>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 6 }}>Standalone PCR primer design</div>
+              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.55, maxWidth: 780 }}>
+                Design assay primers directly from the selected design reference, a GenBank upload, or pasted raw DNA. The same validated primer rules used in the CRISPR design engine are reused here.
+              </div>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {selectedEntry?.result?.gb && (
+                <button type="button" onClick={() => updatePrimerTool("sourceType", "selected")} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                  Use selected design reference
+                </button>
+              )}
+              <button type="button" onClick={runPrimerToolDesign} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "rgba(89,199,189,0.18)", borderColor: "rgba(89,199,189,0.45)" }}>
+                Design primers
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.30)" }}>
+              <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Reference source</div>
+              <Grid>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Input type</div>
+                  <select value={primerTool.sourceType} onChange={(event) => updatePrimerTool("sourceType", event.target.value)} style={SELECT_STYLE}>
+                    <option value="selected">Selected design reference</option>
+                    <option value="genbank">GenBank file</option>
+                    <option value="raw">Raw DNA</option>
+                  </select>
+                </label>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Primer name prefix</div>
+                  <input value={primerTool.primerNamePrefix} onChange={(event) => updatePrimerTool("primerNamePrefix", event.target.value)} style={FIELD_STYLE} placeholder="Primer" />
+                </label>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Sequence label</div>
+                  <input value={primerTool.sequenceName} onChange={(event) => updatePrimerTool("sequenceName", event.target.value)} style={FIELD_STYLE} placeholder="APOE exon assay" />
+                </label>
+              </Grid>
+
+              {primerTool.sourceType === "selected" && (
+                <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "rgba(7,17,28,0.24)", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
+                  {selectedEntry?.result?.gb
+                    ? `Using the currently selected design reference${selectedEntry?.result?.gene ? ` for ${selectedEntry.result.gene}` : ""}.`
+                    : "No generated design is selected yet. Generate a design first or switch to GenBank/raw DNA input."}
+                </div>
+              )}
+
+              {primerTool.sourceType === "genbank" && (
+                <label style={{ display: "block", marginTop: 12 }}>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>GenBank upload</div>
+                  <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                    <span style={{ color: primerTool.fileName ? COLORS.success : COLORS.muted }}>{primerTool.fileName || "Upload .gb / .gbk / .genbank"}</span>
+                    <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
+                    <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={onPrimerToolFile} style={{ display: "none" }} />
+                  </label>
+                </label>
+              )}
+
+              {primerTool.sourceType === "raw" && (
+                <label style={{ display: "block", marginTop: 12 }}>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Raw DNA sequence</div>
+                  <textarea value={primerTool.rawSequence} onChange={(event) => updatePrimerTool("rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 160, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste DNA sequence using A/C/G/T/N" />
+                </label>
+              )}
+            </div>
+
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.24)" }}>
+              <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Assay configuration</div>
+              <Grid>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Mode</div>
+                  <select value={primerTool.mode} onChange={(event) => updatePrimerTool("mode", event.target.value)} style={SELECT_STYLE}>
+                    <option value="centered">Centered assay</option>
+                    <option value="flanking">Flanking interval</option>
+                    <option value="deletion">Deletion screen</option>
+                  </select>
+                </label>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Min amplicon</div>
+                  <input value={primerTool.minAmp} onChange={(event) => updatePrimerTool("minAmp", event.target.value)} style={FIELD_STYLE} placeholder="450" />
+                </label>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Max amplicon</div>
+                  <input value={primerTool.maxAmp} onChange={(event) => updatePrimerTool("maxAmp", event.target.value)} style={FIELD_STYLE} placeholder="500" />
+                </label>
+                <label>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Target amplicon</div>
+                  <input value={primerTool.desiredAmp} onChange={(event) => updatePrimerTool("desiredAmp", event.target.value)} style={FIELD_STYLE} placeholder="475" />
+                </label>
+              </Grid>
+
+              {primerTool.mode === "centered" && (
+                <label style={{ display: "block", marginTop: 12 }}>
+                  <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Target position (1-based)</div>
+                  <input value={primerTool.center} onChange={(event) => updatePrimerTool("center", event.target.value)} style={FIELD_STYLE} placeholder="742" />
+                </label>
+              )}
+
+              {primerTool.mode === "flanking" && (
+                <Grid style={{ marginTop: 12 }}>
+                  <label>
+                    <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Interval start (1-based)</div>
+                    <input value={primerTool.intervalStart} onChange={(event) => updatePrimerTool("intervalStart", event.target.value)} style={FIELD_STYLE} placeholder="701" />
+                  </label>
+                  <label>
+                    <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Interval end (1-based)</div>
+                    <input value={primerTool.intervalEnd} onChange={(event) => updatePrimerTool("intervalEnd", event.target.value)} style={FIELD_STYLE} placeholder="760" />
+                  </label>
+                </Grid>
+              )}
+
+              {primerTool.mode === "deletion" && (
+                <>
+                  <Grid style={{ marginTop: 12 }}>
+                    <label>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Left cut (1-based)</div>
+                      <input value={primerTool.leftCut} onChange={(event) => updatePrimerTool("leftCut", event.target.value)} style={FIELD_STYLE} placeholder="820" />
+                    </label>
+                    <label>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Right cut (1-based)</div>
+                      <input value={primerTool.rightCut} onChange={(event) => updatePrimerTool("rightCut", event.target.value)} style={FIELD_STYLE} placeholder="1240" />
+                    </label>
+                    <label>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Target flank</div>
+                      <input value={primerTool.flank} onChange={(event) => updatePrimerTool("flank", event.target.value)} style={FIELD_STYLE} placeholder="250" />
+                    </label>
+                  </Grid>
+                  <div style={{ marginTop: 8, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
+                    Deletion-screen mode reports both the WT and expected deletion-band amplicon sizes.
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {primerToolError && <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{primerToolError}</div>}
+
+          {primerToolResult && (
+            <div style={{ marginTop: 10, padding: 14, borderRadius: 14, background: "linear-gradient(180deg, #fbf8f1, #f4efe4)", color: "#2c3340", border: "1px solid #d8cfbf", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Primer set ready</div>
+                  <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55 }}>
+                    {primerToolResult.sourceLabel} | {primerToolResult.targetSummary} | {primerToolResult.amp}
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <Badge color={COLORS.success}>{primerToolResult.ps?.length || 0} primers</Badge>
+                  <Badge>{primerToolResult.strategy}</Badge>
+                  <Badge>{primerToolResult.sequenceLength} bp reference</Badge>
+                  {primerTool.sourceType === "selected" && selectedEntry?.rowId && (
+                    <button type="button" onClick={applyPrimerToolToSelectedDesign} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, minHeight: 34, padding: "6px 10px", background: "#ffffff", color: "#111827", borderColor: "#d7dee7" }}>
+                      Use in selected design report
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ fontSize: 15, fontWeight: 700, margin: "6px 0 8px 0" }}>Primary primer pair</div>
+              <PrimerQualityCard result={primerToolResult} />
+              <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
+                <thead>
+                  <tr>{["Name", "Sequence", "Length", "Tm", "GC", "3' clamp"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {buildPrimerRows(primerToolResult).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
+                </tbody>
+              </table>
+
+              {!!buildPrimerCandidateRows(primerToolResult).length && (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 700, margin: "6px 0 8px 0" }}>Alternative validated pairs</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>{["Rank", "Fw", "Fw Tm", "Fw GC", "Fw clamp", "Rev", "Rev Tm", "Rev GC", "Rev clamp", "Amplicon"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#E5E7EB", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {buildPrimerCandidateRows(primerToolResult).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: cellIndex === 1 || cellIndex === 5 ? "Consolas, monospace" : "inherit", fontSize: 12 }}>{cell}</td>)}</tr>)}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        )}
+
         {activeTab === "exports" && (
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
-          <SectionTitle>3. Order Exports</SectionTitle>
+          <SectionTitle>4. Order Exports</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Successful designs are flattened into order-ready spreadsheet files for gRNAs, primers, and donors. The same export area works whether you designed one project or many.
           </div>

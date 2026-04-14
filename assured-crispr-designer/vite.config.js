@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const { lookupCasDatabase } = require("../cas-database-lookup.cjs");
 const { lookupBrunelloGuides } = require("../brunello-lookup.cjs");
 const { lookupFpbaseReporters } = require("../fpbase-lookup.cjs");
+const { lookupPrimerSpecificity } = require("../primer-specificity-lookup.cjs");
 
 /** GitHub Pages project site: https://<user>.github.io/<repo>/ */
 const GITHUB_PAGES_BASE = "/Assured_CRISPR_Design/";
@@ -108,8 +109,43 @@ function fpbaseDevApi() {
   };
 }
 
+function primerSpecificityDevApi() {
+  return {
+    name: "primer-specificity-dev-api",
+    configureServer(server) {
+      server.middlewares.use("/api/primer-specificity", async (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ok: false, error: "Method not allowed." }));
+          return;
+        }
+
+        try {
+          const requestUrl = new URL(req.url || "/", "http://localhost");
+          const forwardPrimer = requestUrl.searchParams.get("fw") || "";
+          const reversePrimer = requestUrl.searchParams.get("rev") || "";
+          const genome = requestUrl.searchParams.get("genome") || "hg38";
+          const result = await lookupPrimerSpecificity({ forwardPrimer, reversePrimer, genome });
+          res.statusCode = result.ok ? 200 : 400;
+          res.setHeader("Content-Type", "application/json");
+          res.setHeader("Cache-Control", "no-store");
+          res.end(JSON.stringify(result));
+        } catch (error) {
+          res.statusCode = 500;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({
+            ok: false,
+            error: error?.message || "Primer specificity lookup failed unexpectedly.",
+          }));
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig(({ command }) => ({
-  plugins: [react(), casDatabaseDevApi(), brunelloDevApi(), fpbaseDevApi()],
+  plugins: [react(), casDatabaseDevApi(), brunelloDevApi(), fpbaseDevApi(), primerSpecificityDevApi()],
   base: command === "build" && process.env.GITHUB_PAGES === "1" ? GITHUB_PAGES_BASE : "/",
   build: {
     rollupOptions: {

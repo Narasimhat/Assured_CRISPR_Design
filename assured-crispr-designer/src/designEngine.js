@@ -799,34 +799,238 @@ function countThreePrimeClamp(seq) {
   return [...String(seq || "").toUpperCase().slice(-3)].filter((base) => base === "G" || base === "C").length;
 }
 
+function countGc(sequence) {
+  return [...String(sequence || "").toUpperCase()].filter((base) => base === "G" || base === "C").length;
+}
+
+function longestSelfComplementRun(seq, minLoop = 3) {
+  const clean = String(seq || "").toUpperCase();
+  const rc = reverseComplement(clean);
+  let best = 0;
+  for (let offset = -(rc.length - 1); offset < clean.length; offset += 1) {
+    let current = 0;
+    let hasLoop = false;
+    for (let index = 0; index < clean.length; index += 1) {
+      const rcIndex = index - offset;
+      if (rcIndex < 0 || rcIndex >= rc.length) {
+        current = 0;
+        hasLoop = false;
+        continue;
+      }
+      const originalIndex = clean.length - 1 - rcIndex;
+      if (Math.abs(originalIndex - index) <= minLoop) {
+        current = 0;
+        hasLoop = false;
+        continue;
+      }
+      if (clean[index] === rc[rcIndex]) {
+        current += 1;
+        hasLoop = true;
+        if (hasLoop) best = Math.max(best, current);
+      } else {
+        current = 0;
+        hasLoop = false;
+      }
+    }
+  }
+  return best;
+}
+
+function longestComplementRun(leftSequence, rightSequence) {
+  const left = String(leftSequence || "").toUpperCase();
+  const right = reverseComplement(String(rightSequence || "").toUpperCase());
+  let best = 0;
+  for (let offset = -(right.length - 1); offset < left.length; offset += 1) {
+    let current = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      const rightIndex = index - offset;
+      if (rightIndex < 0 || rightIndex >= right.length) {
+        current = 0;
+        continue;
+      }
+      if (left[index] === right[rightIndex]) {
+        current += 1;
+        best = Math.max(best, current);
+      } else {
+        current = 0;
+      }
+    }
+  }
+  return best;
+}
+
+function countThreePrimeComplementRun(leftSequence, rightSequence, windowSize = 8) {
+  const left = String(leftSequence || "").toUpperCase().slice(-windowSize);
+  const right = reverseComplement(String(rightSequence || "").toUpperCase().slice(-windowSize));
+  let best = 0;
+  for (let offset = -(right.length - 1); offset < left.length; offset += 1) {
+    let current = 0;
+    for (let index = 0; index < left.length; index += 1) {
+      const rightIndex = index - offset;
+      if (rightIndex < 0 || rightIndex >= right.length) {
+        current = 0;
+        continue;
+      }
+      if (left[index] === right[rightIndex]) {
+        current += 1;
+        best = Math.max(best, current);
+      } else {
+        current = 0;
+      }
+    }
+  }
+  return best;
+}
+
+function hasLowComplexityPrimer(seq) {
+  const clean = String(seq || "").toUpperCase();
+  if (!clean) return true;
+  if (/^(AT)+$|^(TA)+$|^(GC)+$|^(CG)+$/i.test(clean)) return true;
+  const uniqueBases = new Set(clean.split("")).size;
+  if (uniqueBases <= 2 && clean.length >= 20) return true;
+  const dinucleotideRepeats = clean.match(/(..)\1{3,}/g) || [];
+  return dinucleotideRepeats.length > 0;
+}
+
+function calculateThreePrimeGcCount(seq, windowSize = 5) {
+  return countGc(String(seq || "").toUpperCase().slice(-windowSize));
+}
+
+// ΔG of the 3′ terminal window using SantaLucia 1998 nearest-neighbor parameters at 37 °C.
+// Values in PRIMER_NN_PARAMS are in cal/mol (ΔH) and cal/mol/K (ΔS).
+// Ideal range for specific priming: −2.0 to −9.0 kcal/mol.
+// > −1.0  → weak 3′ clamp (non-productive priming risk)
+// < −10.0 → over-stable 3′ end (non-specific priming risk)
+function calculateThreePrimeDeltaG(seq, windowSize = 5) {
+  const clean = String(seq || "").toUpperCase().slice(-windowSize);
+  let dH = 0;
+  let dS = 0;
+  for (let index = 0; index < clean.length - 1; index += 1) {
+    const pair = clean[index] + clean[index + 1];
+    if (PRIMER_NN_PARAMS[pair]) {
+      dH += PRIMER_NN_PARAMS[pair][0];
+      dS += PRIMER_NN_PARAMS[pair][1];
+    }
+  }
+  // ΔG (kcal/mol) at 37 °C (310.15 K)
+  return Math.round(((dH - 310.15 * dS) / 1000) * 100) / 100;
+}
+
+function calculatePrimerPenalty(seq) {
+  const clean = String(seq || "").toUpperCase();
+  if (!clean) return 100;
+  let penalty = 0;
+  const gcPercent = calculatePrimerGcPercent(clean);
+  penalty += Math.abs(gcPercent - 50) / 4;
+  const tm = calculateNearestNeighborTm(clean);
+  penalty += Math.abs(tm - 60) / 3;
+  if (hasPrimerHomopolymerRun(clean, 4)) penalty += 8;
+  if (hasLowComplexityPrimer(clean)) penalty += 10;
+  const dg3 = calculateThreePrimeDeltaG(clean);
+  if (dg3 > -1.0) penalty += 6;     // weak 3′ clamp — unproductive priming risk
+  else if (dg3 < -10.0) penalty += 4; // over-stable 3′ end — non-specific priming risk
+  const selfRun = longestComplementRun(clean, clean);
+  const selfThreePrimeRun = countThreePrimeComplementRun(clean, clean);
+  const hairpinRun = longestSelfComplementRun(clean);
+  penalty += Math.max(0, selfRun - 3) * 2.5;
+  penalty += Math.max(0, selfThreePrimeRun - 2) * 5;
+  penalty += Math.max(0, hairpinRun - 3) * 3;
+  return Math.round(penalty * 10) / 10;
+}
+
+function assessPrimerSequence(seq) {
+  const clean = String(seq || "").toUpperCase();
+  const gc = calculatePrimerGcPercent(clean);
+  const tm = calculateNearestNeighborTm(clean);
+  const selfDimerRun = longestComplementRun(clean, clean);
+  const selfThreePrimeRun = countThreePrimeComplementRun(clean, clean);
+  const hairpinRun = longestSelfComplementRun(clean);
+  const dg3 = calculateThreePrimeDeltaG(clean);
+  const warnings = [];
+  if (hasPrimerHomopolymerRun(clean, 4)) warnings.push("homopolymer run");
+  if (hasLowComplexityPrimer(clean)) warnings.push("low complexity");
+  if (selfThreePrimeRun >= 4) warnings.push("3' self-dimer risk");
+  if (selfDimerRun >= 6) warnings.push("self-dimer risk");
+  if (hairpinRun >= 5) warnings.push("hairpin risk");
+  if (dg3 > -1.0) warnings.push("weak 3' clamp");
+  if (dg3 < -10.0) warnings.push("over-stable 3' end");
+  const penalty = calculatePrimerPenalty(clean);
+  const status = penalty <= 6 ? "high" : penalty <= 14 ? "medium" : "review";
+  return {
+    penalty,
+    status,
+    gc,
+    tm,
+    selfDimerRun,
+    selfThreePrimeRun,
+    hairpinRun,
+    threePrimeDeltaG: dg3,
+    warnings,
+  };
+}
+
+export function summarizePrimerPairQuality(forwardSequence, reverseSequence) {
+  const forward = assessPrimerSequence(forwardSequence);
+  const reverse = assessPrimerSequence(reverseSequence);
+  const heteroDimerRun = longestComplementRun(forwardSequence, reverseSequence);
+  const heteroThreePrimeRun = countThreePrimeComplementRun(forwardSequence, reverseSequence);
+  const warnings = [...forward.warnings.map((item) => `Fw ${item}`), ...reverse.warnings.map((item) => `Rev ${item}`)];
+  if (heteroThreePrimeRun >= 4) warnings.push("3' hetero-dimer risk");
+  else if (heteroDimerRun >= 7) warnings.push("hetero-dimer risk");
+  const penalty = Math.round((forward.penalty + reverse.penalty + Math.max(0, heteroDimerRun - 4) * 3 + Math.max(0, heteroThreePrimeRun - 2) * 7 + Math.abs(forward.tm - reverse.tm) / 2) * 10) / 10;
+  const confidence = penalty <= 14 ? "high" : penalty <= 26 ? "medium" : "review";
+  return {
+    confidence,
+    penalty,
+    heteroDimerRun,
+    heteroThreePrimeRun,
+    tmDelta: Math.round(Math.abs(forward.tm - reverse.tm) * 10) / 10,
+    forward,
+    reverse,
+    warnings,
+  };
+}
+
 export function buildPrimerRecord(name, sequence, extra = {}) {
   const clean = String(sequence || "").toUpperCase();
+  const assessment = assessPrimerSequence(clean);
   return {
     n: name,
     s: clean,
     len: clean.length,
     gc: calculatePrimerGcPercent(clean),
     tm: calculateNearestNeighborTm(clean),
+    dg3: calculateThreePrimeDeltaG(clean),
     clamp: countThreePrimeClamp(clean),
+    qc: assessment,
     notes: extra.notes || "",
   };
 }
 
 function scoreValidatedPrimerPair(forwardPrimer, reversePrimer, ampliconLength, desiredAmpliconLength = 520, extraPenalty = 0) {
+  const quality = summarizePrimerPairQuality(forwardPrimer.seq, reversePrimer.seq);
   return Math.round((-(Math.abs(forwardPrimer.tm - 60) + Math.abs(reversePrimer.tm - 60))
     - (Math.abs(forwardPrimer.gc - 50) + Math.abs(reversePrimer.gc - 50)) / 10
     + (forwardPrimer.clamp + reversePrimer.clamp) * 2
     - Math.abs(ampliconLength - desiredAmpliconLength) / 100
+    - quality.penalty / 8
     - extraPenalty) * 100) / 100;
 }
 
 function buildPrimerCandidatePair(forwardPrimer, reversePrimer, extra = {}) {
+  const quality = summarizePrimerPairQuality(forwardPrimer.seq, reversePrimer.seq);
+  const ampliconGc = typeof extra.ampliconGc === "number" ? extra.ampliconGc : null;
+  if (ampliconGc !== null && ampliconGc > 65 && !quality.warnings.includes("high-GC amplicon")) {
+    quality.warnings.push("high-GC amplicon (>65%)");
+  }
   return {
     fw: forwardPrimer,
     rev: reversePrimer,
     amp: extra.amp ?? (reversePrimer.end - forwardPrimer.start),
     wtAmpliconLength: extra.wtAmpliconLength ?? null,
     deletionAmpliconLength: extra.deletionAmpliconLength ?? null,
+    ampliconGc,
+    quality,
     score: extra.score ?? 0,
   };
 }
@@ -860,15 +1064,21 @@ function buildFallbackPrimerPair(seq, ampliconStart, ampliconEnd, forwardName = 
 }
 
 function serializePrimerCandidates(pairs = []) {
-  return pairs.map((pair, index) => ({
-    rank: index + 1,
-    score: pair.score,
-    ampliconLength: pair.amp ?? null,
-    wtAmpliconLength: pair.wtAmpliconLength ?? null,
-    deletionAmpliconLength: pair.deletionAmpliconLength ?? null,
-    forward: buildPrimerRecord("Fw", pair.fw?.seq || pair.forward || ""),
-    reverse: buildPrimerRecord("Rev", pair.rev?.seq || pair.reverse || ""),
-  }));
+  return pairs.map((pair, index) => {
+    const ampliconGc = typeof pair.ampliconGc === "number" ? pair.ampliconGc : null;
+    return {
+      rank: index + 1,
+      score: pair.score,
+      ampliconLength: pair.amp ?? null,
+      ampliconGc,
+      ampliconGcWarning: ampliconGc !== null && ampliconGc > 65 ? "high-GC amplicon — consider adding DMSO or betaine to PCR" : null,
+      wtAmpliconLength: pair.wtAmpliconLength ?? null,
+      deletionAmpliconLength: pair.deletionAmpliconLength ?? null,
+      quality: pair.quality || summarizePrimerPairQuality(pair.fw?.seq || pair.forward || "", pair.rev?.seq || pair.reverse || ""),
+      forward: buildPrimerRecord("Fw", pair.fw?.seq || pair.forward || ""),
+      reverse: buildPrimerRecord("Rev", pair.rev?.seq || pair.reverse || ""),
+    };
+  });
 }
 
 export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}) {
@@ -887,7 +1097,8 @@ export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}
   const fwCandidates = [];
   const revCandidates = [];
 
-  const fwSearchStart = Math.max(0, anchorStart - 400);
+  // Widened upstream window: 500 bp (was 400) to maximise candidate diversity.
+  const fwSearchStart = Math.max(0, anchorStart - 500);
   const fwSearchEnd = Math.max(0, anchorStart - 80);
   for (let pos = fwSearchStart; pos < fwSearchEnd; pos += 1) {
     for (let len = minLen; len <= maxLen; len += 1) {
@@ -897,6 +1108,8 @@ export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}
       if (gc < gcMin || gc > gcMax || hasPrimerHomopolymerRun(primer)) continue;
       const tm = calculateNearestNeighborTm(primer);
       if (tm < tmMin || tm > tmMax) continue;
+      const qc = assessPrimerSequence(primer);
+      if (qc.selfThreePrimeRun >= 4 || qc.hairpinRun >= 6 || qc.penalty > 22) continue;
       fwCandidates.push({ seq: primer, start: pos, end: pos + len, tm, gc, len, clamp: countThreePrimeClamp(primer) });
     }
   }
@@ -912,6 +1125,8 @@ export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}
       if (gc < gcMin || gc > gcMax || hasPrimerHomopolymerRun(primer)) continue;
       const tm = calculateNearestNeighborTm(primer);
       if (tm < tmMin || tm > tmMax) continue;
+      const qc = assessPrimerSequence(primer);
+      if (qc.selfThreePrimeRun >= 4 || qc.hairpinRun >= 6 || qc.penalty > 22) continue;
       revCandidates.push({ seq: primer, start: pos, end: pos + len, tm, gc, len, clamp: countThreePrimeClamp(primer) });
     }
   }
@@ -923,8 +1138,11 @@ export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}
       if (amp < minAmp || amp > maxAmp) continue;
       if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
       if (reverseComplement(fw.seq.slice(-4)) === rev.seq.slice(-4)) continue;
+      const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
+      if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
+      const ampliconGc = calculatePrimerGcPercent(seq.slice(fw.start, rev.end));
       const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp);
-      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, score }));
+      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, ampliconGc, score }));
     }
   }
   if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
@@ -959,18 +1177,31 @@ export function designCenteredPrimerPairs(seq, center, opts = {}) {
     gcMax = 67,
     tmDelta = 5,
     maxOffset = 35,
+    // ICE/TIDE mode: place the cut ~iceTideOffset bp downstream of the Fw primer
+    // start rather than at the amplicon center. Recommended: 175 bp for Sanger + ICE.
+    // Set to 0 (default) to preserve the original centering behaviour.
+    iceTideOffset = 0,
   } = opts;
   const minLength = Math.max(minLen * 2, minAmp);
   const maxLength = Math.max(minLength, maxAmp);
   const pairs = [];
   for (let ampliconLength = minLength; ampliconLength <= maxLength; ampliconLength += 1) {
     const maxStart = Math.max(0, seq.length - ampliconLength);
-    const idealStart = Math.round(center - ampliconLength / 2);
+    // When iceTideOffset > 0, anchor the Fw primer start so the cut falls at
+    // the desired distance; otherwise centre as before.
+    const idealStart = iceTideOffset > 0
+      ? Math.round(center - iceTideOffset)
+      : Math.round(center - ampliconLength / 2);
     for (let offset = -maxOffset; offset <= maxOffset; offset += 1) {
       const ampliconStart = Math.max(0, Math.min(maxStart, idealStart + offset));
       const ampliconEnd = ampliconStart + ampliconLength;
-      const ampliconCenter = ampliconStart + ampliconLength / 2;
-      const centerPenalty = Math.abs(center - ampliconCenter);
+      // Placement penalty: penalise deviation from desired cut position within amplicon.
+      const placementPenalty = iceTideOffset > 0
+        ? Math.abs((center - ampliconStart) - iceTideOffset) / 5
+        : Math.abs(center - (ampliconStart + ampliconLength / 2)) / 5;
+      // Amplicon GC — flag anything > 65 %.
+      const ampliconSeq = seq.slice(ampliconStart, ampliconEnd);
+      const ampliconGc = calculatePrimerGcPercent(ampliconSeq);
       for (let fwLen = minLen; fwLen <= maxLen; fwLen += 1) {
         const fwSeq = seq.slice(ampliconStart, ampliconStart + fwLen);
         if (fwSeq.length !== fwLen || fwSeq.includes("N")) continue;
@@ -978,6 +1209,8 @@ export function designCenteredPrimerPairs(seq, center, opts = {}) {
         if (fwGc < gcMin || fwGc > gcMax || hasPrimerHomopolymerRun(fwSeq)) continue;
         const fw = { seq: fwSeq, start: ampliconStart, end: ampliconStart + fwLen, tm: calculateNearestNeighborTm(fwSeq), gc: fwGc, len: fwLen, clamp: countThreePrimeClamp(fwSeq) };
         if (fw.tm < tmMin || fw.tm > tmMax) continue;
+        const fwQc = assessPrimerSequence(fwSeq);
+        if (fwQc.selfThreePrimeRun >= 4 || fwQc.hairpinRun >= 6 || fwQc.penalty > 22) continue;
         for (let revLen = minLen; revLen <= maxLen; revLen += 1) {
           const revStart = ampliconEnd - revLen;
           if (revStart <= fw.end) continue;
@@ -987,10 +1220,14 @@ export function designCenteredPrimerPairs(seq, center, opts = {}) {
           if (revGc < gcMin || revGc > gcMax || hasPrimerHomopolymerRun(revSeq)) continue;
           const rev = { seq: revSeq, start: revStart, end: ampliconEnd, tm: calculateNearestNeighborTm(revSeq), gc: revGc, len: revLen, clamp: countThreePrimeClamp(revSeq) };
           if (rev.tm < tmMin || rev.tm > tmMax) continue;
+          const revQc = assessPrimerSequence(revSeq);
+          if (revQc.selfThreePrimeRun >= 4 || revQc.hairpinRun >= 6 || revQc.penalty > 22) continue;
           if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
           if (reverseComplement(fw.seq.slice(-4)) === rev.seq.slice(-4)) continue;
-          const score = scoreValidatedPrimerPair(fw, rev, ampliconLength, desiredAmp, centerPenalty / 5);
-          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: ampliconLength, score }));
+          const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
+          if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
+          const score = scoreValidatedPrimerPair(fw, rev, ampliconLength, desiredAmp, placementPenalty);
+          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: ampliconLength, ampliconGc, score }));
         }
       }
     }
@@ -1041,6 +1278,8 @@ export function designDeletionScreenPrimerPairs(seq, leftCut, rightCut, flank = 
       if (fwGc < gcMin || fwGc > gcMax || hasPrimerHomopolymerRun(forward)) continue;
       const fw = { seq: forward, start: forwardStart, end: forwardStart + fwLen, tm: calculateNearestNeighborTm(forward), gc: fwGc, len: fwLen, clamp: countThreePrimeClamp(forward) };
       if (fw.tm < tmMin || fw.tm > tmMax) continue;
+      const fwQc = assessPrimerSequence(forward);
+      if (fwQc.selfThreePrimeRun >= 4 || fwQc.hairpinRun >= 6 || fwQc.penalty > 22) continue;
       for (let reverseOffset = -offsetWindow; reverseOffset <= offsetWindow; reverseOffset += 1) {
         for (let revLen = minLen; revLen <= maxLen; revLen += 1) {
           const reverseStart = Math.max(fw.end + 50, Math.min(Math.max(0, seq.length - revLen), desiredReverseStart + reverseOffset));
@@ -1050,7 +1289,11 @@ export function designDeletionScreenPrimerPairs(seq, leftCut, rightCut, flank = 
           if (revGc < gcMin || revGc > gcMax || hasPrimerHomopolymerRun(reverse)) continue;
           const rev = { seq: reverse, start: reverseStart, end: reverseStart + revLen, tm: calculateNearestNeighborTm(reverse), gc: revGc, len: revLen, clamp: countThreePrimeClamp(reverse) };
           if (rev.tm < tmMin || rev.tm > tmMax) continue;
+          const revQc = assessPrimerSequence(reverse);
+          if (revQc.selfThreePrimeRun >= 4 || revQc.hairpinRun >= 6 || revQc.penalty > 22) continue;
           if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
+          const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
+          if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
           const wtAmpliconLength = reverseStart + revLen - forwardStart;
           const deletionAmpliconLength = Math.max(minLen * 2, (leftCut - forwardStart) + ((reverseStart + revLen) - rightCut));
           const leftFlankPenalty = Math.abs((leftCut - forwardStart) - flank);
@@ -1069,6 +1312,87 @@ export function designDeletionScreenPrimerPairs(seq, leftCut, rightCut, flank = 
   fallback.deletionAmpliconLength = Math.max(48, (leftCut - fallbackForwardStart) + ((fallback.rev?.end || fallbackReverseStart + 24) - rightCut));
   fallback.amp = fallback.deletionAmpliconLength;
   return [fallback];
+}
+
+export function designPrimerTool(sequenceInput, config = {}) {
+  const sequence = String(sequenceInput || "").toUpperCase().replace(/[^ACGTN]/g, "");
+  if (!sequence) return { err: "Paste a DNA sequence or upload a GenBank file first." };
+  if (sequence.length < 120) return { err: "Reference sequence must be at least 120 bp long for primer design." };
+
+  const mode = config.mode || "centered";
+  const primerNamePrefix = String(config.primerNamePrefix || "Primer");
+  const minAmp = parseInt(config.minAmp, 10);
+  const maxAmp = parseInt(config.maxAmp, 10);
+  const desiredAmp = parseInt(config.desiredAmp, 10);
+
+  const normalizedPrimerConfig = {
+    minAmp: Number.isFinite(minAmp) ? minAmp : VALIDATION_PRIMER_MIN_AMP,
+    maxAmp: Number.isFinite(maxAmp) ? maxAmp : VALIDATION_PRIMER_MAX_AMP,
+    desiredAmp: Number.isFinite(desiredAmp) ? desiredAmp : VALIDATION_PRIMER_TARGET_AMP,
+  };
+
+  let primerPairs = [];
+  let strategy = "";
+  let targetSummary = "";
+  let ampliconSummary = "";
+  let target = null;
+
+  if (mode === "centered") {
+    const centerOneBased = parseInt(config.center, 10);
+    if (!Number.isFinite(centerOneBased) || centerOneBased < 1 || centerOneBased > sequence.length) {
+      return { err: `Centered primer mode needs a valid 1-based target position between 1 and ${sequence.length}.` };
+    }
+    const centerZeroBased = centerOneBased - 1;
+    primerPairs = designCenteredPrimerPairs(sequence, centerZeroBased, normalizedPrimerConfig);
+    strategy = "validated-centered";
+    targetSummary = `Centered around position ${centerOneBased}`;
+    ampliconSummary = `~${primerPairs[0]?.amp || normalizedPrimerConfig.desiredAmp} bp`;
+    target = { mode, center: centerOneBased };
+  } else if (mode === "flanking") {
+    const startOneBased = parseInt(config.intervalStart, 10);
+    const endOneBased = parseInt(config.intervalEnd, 10);
+    if (!Number.isFinite(startOneBased) || !Number.isFinite(endOneBased) || startOneBased < 1 || endOneBased > sequence.length || startOneBased > endOneBased) {
+      return { err: `Flanking primer mode needs a valid 1-based interval within 1-${sequence.length}.` };
+    }
+    const anchorStart = startOneBased - 1;
+    const anchorEnd = endOneBased;
+    primerPairs = designFlankingPrimerPairs(sequence, anchorStart, anchorEnd, normalizedPrimerConfig);
+    strategy = "validated-flanking";
+    targetSummary = `Flanking interval ${startOneBased}-${endOneBased}`;
+    ampliconSummary = `~${primerPairs[0]?.amp || normalizedPrimerConfig.desiredAmp} bp`;
+    target = { mode, intervalStart: startOneBased, intervalEnd: endOneBased };
+  } else if (mode === "deletion") {
+    const leftCutOneBased = parseInt(config.leftCut, 10);
+    const rightCutOneBased = parseInt(config.rightCut, 10);
+    const flank = parseInt(config.flank, 10);
+    if (!Number.isFinite(leftCutOneBased) || !Number.isFinite(rightCutOneBased) || leftCutOneBased < 1 || rightCutOneBased > sequence.length || leftCutOneBased >= rightCutOneBased) {
+      return { err: `Deletion screen mode needs two valid 1-based cut positions within 1-${sequence.length}.` };
+    }
+    primerPairs = designDeletionScreenPrimerPairs(sequence, leftCutOneBased - 1, rightCutOneBased - 1, Number.isFinite(flank) ? flank : KO_DELETION_SCREEN_FLANK);
+    strategy = "validated-deletion-screen";
+    ampliconSummary = `WT ~${primerPairs[0]?.wtAmpliconLength || "n/a"} bp | deletion ~${primerPairs[0]?.deletionAmpliconLength || "n/a"} bp`;
+    targetSummary = `Deletion screen across cuts ${leftCutOneBased} and ${rightCutOneBased}`;
+    target = { mode, leftCut: leftCutOneBased, rightCut: rightCutOneBased, flank: Number.isFinite(flank) ? flank : KO_DELETION_SCREEN_FLANK };
+  } else {
+    return { err: `Unsupported primer design mode: ${mode}.` };
+  }
+
+  const primerPair = primerPairs[0];
+  if (!primerPair?.fw?.seq || !primerPair?.rev?.seq) return { err: "No primer pair could be generated from the supplied sequence." };
+
+  return {
+    type: "primer-tool",
+    strategy,
+    targetSummary,
+    amp: ampliconSummary,
+    target,
+    sequenceLength: sequence.length,
+    ps: [
+      buildPrimerRecord(`${primerNamePrefix}_Fw`, primerPair.fw.seq),
+      buildPrimerRecord(`${primerNamePrefix}_Rev`, primerPair.rev.seq),
+    ],
+    primerCandidates: serializePrimerCandidates(primerPairs),
+  };
 }
 
 function pickDeletionScreenPrimerPair(seq, leftCut, rightCut, flank = KO_DELETION_SCREEN_FLANK) {
@@ -1800,7 +2124,14 @@ export function designKO(gb, options = {}) {
   const longDeletion = sortedCuts.length === 2 && selectedPair.spacing > KO_LONG_DELETION_THRESHOLD;
   const primerPairs = longDeletion
     ? designDeletionScreenPrimerPairs(seq, sortedCuts[0], sortedCuts[1], KO_DELETION_SCREEN_FLANK)
-    : designCenteredPrimerPairs(seq, cutCenter, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
+    : designCenteredPrimerPairs(seq, cutCenter, {
+        minAmp: VALIDATION_PRIMER_MIN_AMP,
+        maxAmp: VALIDATION_PRIMER_MAX_AMP,
+        desiredAmp: VALIDATION_PRIMER_TARGET_AMP,
+        // ICE/TIDE optimisation: place the cut ~175 bp from the Fw primer start
+        // so the indel falls in the optimal Sanger read quality window.
+        iceTideOffset: 175,
+      });
   const primerPair = primerPairs[0];
 
   return {
