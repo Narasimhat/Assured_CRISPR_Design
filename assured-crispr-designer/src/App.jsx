@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, summarizePrimerPairQuality } from "./designEngine";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
+import SangerAnalysisPanel from "./SangerAnalysisPanel";
 
 const COLORS = {
   bg: "#08131f",
@@ -4547,6 +4548,9 @@ export default function App() {
           <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
             Exports
           </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "sanger"} onClick={() => setActiveTab("sanger")} tone="warm">
+            Sanger Analysis
+          </TopLevelTabButton>
         </div>
 
         {activeTab === "workspace" && (
@@ -5775,8 +5779,12 @@ export default function App() {
         </div>
         )}
 
+        {activeTab === "sanger" && (
+          <SangerAnalysisPanel guideFromDesign={selectedEntry?.result?.gs?.[0]?.sp || ""} />
+        )}
+
         {activeTab === "exports" && (
-        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+          <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>4. Order Exports</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Successful designs are flattened into order-ready spreadsheet files for gRNAs, primers, and donors. The same export area works whether you designed one project or many.
@@ -5858,7 +5866,7 @@ export default function App() {
               </table>
             </div>
           )}
-        </div>
+          </div>
         )}
 
         <div style={{ color: COLORS.dim, fontSize: 12, marginTop: 18, textAlign: "center", lineHeight: 1.6 }}>
