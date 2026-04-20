@@ -2,30 +2,25 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, summarizePrimerPairQuality } from "./designEngine";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
+import { EDITION_CONFIG, getEditionUnsupportedIssue, isProjectTypeEnabled, IS_COMMUNITY_EDITION } from "./editionConfig";
 
 const COLORS = {
-  bg: "#08131f",
-  panel: "#102234",
-  panelAlt: "#173149",
-  border: "#27435f",
-  borderSoft: "rgba(199, 213, 228, 0.22)",
-  accent: "#59c7bd",
-  accentAlt: "#f0b458",
-  success: "#42c98f",
-  danger: "#f07a7a",
-  text: "#f2f7fb",
-  muted: "#d2deea",
-  dim: "#a8b8ca",
-  paper: "#f6f7f4",
+  bg: "#F5F7FB",
+  panel: "#FFFFFF",
+  panelAlt: "#F8FAFC",
+  border: "#D0D5DD",
+  borderSoft: "rgba(15, 23, 42, 0.12)",
+  accent: "#0F766E",
+  accentAlt: "#B45309",
+  success: "#15803D",
+  danger: "#B42318",
+  text: "#0F172A",
+  muted: "#475467",
+  dim: "#667085",
+  paper: "#FFFFFF",
 };
 
-const PROJECT_TYPES = [
-  { id: "pm", label: "Point mutation", short: "SNP / amino-acid change" },
-  { id: "ko", label: "Knockout", short: "Frameshift knockout" },
-  { id: "it", label: "Internal in-frame tag", short: "ssODN insert within CDS" },
-  { id: "ct", label: "C-terminal tag / reporter", short: "HDR insert at stop" },
-  { id: "nt", label: "N-terminal tag / reporter", short: "HDR insert at ATG" },
-];
+const PROJECT_TYPES = EDITION_CONFIG.projectTypes;
 
 const CAS_DATABASE_ORGANISM_OPTIONS = [
   { id: "1", label: "Human (GRCh38/hg38)" },
@@ -40,13 +35,13 @@ const FIELD_STYLE = {
   padding: "10px 12px",
   borderRadius: 10,
   border: `1px solid ${COLORS.borderSoft}`,
-  background: "rgba(10, 20, 34, 0.78)",
+  background: "#FFFFFF",
   color: COLORS.text,
   fontSize: 14,
   minHeight: 44,
   lineHeight: 1.35,
   boxSizing: "border-box",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.6)",
 };
 
 const SELECT_STYLE = {
@@ -62,12 +57,12 @@ const SELECT_STYLE = {
 };
 
 const CARD_STYLE = {
-  background: "linear-gradient(180deg, rgba(15,28,46,0.98), rgba(12,23,38,0.96))",
+  background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)",
   border: `1px solid ${COLORS.border}`,
   borderRadius: 18,
   padding: 18,
-  boxShadow: "0 22px 50px rgba(2, 8, 23, 0.28)",
-  backdropFilter: "blur(10px)",
+  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
+  backdropFilter: "blur(8px)",
 };
 
 const CODON_TABLE = {
@@ -94,15 +89,9 @@ const PM_EDIT_COLORS = {
   desired: "#FDE68A",
   silent: "#FCA5A5",
 };
-const APP_FOOTER_LABEL = "Hosted build • 31 Mar 2026";
+const APP_FOOTER_LABEL = EDITION_CONFIG.footerLabel;
 const REPO_URL = "https://github.com/Narasimhat/Assured_CRISPR_Design";
-const SAMPLE_REQUEST_TEXT = [
-  "PSEN1 N32R BIHi005-A",
-  "ECSIT knockout BIHi005-A",
-  "SCN5A internal SPOT after P155 BIHi005-A",
-  "INS C-terminal SD40-2xHA BIHi005-A",
-  "SORCS1 N-terminal N:EGFP-Linker BIHi005-A",
-].join("\n");
+const SAMPLE_REQUEST_TEXT = EDITION_CONFIG.sampleRequestText;
 
 const CASSETTE_ALIASES = {
   mscarlett2a: "T2A-mScarlet_I3",
@@ -575,6 +564,10 @@ function buildGeneInfoRows(meta, result, fileName) {
   ];
 }
 
+function buildGeneInfoItems(meta, result, fileName) {
+  return buildGeneInfoRows(meta, result, fileName).map(([label, value]) => ({ label, value }));
+}
+
 function buildGuideRows(result) {
   return (result?.gs || []).map((guide) => [guide.n, `${guide.sp} ${guide.pm}`, `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
 }
@@ -1030,6 +1023,62 @@ function buildPrimerRows(result) {
   ]);
 }
 
+function buildPrimerSummaryItems(result) {
+  return (result?.ps || []).map((primer) => ({
+    name: primer.n,
+    sequence: primer.s || "n/a",
+    length: primer.len ? `${primer.len} nt` : "n/a",
+    tm: Number.isFinite(primer.tm) ? `${primer.tm.toFixed(1)} C` : "n/a",
+    gc: Number.isFinite(primer.gc) ? `${primer.gc}%` : "n/a",
+    clamp: Number.isFinite(primer.clamp) ? `${primer.clamp}/3` : "n/a",
+  }));
+}
+
+function buildSummaryCardsHtml(items, options = {}) {
+  if (!items?.length) return "";
+  const minWidth = options.minWidth || 200;
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(${minWidth}px,1fr));gap:12px;margin:0 0 16px 0;">
+      ${items.map((item) => `
+        <div style="padding:12px 14px;border-radius:14px;border:1px solid #D0D5DD;background:#FCFCFD;">
+          <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;">${item.label}</div>
+          <div style="color:#111827;font-size:15px;font-weight:700;line-height:1.4;${item.monospace ? "font-family:Consolas,monospace;" : ""}">${item.value || "n/a"}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function buildPrimerSummaryHtml(result) {
+  const primers = buildPrimerSummaryItems(result);
+  if (!primers.length) return `<p class="sub">No validation primers were generated for this design.</p>`;
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:0 0 12px 0;">
+      ${primers.map((primer) => `
+        <div style="padding:14px;border-radius:16px;border:1px solid #D0D5DD;background:#FCFCFD;">
+          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+            <div style="font-size:13px;font-weight:800;color:#111827;">${primer.name}</div>
+            <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:#EEF2FF;color:#344054;font-size:11px;font-weight:700;">${primer.length}</span>
+          </div>
+          <div style="padding:10px 12px;border-radius:12px;background:#FFFFFF;border:1px solid #E4E7EC;font-family:Consolas,monospace;font-size:13px;line-height:1.6;overflow-wrap:anywhere;margin-bottom:10px;">${primer.sequence}</div>
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
+            ${[
+              ["Tm", primer.tm],
+              ["GC", primer.gc],
+              ["Clamp", primer.clamp],
+            ].map(([label, value]) => `
+              <div style="padding:8px 10px;border-radius:10px;background:#FFFFFF;border:1px solid #E4E7EC;">
+                <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:4px;">${label}</div>
+                <div style="color:#111827;font-size:13px;font-weight:700;">${value}</div>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function buildPrimerCandidateRows(result) {
   return (result?.primerCandidates || []).slice(1).map((candidate) => [
     `#${candidate.rank}`,
@@ -1130,7 +1179,7 @@ function createBatchRow(index) {
     referenceSource: "genbank",
     requestedReporter: "",
     mutation: "",
-    tag: "dTAG-V5",
+    tag: EDITION_CONFIG.defaultTag,
     homologyArm: "250",
     customGuides: "",
     gbRaw: "",
@@ -1200,13 +1249,18 @@ function resolvePrimerToolReference(primerTool, selectedEntry) {
 function applyBatchRowChange(row, key, value, folderLibrary) {
   const nextRow = { ...row, [key]: value };
   if (key === "projectType") {
-    if (value === "it") {
+    if (!isProjectTypeEnabled(value)) {
+      nextRow.projectType = PROJECT_TYPES[0]?.id || "pm";
+    } else if (value === "it") {
       nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
       nextRow.mutation = row.mutation && /^[A-Z]?\d+$/i.test(row.mutation) ? row.mutation : "";
     } else if (value === "ct") {
       nextRow.tag = CASSETTES[row.tag] && !row.tag.startsWith("N:") ? row.tag : "SD40-2xHA";
     } else if (value === "nt") {
       nextRow.tag = CASSETTES[row.tag] ? row.tag : "N:EGFP-Linker";
+    } else {
+      nextRow.tag = EDITION_CONFIG.defaultTag;
+      if (value === "ko") nextRow.mutation = "";
     }
   }
   if (key === "gene" && nextRow.referenceSource !== "raw" && !nextRow.fileName && folderLibrary.byGene.has(normalizeGeneToken(value))) {
@@ -1372,9 +1426,9 @@ function normalizeBatchProjectType(value) {
   const compact = String(value || "").toLowerCase().replace(/[^a-z]/g, "");
   if (compact === "pm" || compact === "snp" || compact === "pointmutation" || compact === "pointmutations") return "pm";
   if (compact === "ko" || compact === "knockout" || compact === "knockouts") return "ko";
-  if (compact === "it" || compact === "internal" || compact === "internaltag" || compact === "internalinframetag" || compact === "inframe" || compact === "inframetag" || compact === "internalknockin") return "it";
-  if (compact === "ct" || compact === "cterminal" || compact === "ctag" || compact === "cterminaltag") return "ct";
-  if (compact === "nt" || compact === "nterminal" || compact === "ntag" || compact === "nterminaltag") return "nt";
+  if (!IS_COMMUNITY_EDITION && (compact === "it" || compact === "internal" || compact === "internaltag" || compact === "internalinframetag" || compact === "inframe" || compact === "inframetag" || compact === "internalknockin")) return "it";
+  if (!IS_COMMUNITY_EDITION && (compact === "ct" || compact === "cterminal" || compact === "ctag" || compact === "cterminaltag")) return "ct";
+  if (!IS_COMMUNITY_EDITION && (compact === "nt" || compact === "nterminal" || compact === "ntag" || compact === "nterminaltag")) return "nt";
   return "";
 }
 
@@ -1512,7 +1566,9 @@ function parseRequestLine(line, index, folderLibrary) {
   const initialCassette = detectCassetteKey(trimmed);
   const mutation = detectMutationToken(trimmed);
   const internalSite = detectInternalSiteToken(trimmed);
-  const projectType = detectProjectTypeFromText(trimmed, mutation, internalSite, initialCassette);
+  const parsedProjectType = detectProjectTypeFromText(trimmed, mutation, internalSite, initialCassette);
+  const unsupportedIssue = getEditionUnsupportedIssue(trimmed, initialCassette);
+  const projectType = unsupportedIssue ? (parsedProjectType === "ko" ? "ko" : "pm") : parsedProjectType;
   const requestedReporter = (projectType === "ct" || projectType === "nt") ? detectReporterMentionKey(trimmed) : "";
   const cassetteKey = detectCassetteKey(trimmed, projectType) || ((projectType === "ct" || projectType === "nt" || projectType === "it") ? initialCassette : "");
   const cellLine = detectCellLineToken(trimmed);
@@ -1532,14 +1588,14 @@ function parseRequestLine(line, index, folderLibrary) {
       ? (cassetteKey || "")
       : projectType === "it"
         ? (cassetteKey || "SPOT")
-        : "dTAG-V5",
+        : EDITION_CONFIG.defaultTag,
     homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
     customGuides: "",
     gbRaw: fileEntry?.gbRaw || "",
     fileName: fileEntry?.fileName || "",
-    parseIssue: "",
+    parseIssue: unsupportedIssue,
   };
-  row.parseIssue = summarizeRowParseIssue(row, fileEntry);
+  row.parseIssue = row.parseIssue || summarizeRowParseIssue(row, fileEntry);
   return row;
 }
 
@@ -1583,6 +1639,38 @@ function parseCustomGuideInput(value) {
     .map((entry) => entry.toUpperCase().replace(/[^ACGT]/g, ""))
     .filter(Boolean)
     .slice(0, 2);
+}
+
+function getRowSectionIssues(row) {
+  const project = [];
+  const reference = [];
+  const design = [];
+
+  if (!row?.gene) project.push("Enter a gene or locus.");
+  if (!row?.cellLine && !(row?.projectType === "ko" && !hasSequenceBackedReference(row))) {
+    project.push("Add a cell line for the final report.");
+  }
+
+  if (row?.referenceSource === "raw") {
+    if (!parseRawSequenceInput(row?.rawSequence)) reference.push("Paste a genomic DNA sequence.");
+    if (!row?.cdsStart || !row?.cdsEnd) reference.push("Provide CDS start and end coordinates.");
+  } else if (!hasSequenceBackedReference(row) && row?.projectType !== "ko") {
+    reference.push("Upload a GenBank file or switch to raw DNA input.");
+  }
+
+  if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
+    reference.push("Gene-only KO mode will suggest reference guides only. Upload a reference to generate validation primers automatically.");
+  }
+  if (row?.projectType === "ko" && parseCustomGuideInput(row?.customGuides).length && !hasSequenceBackedReference(row)) {
+    reference.push("Upload a reference before using custom knockout guides.");
+  }
+
+  if (row?.projectType === "pm" && !row?.mutation) design.push("Enter the requested mutation, for example R175H.");
+  if (row?.projectType === "it" && !row?.mutation) design.push("Enter the internal insertion site, for example P155.");
+  if (row?.projectType === "it" && !row?.tag) design.push("Choose an internal tag.");
+  if ((row?.projectType === "ct" || row?.projectType === "nt") && !row?.tag) design.push("Choose a cassette.");
+
+  return { project, reference, design };
 }
 
 function parseRawSequenceInput(value) {
@@ -2578,6 +2666,63 @@ function buildDesignReadinessChecks(result) {
   return checks;
 }
 
+function buildReportSnapshotItems(result) {
+  if (!result) return [];
+  const guideCount = (result.gs || []).length;
+  const pairSpacing = result.type === "ko" && result.gs?.length >= 2 && Number.isFinite(result.gs[0]?.d) && Number.isFinite(result.gs[1]?.d)
+    ? `${Math.abs(result.gs[1].d - result.gs[0].d)} bp`
+    : null;
+  if (result.type === "ko") {
+    return [
+      { label: "Edit class", value: "Knockout", tone: "accent" },
+      { label: "Primary target", value: result.exon || "Coding region", tone: "default" },
+      { label: "Guide pair", value: pairSpacing ? `${guideCount} guides · ${pairSpacing}` : `${guideCount} guides`, tone: guideCount >= 2 ? "success" : "warm" },
+      { label: "Primers", value: result.amp || (result.referenceOnly ? "Needs reference" : "Pending"), tone: result.amp ? "success" : "warm" },
+    ];
+  }
+  if (result.type === "pm") {
+    return [
+      { label: "Edit class", value: "SNP knock-in", tone: "accent" },
+      { label: "Target", value: `${result.wA}${result.an}${result.mA}`, tone: "default" },
+      { label: "Guides", value: `${guideCount}`, tone: guideCount ? "success" : "warm" },
+      { label: "Primers", value: result.amp || "Pending", tone: result.amp ? "success" : "warm" },
+    ];
+  }
+  if (result.type === "it") {
+    return [
+      { label: "Edit class", value: "Internal tag", tone: "accent" },
+      { label: "Insert", value: result.tag || "Tag", tone: "default" },
+      { label: "Donors", value: `${(result.os || []).length}`, tone: (result.os || []).length ? "success" : "warm" },
+      { label: "Primers", value: result.amp || "Pending", tone: result.amp ? "success" : "warm" },
+    ];
+  }
+  if (result.type === "ct" || result.type === "nt") {
+    return [
+      { label: "Edit class", value: result.type === "ct" ? "C-terminal KI" : "N-terminal KI", tone: "accent" },
+      { label: "Insert", value: result.tag || "Tag", tone: "default" },
+      { label: "Donor", value: result.dl ? `${result.dl} bp` : "Ready", tone: "success" },
+      { label: "Primers", value: result.amp || "Pending", tone: result.amp ? "success" : "warm" },
+    ];
+  }
+  return [];
+}
+
+function buildReportSnapshotHtml(result) {
+  const items = buildReportSnapshotItems(result);
+  if (!items.length) return "";
+  const toneColor = (tone) => tone === "accent" ? "#2E75B6" : tone === "warm" ? "#B54708" : tone === "success" ? "#067647" : "#111827";
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 16px 0;">
+      ${items.map((item) => `
+        <div style="padding:12px 14px;border-radius:12px;border:1px solid ${toneColor(item.tone)}22;background:#f8fafc;">
+          <div style="font-size:11px;font-weight:700;color:#667085;margin-bottom:4px;">${item.label}</div>
+          <div style="font-size:18px;font-weight:800;color:${toneColor(item.tone)};">${item.value}</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function buildDesignReadinessHtml(result) {
   const checks = buildDesignReadinessChecks(result);
   if (!checks.length) return "";
@@ -2730,8 +2875,10 @@ function buildLocusMapHtml(result) {
   if (!items.length) return "";
   return `
     <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
-      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Target Region Map</div>
-      <div style="font-size:12px;color:#555;margin-bottom:10px;">Showing ${window.start + 1}-${window.end} on the uploaded reference sequence.</div>
+      <div style="margin-bottom:8px;">
+        <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:4px;">Target Region Map</div>
+        <div style="font-size:12px;color:#555;">Showing ${window.start + 1}-${window.end} on the uploaded reference sequence.</div>
+      </div>
       <div style="font-size:11px;color:#667085;font-weight:700;margin-bottom:6px;">Exon / intron structure</div>
       <div style="position:relative;height:18px;border-radius:999px;background:#E5E7EB;overflow:hidden;margin-bottom:10px;">
         ${structure.introns.map((item) => `<div title="${item.label}" style="position:absolute;left:${item.left}%;width:${item.width}%;top:7px;height:4px;background:${item.color};opacity:0.9;"></div>`).join("")}
@@ -2918,9 +3065,8 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
     ["Group", meta.clientName || "n/a"],
     ["IRIS ID", meta.irisId || "[to be assigned]"],
   ];
-  const geneRows = buildGeneInfoRows(meta, result, fileName);
+  const geneInfoItems = buildGeneInfoItems(meta, result, fileName);
   const guideRows = (result?.gs || []).map((guide) => [guide.n, renderGuideSequence(guide.sp, guide.pm, true), `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
-  const primerRows = buildPrimerRows(result);
   const primerCandidateRows = buildPrimerCandidateRows(result);
   const ssOdnNotes = buildSsOdnNotes(result);
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
@@ -2930,6 +3076,7 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const additionalInfoSectionNumber = reviewSectionNumber + 1;
   const readinessBlock = buildDesignReadinessHtml(result);
   const locusMapBlock = buildLocusMapHtml(result);
+  const snapshotBlock = buildReportSnapshotHtml(result);
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
@@ -2960,12 +3107,13 @@ p{font-size:13px;line-height:1.45}
   <table>${tableHtml(headerRows)}</table>
   <h1>Design: ${formatDesignLabel(meta, result)}</h1>
   <p class="sub">${meta.notes || "Strategy document generated by ASSURED CRISPR Designer."}</p>
+  ${snapshotBlock}
   <h2>1. Gene Information</h2>
-  <table>${tableHtml(geneRows)}</table>
+  ${buildSummaryCardsHtml(geneInfoItems, { minWidth: 210 })}
   <h2>2. gRNA Sequences</h2>
   <table>${tableHtml([["Name", "Sequence", "Strand", "GC", "Notes"]], true)}${tableHtml(guideRows)}</table>
   <h2>3. Validation Primers</h2>
-  <table>${tableHtml([["Name", "Sequence", "Length", "Tm", "GC", "Clamp"]], true)}${tableHtml(primerRows)}</table>
+  ${buildPrimerSummaryHtml(result)}
   <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
   ${result.primerStrategy ? `<p class="sub">Primer strategy: ${result.primerStrategy}</p>` : ""}
   ${primerCandidateRows.length ? `<h3>Alternative Validated Primer Pairs</h3><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table>` : ""}
@@ -2974,7 +3122,7 @@ p{font-size:13px;line-height:1.45}
   <h2>4. ${resolvedSectionTitle}</h2>
   <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
-  ${result.type === "ko" && brunelloReferenceGuideSet ? `<h3>Brunello CRISPRko Reference Guides</h3><p>${brunelloReferenceGuideSet.source}. ${brunelloReferenceGuideSet.summary}${brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}</p><table>${tableHtml([["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand"]], true)}${tableHtml(brunelloReferenceGuideSet.guides.map((guide) => [guide.spacer, guide.pam, `Exon ${guide.exon}`, String(guide.ruleSet2), guide.transcript, guide.strand]))}</table>` : ""}
+  ${result.type === "ko" && brunelloReferenceGuideSet ? `<details style="margin:0 0 14px 0;padding:12px;border:1px solid #FDBA74;border-radius:12px;background:#FFF7ED;"><summary style="cursor:pointer;font-weight:700;color:#9A3412;">Brunello CRISPRko Reference Guides (${brunelloReferenceGuideSet.guides.length})</summary><div style="margin-top:10px;"><p>${brunelloReferenceGuideSet.source}. ${brunelloReferenceGuideSet.summary}${brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}</p><table>${tableHtml([["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand"]], true)}${tableHtml(brunelloReferenceGuideSet.guides.map((guide) => [guide.spacer, guide.pam, `Exon ${guide.exon}`, String(guide.ruleSet2), guide.transcript, guide.strand]))}</table></div></details>` : ""}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
   ${hasHistoricalMatches ? `<h2>5. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
   <h2>${reviewSectionNumber}. Review Checkpoints</h2>
@@ -2987,6 +3135,58 @@ p{font-size:13px;line-height:1.45}
 
 function Badge({ children, color = COLORS.accent }) {
   return <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, fontSize: 13, fontWeight: 700, color, background: `${color}12`, border: `1px solid ${color}33` }}>{children}</span>;
+}
+
+function ActionButton({ children, onClick, variant = "secondary", disabled = false, style = {}, ...props }) {
+  const variants = {
+    primary: {
+      background: "linear-gradient(135deg, #2dd4bf, #f59e0b)",
+      color: "#07111c",
+      border: "none",
+      boxShadow: "0 12px 24px rgba(2, 8, 23, 0.16)",
+    },
+    secondary: {
+      background: "#ffffff",
+      color: "#111827",
+      border: "1px solid #D0D5DD",
+    },
+    subtle: {
+      background: "rgba(7,17,28,0.08)",
+      color: "#334155",
+      border: "1px solid rgba(148, 163, 184, 0.35)",
+    },
+    danger: {
+      background: "#FEF3F2",
+      color: "#B42318",
+      border: "1px solid #FECDCA",
+    },
+    warm: {
+      background: "#FFF7ED",
+      color: "#9A3412",
+      border: "1px solid #FDBA74",
+    },
+  };
+  const resolved = variants[variant] || variants.secondary;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        ...FIELD_STYLE,
+        width: "auto",
+        minHeight: 42,
+        cursor: disabled ? "not-allowed" : "pointer",
+        fontWeight: 700,
+        ...resolved,
+        opacity: disabled ? 0.55 : 1,
+        ...style,
+      }}
+      {...props}
+    >
+      {children}
+    </button>
+  );
 }
 
 function SectionTitle({ children }) {
@@ -3006,12 +3206,74 @@ function QuickMetric({ label, value, tone = "default" }) {
         padding: "12px 14px",
         borderRadius: 14,
         border: `1px solid ${toneColor}33`,
-        background: `linear-gradient(180deg, ${toneColor}10, rgba(15,28,46,0.82))`,
+        background: `linear-gradient(180deg, ${toneColor}12, rgba(255,255,255,0.96))`,
       }}
     >
       <div style={{ color: COLORS.muted, fontSize: 13, fontWeight: 700, letterSpacing: 0.1, marginBottom: 4 }}>{label}</div>
       <div style={{ color: toneColor, fontSize: 22, fontWeight: 800, lineHeight: 1 }}>{value}</div>
     </div>
+  );
+}
+
+function SummaryFieldCard({ label, value, monospace = false }) {
+  return (
+    <div style={{ padding: "12px 14px", borderRadius: 14, border: "1px solid #D0D5DD", background: "#FCFCFD" }}>
+      <div style={{ color: "#667085", fontSize: 11, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+      <div style={{ color: "#111827", fontSize: 15, fontWeight: 700, lineHeight: 1.4, fontFamily: monospace ? "Consolas, monospace" : "inherit" }}>{value || "n/a"}</div>
+    </div>
+  );
+}
+
+function SummaryFieldGrid({ items, minWidth = 200, style = {} }) {
+  if (!items?.length) return null;
+  return <Grid style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${minWidth}px, 1fr))`, ...style }}>{items.map((item) => <SummaryFieldCard key={item.label} label={item.label} value={item.value} monospace={item.monospace} />)}</Grid>;
+}
+
+function ReportSnapshotCard({ result }) {
+  const items = buildReportSnapshotItems(result);
+  if (!items.length) return null;
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Design snapshot</div>
+      <Grid style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+        {items.map((item) => <QuickMetric key={item.label} label={item.label} value={item.value} tone={item.tone} />)}
+      </Grid>
+    </div>
+  );
+}
+
+function GeneInfoCardGrid({ meta, result, fileName }) {
+  const items = buildGeneInfoItems(meta, result, fileName);
+  if (!items.length) return null;
+  return <SummaryFieldGrid items={items} minWidth={210} style={{ marginBottom: 16 }} />;
+}
+
+function PrimerSummaryCardGrid({ result }) {
+  const primers = buildPrimerSummaryItems(result);
+  if (!primers.length) {
+    return <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 14, border: "1px solid #D0D5DD", background: "#FCFCFD", color: "#475467", fontSize: 13 }}>No validation primers were generated for this design.</div>;
+  }
+  return (
+    <Grid style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", marginBottom: 12 }}>
+      {primers.map((primer) => (
+        <div key={primer.name} style={{ padding: 14, borderRadius: 16, border: "1px solid #D0D5DD", background: "#FCFCFD" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>{primer.name}</div>
+            <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 8px", borderRadius: 999, background: "#EEF2FF", color: "#344054", fontSize: 11, fontWeight: 700 }}>{primer.length}</span>
+          </div>
+          <div style={{ padding: "10px 12px", borderRadius: 12, background: "#FFFFFF", border: "1px solid #E4E7EC", fontFamily: "Consolas, monospace", fontSize: 13, lineHeight: 1.6, overflowWrap: "anywhere", marginBottom: 10 }}>
+            {primer.sequence}
+          </div>
+          <Grid style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            {[
+              ["Tm", primer.tm],
+              ["GC", primer.gc],
+              ["Clamp", primer.clamp],
+            ].map(([label, value]) => <SummaryFieldCard key={`${primer.name}-${label}`} label={label} value={value} />)}
+          </Grid>
+        </div>
+      ))}
+    </Grid>
   );
 }
 
@@ -3024,7 +3286,7 @@ function FormSection({ title, hint, children, tone = "default" }) {
         padding: 14,
         borderRadius: 14,
         border: `1px solid ${accent === COLORS.borderSoft ? COLORS.borderSoft : `${accent}44`}`,
-        background: tone === "default" ? "rgba(8,18,32,0.34)" : `linear-gradient(180deg, ${accent}10, rgba(8,18,32,0.42))`,
+        background: tone === "default" ? "#F8FAFC" : `linear-gradient(180deg, ${accent}10, rgba(255,255,255,0.96))`,
       }}
     >
       <div style={{ marginBottom: 10 }}>
@@ -3046,16 +3308,78 @@ function TopLevelTabButton({ active, children, onClick, tone = "default" }) {
         padding: "10px 14px",
         borderRadius: 12,
         border: active ? `1px solid ${toneColor}66` : `1px solid ${COLORS.borderSoft}`,
-        background: active ? `linear-gradient(180deg, ${toneColor}14, rgba(12,23,38,0.84))` : "rgba(8,18,32,0.24)",
-        color: active ? toneColor : COLORS.text,
+        background: active ? `linear-gradient(180deg, ${toneColor}14, rgba(255,255,255,0.98))` : "#FFFFFF",
+        color: active ? toneColor : "#344054",
         fontSize: 14,
         fontWeight: 700,
         cursor: "pointer",
-        boxShadow: active ? "0 10px 24px rgba(2,8,23,0.16)" : "none",
+        boxShadow: active ? "0 10px 24px rgba(15,23,42,0.08)" : "none",
       }}
     >
       {children}
     </button>
+  );
+}
+
+function InlineNotice({ children, tone = "info", style = {} }) {
+  const palette = tone === "danger"
+    ? { background: "#FEF3F2", border: "#FECDCA", color: "#B42318" }
+    : tone === "warning"
+      ? { background: "#FFF7ED", border: "#FDBA74", color: "#9A3412" }
+      : tone === "success"
+        ? { background: "#ECFDF3", border: "#ABEFC6", color: "#067647" }
+        : { background: "#F8FAFC", border: "#D7DEE7", color: "#344054" };
+  return (
+    <div style={{ padding: 12, borderRadius: 12, background: palette.background, border: `1px solid ${palette.border}`, color: palette.color, fontSize: 13, lineHeight: 1.55, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+function FloatingNotice({ children, tone = "success" }) {
+  const palette = tone === "danger"
+    ? { background: "#7F1D1D", border: "#FCA5A5", color: "#FEF2F2" }
+    : { background: "#064E3B", border: "#6EE7B7", color: "#ECFDF5" };
+  return (
+    <div
+      style={{
+        position: "fixed",
+        right: 18,
+        bottom: 18,
+        zIndex: 1000,
+        maxWidth: 420,
+        padding: "12px 14px",
+        borderRadius: 14,
+        background: palette.background,
+        border: `1px solid ${palette.border}`,
+        color: palette.color,
+        fontSize: 13,
+        fontWeight: 700,
+        lineHeight: 1.5,
+        boxShadow: "0 20px 40px rgba(2,8,23,0.28)",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function CollapsiblePanel({ title, summary, children, defaultOpen = false, tone = "neutral", style = {} }) {
+  const palette = tone === "warm"
+    ? { background: "#FFF7ED", border: "#FDBA74", color: "#9A3412", summary: "#7C2D12" }
+    : { background: "#F8FAFC", border: "#D7DEE7", color: "#111827", summary: "#475467" };
+  return (
+    <details open={defaultOpen} style={{ marginBottom: 16, border: `1px solid ${palette.border}`, borderRadius: 14, background: palette.background, ...style }}>
+      <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", fontWeight: 800, color: palette.color }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8, alignItems: "baseline" }}>
+          <span>{title}</span>
+          {summary ? <span style={{ fontSize: 12, fontWeight: 600, color: palette.summary }}>{summary}</span> : null}
+        </div>
+      </summary>
+      <div style={{ padding: "0 14px 14px 14px" }}>
+        {children}
+      </div>
+    </details>
   );
 }
 
@@ -3368,8 +3692,10 @@ function LocusMapCard({ result }) {
   if (!items.length) return null;
   return (
     <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
-      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Target region map</div>
-      <div style={{ fontSize: 12, color: "#555", marginBottom: 10 }}>Showing {window.start + 1}-{window.end} on the uploaded reference sequence.</div>
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 4 }}>Target region map</div>
+        <div style={{ fontSize: 12, color: "#555" }}>Showing {window.start + 1}-{window.end} on the uploaded reference sequence.</div>
+      </div>
       <div style={{ fontSize: 11, color: "#667085", fontWeight: 700, marginBottom: 6 }}>Exon / intron structure</div>
       <div style={{ position: "relative", height: 18, borderRadius: 999, background: "#E5E7EB", overflow: "hidden", marginBottom: 10 }}>
         {structure.introns.map((item, index) => (
@@ -3622,6 +3948,8 @@ export default function App() {
   const casDatabaseLocalCandidates = useMemo(() => casDatabasePairCandidates.filter((candidate) => candidate.candidateMode === "nearby" || candidate.candidateMode === "local"), [casDatabasePairCandidates]);
   const casDatabaseCrossExonCandidates = useMemo(() => casDatabasePairCandidates.filter((candidate) => candidate.candidateMode === "cross-exon"), [casDatabasePairCandidates]);
   const casDatabaseDeletionCandidates = useMemo(() => casDatabasePairCandidates.filter((candidate) => candidate.candidateMode === "deletion-screen"), [casDatabasePairCandidates]);
+  const brunelloReviewOnlyCount = brunelloDeletionCandidates.length + brunelloCrossExonCandidates.length + brunelloFilteredPairs.length;
+  const casDatabaseReviewOnlyCount = casDatabaseDeletionCandidates.length + casDatabaseCrossExonCandidates.length + casDatabaseFilteredPairs.length;
   const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
   const additionalInfoSectionNumber = reviewSectionNumber + 1;
   const reviewItems = useMemo(
@@ -3646,6 +3974,24 @@ export default function App() {
   const singleIdtTemplateRows = useMemo(() => buildIdtTemplateRows(singleOrderRows, idtDefaults), [singleOrderRows, idtDefaults]);
   const idtTemplateRows = useMemo(() => buildIdtTemplateRows(batchOrderRows, idtDefaults), [batchOrderRows, idtDefaults]);
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = EDITION_CONFIG.browserTitle;
+    const updateMeta = (selector, content) => {
+      const node = document.querySelector(selector);
+      if (node) node.setAttribute("content", content);
+    };
+    updateMeta('meta[name="description"]', EDITION_CONFIG.metaDescription);
+    updateMeta('meta[name="apple-mobile-web-app-title"]', EDITION_CONFIG.appName);
+    updateMeta('meta[name="twitter:title"]', EDITION_CONFIG.browserTitle);
+    updateMeta('meta[name="twitter:description"]', EDITION_CONFIG.socialDescription);
+    updateMeta('meta[property="og:title"]', EDITION_CONFIG.browserTitle);
+    updateMeta('meta[property="og:description"]', EDITION_CONFIG.socialDescription);
+    updateMeta('meta[property="og:url"]', window.location.href);
+    const canonicalNode = document.querySelector('link[rel="canonical"]');
+    if (canonicalNode) canonicalNode.setAttribute("href", window.location.href);
+  }, []);
   const currentHost = typeof window !== "undefined" ? window.location.host : "local";
   const showWorkspaceIntegration = typeof window !== "undefined"
     ? ["localhost", "127.0.0.1"].some((token) => window.location.hostname.includes(token))
@@ -3937,6 +4283,15 @@ export default function App() {
     setBatchRows((current) => resizeBatchRows(current, safeSize));
     setBatchResults((current) => current.filter((entry) => entry.slot <= safeSize));
   };
+  const resetWorkspace = useCallback((projectType = "pm") => {
+    setRequestText("");
+    setBatchRows([{ ...createBatchRow(0), projectType }]);
+    setBatchResults([]);
+    setBatchError("");
+    setBatchCopyState("");
+    setSelectedProjectId("");
+    setActiveTab("workspace");
+  }, []);
   const addProjectRow = () => setBatchRows((current) => resizeBatchRows(current, current.length + 1));
   const removeProjectRow = (index) => {
     setBatchRows((current) => {
@@ -4276,7 +4631,7 @@ export default function App() {
 
       const mappedRows = definitions.map((definition, index) => {
         if (!definition.fileToken) throw new Error(`Line ${definition.lineNumber}: missing file name.`);
-        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be pm, ko, it, ct, or nt.`);
+        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be ${EDITION_CONFIG.batchTypeHelp}.`);
         if (definition.projectType === "pm" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: point mutation designs need a mutation such as N32R.`);
         if (definition.projectType === "it" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: internal in-frame tag designs need a site and tag such as "after P155 SPOT".`);
         if ((definition.projectType === "ct" || definition.projectType === "nt") && !definition.modification) throw new Error(`Line ${definition.lineNumber}: insert designs need a cassette name such as SD40-2xHA.`);
@@ -4291,7 +4646,7 @@ export default function App() {
           label: definition.label || fileEntry.fileName.replace(/\.[^.]+$/, ""),
           projectType: definition.projectType,
           mutation: definition.projectType === "pm" ? definition.modification : definition.projectType === "it" ? internalSpec.site : "",
-          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : "dTAG-V5",
+          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : EDITION_CONFIG.defaultTag,
           homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "250") : "250",
           gbRaw: fileEntry.gbRaw,
           fileName: fileEntry.fileName,
@@ -4382,62 +4737,84 @@ export default function App() {
   const reviewRowCount = Math.max(0, batchRows.length - readyRowCount);
 
   return (
-    <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top left, rgba(45,212,191,0.10), transparent 24%), radial-gradient(circle at top right, rgba(245,158,11,0.10), transparent 22%), linear-gradient(180deg, #0a1626 0%, ${COLORS.bg} 36%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
+    <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top left, rgba(15,118,110,0.08), transparent 24%), radial-gradient(circle at top right, rgba(180,83,9,0.08), transparent 22%), linear-gradient(180deg, #FDFEFE 0%, ${COLORS.bg} 38%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
       <div style={{ width: "min(1560px, calc(100vw - 32px))", margin: "0 auto", padding: "20px 16px 40px" }}>
-        <div style={{ ...CARD_STYLE, marginBottom: 14, background: "linear-gradient(135deg, rgba(45,212,191,0.16), rgba(245,158,11,0.08) 48%, rgba(15,28,46,0.96))", padding: 18 }}>
+        <div style={{ ...CARD_STYLE, marginBottom: 14, background: "linear-gradient(180deg, #F8FBFD, #EEF4F8)", border: "1px solid #D7DEE7", padding: 20, boxShadow: "0 24px 48px rgba(2, 8, 23, 0.12)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, alignItems: "stretch" }}>
             <div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900, boxShadow: "0 10px 22px rgba(0,0,0,0.18)" }}>AC</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.05 }}>ASSURED CRISPR Designer</div>
-                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6, padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(45,212,191,0.18)", background: "rgba(7,17,28,0.28)" }}>
-                    <span style={{ color: COLORS.accent, fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Created by</span>
-                    <span style={{ width: 1, alignSelf: "stretch", background: "rgba(147,167,189,0.28)" }} />
-                    <span style={{ color: "#F8FAFC", fontSize: 14, fontWeight: 700 }}>Narasimha Telugu</span>
+                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.05, color: "#0F172A" }}>{EDITION_CONFIG.appName}</div>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6, padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(15, 23, 42, 0.08)", background: "#ffffff" }}>
+                    <span style={{ color: "#0F766E", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Created by</span>
+                    <span style={{ width: 1, alignSelf: "stretch", background: "rgba(148,163,184,0.28)" }} />
+                    <span style={{ color: "#0F172A", fontSize: 14, fontWeight: 700 }}>Narasimha Telugu</span>
                   </div>
                 </div>
               </div>
-              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.08, maxWidth: 880, marginBottom: 10 }}>
-                Genome editing design, donor review, and ordering exports in one clean workspace.
+              <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.08, maxWidth: 880, marginBottom: 10, color: "#0F172A" }}>
+                {EDITION_CONFIG.heroHeadline}
               </div>
-              <div style={{ color: COLORS.muted, fontSize: 14, lineHeight: 1.6, maxWidth: 920, marginBottom: 14 }}>
-                Built for knockouts, SNP knock-ins, internal in-frame tags, and terminal reporters. Start from a request, a GenBank file, or raw sequence, then move directly into a scientist-readable report and export package.
+              <div style={{ color: "#475467", fontSize: 14, lineHeight: 1.6, maxWidth: 920, marginBottom: 14 }}>
+                {EDITION_CONFIG.heroDescription}
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-                {["Knockout, SNP, internal, N-term, C-term", "Annotated donor and protein views", "Spreadsheet-ready exports"].map((item) => (
-                  <div key={item} style={{ padding: "7px 11px", borderRadius: 999, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(7,17,28,0.28)", color: COLORS.text, fontSize: 12, fontWeight: 700 }}>
+              <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+                {[
+                  "1. Start with one request or open a demo.",
+                  "2. Add a gene and optional reference sequence.",
+                  "3. Generate guides, primers, and the final report.",
+                ].map((step) => (
+                  <div key={step} style={{ display: "flex", alignItems: "center", gap: 10, color: "#334155", fontSize: 13, fontWeight: 600 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 999, background: "#14B8A6", flex: "0 0 auto" }} />
+                    <span>{step}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+                {EDITION_CONFIG.heroBadges.map((item) => (
+                  <div key={item} style={{ padding: "7px 11px", borderRadius: 999, border: "1px solid #D7DEE7", background: "#ffffff", color: "#334155", fontSize: 12, fontWeight: 700 }}>
                     {item}
                   </div>
                 ))}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 800, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none", boxShadow: "0 12px 24px rgba(0,0,0,0.16)" }}>
-                  Load sample requests
-                </button>
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("design-requests")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "rgba(7,17,28,0.28)" }}
-                >
+                <ActionButton variant="primary" onClick={() => resetWorkspace(IS_COMMUNITY_EDITION ? "ko" : "pm")}>
+                  Start blank workspace
+                </ActionButton>
+                <ActionButton variant="secondary" onClick={loadSampleRequests}>
+                  Load demo requests
+                </ActionButton>
+                <ActionButton variant="subtle" onClick={() => document.getElementById("design-requests")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
                   Jump to design requests
-                </button>
+                </ActionButton>
               </div>
             </div>
             <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
-              <div style={{ ...CARD_STYLE, padding: 14, background: "rgba(7,17,28,0.30)", border: `1px solid ${COLORS.borderSoft}` }}>
-                <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, lineHeight: 1.4, marginBottom: 6 }}>
-                  Faster path from edit request to order-ready design package.
+              <div style={{ padding: 16, borderRadius: 16, background: "#ffffff", border: "1px solid #D7DEE7" }}>
+                <div style={{ color: "#111827", fontSize: 14, fontWeight: 800, lineHeight: 1.4, marginBottom: 6 }}>
+                  What this tool is best at
                 </div>
-                <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.555 }}>
-                  One place for guides, donor geometry, protein impact, QC checkpoints, and export files.
+                <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
+                  {EDITION_CONFIG.valueBlurb}
+                </div>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {[
+                    "Use one row per edit request.",
+                    "Upload a reference only when you want sequence-backed design and primers.",
+                    "Review one final report at a time after generation.",
+                  ].map((item) => (
+                    <div key={item} style={{ padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: "1px solid #E4E7EC", color: "#344054", fontSize: 13, lineHeight: 1.5 }}>
+                      {item}
+                    </div>
+                  ))}
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
                   <a
                     href={REPO_URL}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", background: "rgba(7,17,28,0.22)" }}
+                    style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, textDecoration: "none", display: "inline-flex", alignItems: "center", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD" }}
                   >
                     View repository
                   </a>
@@ -4452,7 +4829,7 @@ export default function App() {
           </div>
         </div>
         {showWorkspaceIntegration && (
-        <div style={{ ...CARD_STYLE, marginTop: 8, marginBottom: 14, padding: 12, background: "rgba(10,20,34,0.52)", border: `1px solid ${COLORS.borderSoft}` }}>
+        <div style={{ ...CARD_STYLE, marginTop: 8, marginBottom: 14, padding: 12, background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)", border: `1px solid ${COLORS.borderSoft}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Advanced: workspace integration</div>
@@ -4567,11 +4944,14 @@ export default function App() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
-            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.30)" }}>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "#FFFFFF" }}>
               <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Batch input</div>
               <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
                 Paste one request per line if you want to generate rows quickly, or skip this and build rows manually.
               </div>
+              <InlineNotice tone="info" style={{ marginBottom: 10 }}>
+                Start with one simple line such as <strong>TP53 knockout</strong> or <strong>APOE R176C SNP knockin</strong>, then click <strong>Parse requests</strong>.
+              </InlineNotice>
               <label style={{ display: "block" }}>
                 <textarea
                   value={requestText}
@@ -4581,29 +4961,31 @@ export default function App() {
                 />
               </label>
             </div>
-            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.24)" }}>
+            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "#FCFCFD" }}>
               <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Actions</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
                 <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
                   <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
                   <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
                 </label>
-                <button type="button" onClick={loadSampleRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Load sample requests</button>
-                <button type="button" onClick={parseRequests} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Parse requests</button>
-                <button type="button" onClick={addProjectRow} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Add design</button>
+                <ActionButton variant="secondary" onClick={parseRequests}>Parse requests</ActionButton>
+                <ActionButton variant="secondary" onClick={addProjectRow}>Add design</ActionButton>
+                <ActionButton variant="subtle" onClick={loadSampleRequests}>Load demo requests</ActionButton>
+                <ActionButton variant="danger" onClick={() => resetWorkspace(IS_COMMUNITY_EDITION ? "ko" : "pm")}>Clear workspace</ActionButton>
               </div>
+              {batchError && <InlineNotice tone="danger" style={{ marginBottom: 12 }}>{batchError}</InlineNotice>}
               <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(7,17,28,0.24)", border: `1px solid ${COLORS.borderSoft}` }}>
+                <div style={{ padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: `1px solid ${COLORS.borderSoft}` }}>
                   <div style={{ color: COLORS.muted, fontSize: 12, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 4 }}>Current workspace</div>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>{batchRows.length} design row{batchRows.length === 1 ? "" : "s"}</div>
                 </div>
                 {batchFolderEntries.length > 0 ? (
-                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(16,185,129,0.10)", border: "1px solid rgba(16,185,129,0.30)", color: COLORS.success, fontSize: 13, lineHeight: 1.55 }}>
+                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.22)", color: COLORS.success, fontSize: 13, lineHeight: 1.55 }}>
                     Folder ready: {batchFolderEntries.length} GenBank file{batchFolderEntries.length === 1 ? "" : "s"} loaded for automatic matching.
                   </div>
                 ) : (
-                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(7,17,28,0.24)", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
-                    No GenBank folder loaded yet. KO can still start from gene name alone, but sequence-backed designs benefit from a GenBank file or raw DNA.
+                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
+                    {EDITION_CONFIG.emptyFolderNotice}
                   </div>
                 )}
               </div>
@@ -4636,8 +5018,9 @@ export default function App() {
                 ? getConstructBuilderHelp(row.projectType, constructSelection.architecture)
                 : "";
               const rowReady = !row.parseIssue && (row.projectType === "ko" ? (!!row.gene || hasSequenceBackedReference(row)) : hasSequenceBackedReference(row));
+              const rowIssues = getRowSectionIssues(row);
               return (
-                <div key={row.id} style={{ padding: 16, borderRadius: 18, border: `1px solid ${COLORS.borderSoft}`, background: "linear-gradient(180deg, rgba(20,36,59,0.86), rgba(10,20,34,0.76))", boxShadow: "0 18px 34px rgba(2, 8, 23, 0.18)" }}>
+                <div key={row.id} style={{ padding: 16, borderRadius: 18, border: `1px solid ${COLORS.borderSoft}`, background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)", boxShadow: "0 14px 28px rgba(15, 23, 42, 0.08)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
                     <div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -4656,29 +5039,31 @@ export default function App() {
                       {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
                       {batchStatus?.status === "error" && <Badge color={COLORS.danger}>Error</Badge>}
                       {batchSuccessfulResults.length > 1 && batchStatus?.status === "success" && (
-                        <button type="button" onClick={() => setSelectedProjectId(row.id)} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>
+                        <ActionButton variant="secondary" onClick={() => setSelectedProjectId(row.id)}>
                           {selectedEntry?.rowId === row.id ? "Shown below" : "Show report"}
-                        </button>
+                        </ActionButton>
                       )}
-                      <button type="button" onClick={() => duplicateProjectRow(index)} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700 }}>Duplicate</button>
-                      <button type="button" onClick={() => removeProjectRow(index)} disabled={batchRows.length <= 1} style={{ ...FIELD_STYLE, width: "auto", cursor: batchRows.length > 1 ? "pointer" : "not-allowed", fontWeight: 700 }}>Remove</button>
+                      <ActionButton variant="subtle" onClick={() => duplicateProjectRow(index)}>Duplicate</ActionButton>
+                      <ActionButton variant="danger" onClick={() => removeProjectRow(index)} disabled={batchRows.length <= 1}>Remove</ActionButton>
                     </div>
                   </div>
 
-                  <FormSection title="Project setup" hint="Define the gene, cell line, and core project identity.">
+                  <FormSection title="Basic details" hint="Start with the gene, the edit type, and any project identifiers you already know.">
+                    {!!rowIssues.project.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.project.join(" ")}</InlineNotice>}
                     <Grid>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>IRIS ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Group</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal / sponsor name" /></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene / locus</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="BIHi005-A" /></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project label</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Project ${slot}`} /></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Design type</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Team or client</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal program or sponsor" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
                   </FormSection>
 
-                  <FormSection title="Reference sequence" hint="Choose whether this row is sequence-backed by a GenBank file or raw DNA with CDS coordinates." tone="accent">
+                  <FormSection title="Sequence input" hint="Use a GenBank file for the easiest path. Paste raw DNA only if you also know the CDS coordinates." tone="accent">
+                    {!!rowIssues.reference.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.reference.join(" ")}</InlineNotice>}
                     <label style={{ display: "block", marginBottom: 12 }}>
-                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Reference source</div>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>How are you providing sequence?</div>
                       <select value={row.referenceSource} onChange={(event) => updateBatchRow(index, "referenceSource", event.target.value)} style={SELECT_STYLE}>
                         <option value="genbank">GenBank file</option>
                         <option value="raw">Raw DNA + CDS coordinates</option>
@@ -4688,12 +5073,12 @@ export default function App() {
                     {row.referenceSource === "raw" ? (
                       <>
                         <label style={{ display: "block", marginBottom: 12 }}>
-                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Reference DNA</div>
-                          <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA sequence using A/C/G/T only" />
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>DNA sequence</div>
+                          <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA using A, C, G, and T only" />
                         </label>
                         <Grid>
-                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>CDS start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
-                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>CDS end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
+                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Coding region start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
+                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Coding region end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
                         </Grid>
                         <label style={{ display: "block", marginTop: 12 }}>
                           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Exon coordinates (optional)</div>
@@ -4702,7 +5087,7 @@ export default function App() {
                       </>
                     ) : (
                       <label style={{ display: "block" }}>
-                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Reference GenBank {row.projectType === "ko" ? "(optional for gene-list KO mode)" : ""}</div>
+                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>GenBank file {row.projectType === "ko" ? "(optional for gene-only KO mode)" : ""}</div>
                         <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
                           <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
                           <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
@@ -4712,7 +5097,7 @@ export default function App() {
                     )}
 
                     <label style={{ display: "block", marginTop: 12 }}>
-                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Custom gRNAs (optional)</div>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Use your own gRNAs (optional)</div>
                       <textarea
                         value={row.customGuides}
                         onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
@@ -4720,26 +5105,27 @@ export default function App() {
                         placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
                       />
                       <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
-                        If provided, the app maps these spacers onto the uploaded reference and uses them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
+                        If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
                       </div>
                     </label>
                   </FormSection>
 
-                  <FormSection title="Design details" hint="Capture the requested edit, reporter, or tag configuration for this row." tone="warm">
-                    <label style={{ display: "block", marginBottom: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Requested edit summary</div><input value={row.editSummary} onChange={(event) => updateBatchRow(index, "editSummary", event.target.value)} style={FIELD_STYLE} placeholder="APOE2 (p.Arg176Cys) SNP knockin" /></label>
+                  <FormSection title="What should be designed?" hint={EDITION_CONFIG.designDetailsHint} tone="warm">
+                    {!!rowIssues.design.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.design.join(" ")}</InlineNotice>}
+                    <label style={{ display: "block", marginBottom: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Short edit summary</div><input value={row.editSummary} onChange={(event) => updateBatchRow(index, "editSummary", event.target.value)} style={FIELD_STYLE} placeholder="APOE p.Arg176Cys SNP knock-in" /></label>
 
-                  {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Mutation</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
+                  {row.projectType === "pm" && <label style={{ display: "block", marginTop: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Protein change</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="R176C" /></label>}
                   {row.projectType === "it" && (
                     <Grid>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal tag</div><select value={INTERNAL_TAGS[row.tag] ? row.tag : "SPOT"} onChange={(event) => updateBatchRow(index, "tag", event.target.value)} style={SELECT_STYLE}>{internalTagOptions.map((option) => <option key={option} value={option}>{option} ({INTERNAL_TAGS[option].seq.length} bp)</option>)}</select></label>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Insert after residue</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="P155" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Insert after amino acid</div><input value={row.mutation} onChange={(event) => updateBatchRow(index, "mutation", event.target.value)} style={FIELD_STYLE} placeholder="P155" /></label>
                     </Grid>
                   )}
                   {(row.projectType === "ct" || row.projectType === "nt") && (
                     <>
                       <Grid>
                         <label>
-                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Architecture</div>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Insert style</div>
                           <select
                             value={constructSelection?.architecture || ""}
                             onChange={(event) => {
@@ -4765,7 +5151,7 @@ export default function App() {
                             {constructPayloads.map((option) => <option key={option.cassette} value={option.cassette}>{option.label} ({getCassetteSequenceLength(option.cassette, row.projectType)} bp)</option>)}
                           </select>
                         </label>
-                        <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Homology arm</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={SELECT_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
+                        <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Homology arm length</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={SELECT_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
                       </Grid>
                       <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                         {row.projectType === "nt"
@@ -4872,13 +5258,13 @@ export default function App() {
                       </div>
                     </>
                   )}
-                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 13 }}>KO can run from gene name alone for high-throughput reference-guide mode, or use an uploaded GenBank for sequence-backed spacing and primer design. Custom pasted guides require GenBank so the app can remap cut sites and rebuild the centered amplicon.</div>}
+                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>Knockout can run from the gene name alone for a quick guide shortlist. Upload a GenBank file if you want sequence-backed guide spacing and automatic validation primers. If you paste your own guides, a GenBank file is required.</div>}
                   </FormSection>
 
-                  <FormSection title="Context and notes" hint="Use this space for assumptions, transcript choices, or delivery constraints.">
+                  <FormSection title="Optional notes" hint="Add anything a reviewer should keep in mind, such as transcript choice or delivery plan.">
                     <label style={{ display: "block" }}>
-                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Notes / assumptions</div>
-                      <textarea value={row.notes} onChange={(event) => updateBatchRow(index, "notes", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 84, resize: "vertical" }} placeholder="Transcript assumptions, strand notes, delivery mode, client constraints..." />
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Notes</div>
+                      <textarea value={row.notes} onChange={(event) => updateBatchRow(index, "notes", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 84, resize: "vertical" }} placeholder="Transcript choice, delivery mode, cloning preference, or other review notes..." />
                     </label>
                   </FormSection>
 
@@ -4913,9 +5299,9 @@ export default function App() {
                                 {koRowTopBrunelloPair.exonLabel} | {Number.isFinite(koRowTopBrunelloPair.spacing) ? `${koRowTopBrunelloPair.spacing} bp ${koRowTopBrunelloPair.candidateMode === "deletion-screen" ? "deletion" : "spacing"}` : "spacing n/a"} | {koRowTopBrunelloPair.result.amp || "amplicon n/a"}
                               </div>
                             </div>
-                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowTopBrunelloPair)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                            <ActionButton variant="warm" onClick={() => applyKoGuidePairToRow(row.id, koRowTopBrunelloPair)} style={{ padding: "6px 8px", fontSize: 12 }}>
                               Apply Brunello pair
-                            </button>
+                            </ActionButton>
                           </div>
                         </div>
                       )}
@@ -4928,9 +5314,9 @@ export default function App() {
                                 {koRowTopCasPair.exonLabel} | {Number.isFinite(koRowTopCasPair.spacing) ? `${koRowTopCasPair.spacing} bp ${koRowTopCasPair.candidateMode === "deletion-screen" ? "deletion" : "spacing"}` : "spacing n/a"} | {koRowTopCasPair.result.amp || "amplicon n/a"}
                               </div>
                             </div>
-                            <button type="button" onClick={() => applyKoGuidePairToRow(row.id, koRowTopCasPair)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                            <ActionButton variant="secondary" onClick={() => applyKoGuidePairToRow(row.id, koRowTopCasPair)} style={{ padding: "6px 8px", fontSize: 12 }}>
                               Apply Cas-Database pair
-                            </button>
+                            </ActionButton>
                           </div>
                         </div>
                       )}
@@ -4942,12 +5328,11 @@ export default function App() {
           </div>
 
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 14 }}>
-            <button type="button" onClick={runBatch} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", border: "none" }}>
+            <ActionButton variant="primary" onClick={runBatch}>
               Generate designs
-            </button>
+            </ActionButton>
             {batchCopyState && <Badge color={COLORS.success}>{batchCopyState}</Badge>}
           </div>
-          {batchError && <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{batchError}</div>}
         </div>
         )}
 
@@ -5016,12 +5401,15 @@ export default function App() {
                   Use the Design Requests section to upload GenBank files, paste request lines, and generate designs. Once at least one design succeeds, the full report preview will appear here.
                 </div>
                 <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                  Quick start: upload a GenBank folder, click <strong>Load sample requests</strong>, then click <strong>Generate designs</strong>.
+                  {EDITION_CONFIG.quickStartCopy.split("Load sample requests").length > 1
+                    ? <>Quick start: upload a GenBank folder, click <strong>Load sample requests</strong>, then click <strong>Generate designs</strong>{IS_COMMUNITY_EDITION ? " for KO or SNP projects." : "."}</>
+                    : EDITION_CONFIG.quickStartCopy}
                 </div>
               </div>
             )}
             {selectedEntry?.result && (
               <>
+                {copyState && <InlineNotice tone="success" style={{ marginBottom: 16 }}>{copyState}</InlineNotice>}
                 {batchSuccessfulResults.length > 1 && (
                   <>
                     <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Generated Projects</div>
@@ -5083,18 +5471,10 @@ export default function App() {
 
                 <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 6 }}>Design: {formatDesignLabel(selectedRowMeta, selectedEntry.result)}</div>
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>{selectedRowMeta.notes || "Final strategy report preview."}</div>
+                <ReportSnapshotCard result={selectedEntry.result} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>1. Gene Information</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
-                  <tbody>
-                    {buildGeneInfoRows(selectedRowMeta, selectedEntry.result, selectedEntry.row?.fileName).map(([label, value]) => (
-                      <tr key={label}>
-                        <td style={{ width: 180, padding: "8px 10px", border: "1px solid #cfc5b4", background: "#F4EFE4", fontWeight: 700 }}>{label}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{value}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <GeneInfoCardGrid meta={selectedRowMeta} result={selectedEntry.result} fileName={selectedEntry.row?.fileName} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>2. gRNA Sequences</div>
                 <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
@@ -5115,21 +5495,21 @@ export default function App() {
                 </table>
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>3. Validation Primers</div>
-                <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 12 }}>
-                  <thead>
-                    <tr>{["Name", "Sequence", "Length", "Tm", "GC", "Clamp"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
-                  </thead>
-                  <tbody>
-                    {buildPrimerRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: cellIndex === 1 ? "Consolas, monospace" : "inherit" }}>{cell}</td>)}</tr>)}
-                  </tbody>
-                </table>
+                {selectedEntry.result.type === "ko" && selectedEntry.result.referenceOnly && (
+                  <InlineNotice tone="warning" style={{ marginBottom: 12 }}>
+                    This knockout was generated in gene-only shortlist mode. Upload a GenBank or raw reference sequence for this row if you want automatic validation primer design around the selected local cut sites.
+                  </InlineNotice>
+                )}
+                <PrimerSummaryCardGrid result={selectedEntry.result} />
                 <PrimerQualityCard result={selectedEntry.result} />
                 <div style={{ color: "#555", fontSize: 13, marginBottom: 16 }}>Expected amplicon: {selectedEntry.result.amp || "n/a"}</div>
                 {!!selectedEntry.result?.primerStrategy && <div style={{ color: "#555", fontSize: 13, marginBottom: 12 }}>Primer strategy: {selectedEntry.result.primerStrategy}</div>}
                 {!!buildPrimerCandidateRows(selectedEntry.result).length && (
-                  <>
-                    <div style={{ fontSize: 15, fontWeight: 700, margin: "4px 0 8px 0" }}>Alternative validated primer pairs</div>
-                    <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
+                  <CollapsiblePanel
+                    title="Alternative validated primer pairs"
+                    summary={`${buildPrimerCandidateRows(selectedEntry.result).length} backup pair${buildPrimerCandidateRows(selectedEntry.result).length === 1 ? "" : "s"}`}
+                  >
+                    <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 0 }}>
                       <thead>
                         <tr>{["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#E2E8F0", color: "#111827", textAlign: "left", fontSize: 12 }}>{label}</th>)}</tr>
                       </thead>
@@ -5137,7 +5517,7 @@ export default function App() {
                         {buildPrimerCandidateRows(selectedEntry.result).map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={`${rowIndex}-${cellIndex}`} style={{ padding: "8px 10px", border: "1px solid #bbbbbb", background: "#ffffff", fontFamily: cellIndex === 1 || cellIndex === 5 ? "Consolas, monospace" : "inherit", fontSize: 12 }}>{cell}</td>)}</tr>)}
                       </tbody>
                     </table>
-                  </>
+                  </CollapsiblePanel>
                 )}
 
                 <DesignReadinessCard result={selectedEntry.result} />
@@ -5152,6 +5532,9 @@ export default function App() {
                         ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs above are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up."
                         : "No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption."}
                     </div>
+                    <InlineNotice style={{ marginBottom: 12 }}>
+                      The primary recommended knockout pair is already summarized above. The reference-library sections below are optional if you want backup guides or alternative local pairs.
+                    </InlineNotice>
                     {brunelloLookup.status === "loading" && (
                       <div style={{ marginBottom: 12, color: "#9A3412", fontSize: 13 }}>
                         Loading Brunello CRISPRko reference guides...
@@ -5163,11 +5546,13 @@ export default function App() {
                       </div>
                     )}
                     {brunelloReferenceGuideSet && (
-                      <div style={{ marginBottom: 16, padding: 12, borderRadius: 12, background: "#FFF7ED", border: "1px solid #FED7AA" }}>
-                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Brunello CRISPRko Reference Guides</div>
+                      <CollapsiblePanel
+                        title="Backup KO guides: Brunello"
+                        summary={`${brunelloLocalCandidates.length} same-exon alternative${brunelloLocalCandidates.length === 1 ? "" : "s"}${brunelloReviewOnlyCount ? ` · ${brunelloReviewOnlyCount} review-only` : ""}`}
+                        tone="warm"
+                      >
                         <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
-                          {brunelloReferenceGuideSet.source}. {brunelloReferenceGuideSet.summary}
-                          {brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}
+                          Optional backup guides from the Brunello library. Use these only if you want alternatives to the primary pair shown above.
                         </div>
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
@@ -5184,12 +5569,12 @@ export default function App() {
                                 <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>{guide.strand}</td>
                                 <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
                                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                    <button type="button" onClick={() => applyBrunelloGuideToSelectedKo(0, guide)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                    <ActionButton variant="warm" onClick={() => applyBrunelloGuideToSelectedKo(0, guide)} style={{ padding: "6px 8px", fontSize: 12 }}>
                                       Use as gRNA1
-                                    </button>
-                                    <button type="button" onClick={() => applyBrunelloGuideToSelectedKo(1, guide)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                    </ActionButton>
+                                    <ActionButton variant="warm" onClick={() => applyBrunelloGuideToSelectedKo(1, guide)} style={{ padding: "6px 8px", fontSize: 12 }}>
                                       Use as gRNA2
-                                    </button>
+                                    </ActionButton>
                                   </div>
                                 </td>
                               </tr>
@@ -5224,9 +5609,9 @@ export default function App() {
                                       <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                     </td>
                                     <td style={{ padding: "8px 10px", border: "1px solid #FDBA74", background: "#ffffff", fontSize: 13 }}>
-                                      <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#9A3412", borderColor: "#FDBA74", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                      <ActionButton variant="warm" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ padding: "6px 8px", fontSize: 12 }}>
                                         Use pair
-                                      </button>
+                                      </ActionButton>
                                     </td>
                                   </tr>
                                 ))}
@@ -5234,8 +5619,15 @@ export default function App() {
                             </table>
                           </div>
                         )}
+                        {!!brunelloReviewOnlyCount && (
+                          <CollapsiblePanel
+                            title="Review-only alternative pairs"
+                            summary={`${brunelloReviewOnlyCount} edge-case candidate${brunelloReviewOnlyCount === 1 ? "" : "s"}`}
+                            tone="warm"
+                            style={{ marginTop: 14, marginBottom: 0 }}
+                          >
                         {!!brunelloDeletionCandidates.length && (
-                          <div style={{ marginTop: 14 }}>
+                          <div style={{ marginTop: 0 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Long-range deletion-screen pairs from the top 3 Brunello guides</div>
                             <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                               These guide pairs are far apart on your selected reference, so the app designs flanking junction-PCR primers to amplify the deletion band and reports the expected deletion size.
@@ -5316,17 +5708,21 @@ export default function App() {
                             ))}
                           </div>
                         )}
+                          </CollapsiblePanel>
+                        )}
                         {!brunelloLocalCandidates.length && !brunelloDeletionCandidates.length && hasSequenceBackedReference(selectedEntry.row) && (
                           <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#FFF7ED", border: "1px solid #FDBA74", color: "#7C2D12", fontSize: 13, lineHeight: 1.55 }}>
                             No same-exon local Brunello guide pairs within 40-140 bp were found after remapping onto your selected reference.
                           </div>
                         )}
-                      </div>
+                      </CollapsiblePanel>
                     )}
-                    <div style={{ marginBottom: 16, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Cas-Database Reference Guides</div>
+                    <CollapsiblePanel
+                      title="Backup KO guides: Cas-Database"
+                      summary={`${casDatabaseLocalCandidates.length} same-exon alternative${casDatabaseLocalCandidates.length === 1 ? "" : "s"}${casDatabaseReviewOnlyCount ? ` · ${casDatabaseReviewOnlyCount} review-only` : ""}`}
+                    >
                       <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.5, marginBottom: 10 }}>
-                        Top 3 Cas-Database knockout reference guides using the default recommended filters. These load automatically for the selected KO design and can be applied into the local design above.
+                        Optional backup guides from Cas-Database. Use these if you want additional alternatives to the primary pair shown above.
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end", marginBottom: 10 }}>
                         <label>
@@ -5368,7 +5764,9 @@ export default function App() {
                                     <tr key={target.id}>
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 13 }}>{target.spacer}</td>
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontFamily: "Consolas, monospace", fontSize: 13 }}>{target.pam || "n/a"}</td>
-                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.location || "n/a"}</td>
+                                      <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
+                                        {target.location || "n/a"}
+                                      </td>
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.strand || "n/a"}</td>
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.offTargetCounts.join("/")}</td>
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.oofScore.toFixed(2)}</td>
@@ -5376,12 +5774,12 @@ export default function App() {
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>{target.bestCdsPercentage === null ? "n/a" : `${target.bestCdsPercentage.toFixed(2)}%`}</td>
                                       <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
                                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                          <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(0, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                          <ActionButton variant="secondary" onClick={() => applyCasDatabaseGuideToSelectedKo(0, target)} style={{ padding: "6px 8px", fontSize: 12 }}>
                                             Use as gRNA1
-                                          </button>
-                                          <button type="button" onClick={() => applyCasDatabaseGuideToSelectedKo(1, target)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                          </ActionButton>
+                                          <ActionButton variant="secondary" onClick={() => applyCasDatabaseGuideToSelectedKo(1, target)} style={{ padding: "6px 8px", fontSize: 12 }}>
                                             Use as gRNA2
-                                          </button>
+                                          </ActionButton>
                                         </div>
                                       </td>
                                     </tr>
@@ -5416,9 +5814,9 @@ export default function App() {
                                             <div>Rev: {candidate.result.ps?.[1]?.s || "n/a"}</div>
                                           </td>
                                           <td style={{ padding: "8px 10px", border: "1px solid #D0D5DD", background: "#ffffff", fontSize: 13 }}>
-                                            <button type="button" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ ...FIELD_STYLE, width: "auto", padding: "6px 8px", background: "#ffffff", color: "#111827", borderColor: "#D0D5DD", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                                            <ActionButton variant="secondary" onClick={() => applyKoGuidePairToSelected(candidate)} style={{ padding: "6px 8px", fontSize: 12 }}>
                                               Use pair
-                                            </button>
+                                            </ActionButton>
                                           </td>
                                         </tr>
                                       ))}
@@ -5426,8 +5824,14 @@ export default function App() {
                                   </table>
                                 </div>
                               )}
+                              {!!casDatabaseReviewOnlyCount && (
+                                <CollapsiblePanel
+                                  title="Review-only alternative pairs"
+                                  summary={`${casDatabaseReviewOnlyCount} edge-case candidate${casDatabaseReviewOnlyCount === 1 ? "" : "s"}`}
+                                  style={{ marginTop: 14, marginBottom: 0 }}
+                                >
                               {!!casDatabaseDeletionCandidates.length && (
-                                <div style={{ marginTop: 14 }}>
+                                <div style={{ marginTop: 0 }}>
                                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Long-range deletion-screen pairs from the top 3 Cas-Database guides</div>
                                   <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
                                     These guide pairs are far apart on your selected reference, so the app designs flanking junction-PCR primers to amplify the deletion band and reports the expected deletion size.
@@ -5508,6 +5912,8 @@ export default function App() {
                                   ))}
                                 </div>
                               )}
+                                </CollapsiblePanel>
+                              )}
                               {!casDatabaseLocalCandidates.length && !casDatabaseDeletionCandidates.length && hasSequenceBackedReference(selectedEntry.row) && (
                                 <div style={{ marginTop: 14, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", color: "#475467", fontSize: 13, lineHeight: 1.55 }}>
                                   No same-exon local Cas-Database guide pairs within 40-140 bp were found after remapping onto your selected reference.
@@ -5517,7 +5923,7 @@ export default function App() {
                           )}
                         </>
                       )}
-                    </div>
+                    </CollapsiblePanel>
                   </>
                 )}
                 {selectedEntry.result.type === "it" && (
@@ -5866,6 +6272,9 @@ export default function App() {
           <div>Current host: {currentHost}</div>
         </div>
       </div>
+      {copyState && <FloatingNotice tone="success">{copyState}</FloatingNotice>}
+      {!copyState && batchCopyState && <FloatingNotice tone="success">{batchCopyState}</FloatingNotice>}
+      {!copyState && !batchCopyState && batchError && <FloatingNotice tone="danger">{batchError}</FloatingNotice>}
     </div>
   );
 }
