@@ -1151,6 +1151,154 @@ export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}
   return [buildFallbackPrimerPair(seq, idealStart, Math.min(seq.length, idealStart + fallbackAmp))];
 }
 
+export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homology3End, opts = {}) {
+  const {
+    minLen = 18,
+    maxLen = 26,
+    tmMin = 55,
+    tmMax = 67,
+    gcMin = 38,
+    gcMax = 67,
+    tmDelta = 5,
+    searchWindow = 650,
+    desiredOutsideFlank = 120,
+    outsideBuffer = 0,
+    candidateLimit = 90,
+  } = opts;
+  const sequence = String(seq || "").toUpperCase();
+  const leftBoundary = Math.max(0, Math.min(sequence.length, homology5Start));
+  const rightBoundary = Math.max(leftBoundary, Math.min(sequence.length, homology3End));
+  const forwardBoundary = Math.max(0, leftBoundary - outsideBuffer);
+  const reverseBoundary = Math.min(sequence.length, rightBoundary + outsideBuffer);
+  if (forwardBoundary < minLen || sequence.length - reverseBoundary < minLen) return [];
+
+  const protectedLength = Math.max(0, rightBoundary - leftBoundary);
+  const minAmp = opts.minAmp ?? Math.max(protectedLength + minLen * 2 + outsideBuffer * 2, protectedLength + 48);
+  const maxAmp = opts.maxAmp ?? Math.max(minAmp, protectedLength + searchWindow * 2 + maxLen * 2);
+  const desiredAmp = opts.desiredAmp ?? Math.max(minAmp, protectedLength + desiredOutsideFlank * 2);
+
+  const fwCandidates = [];
+  const revCandidates = [];
+  const fwSearchStart = Math.max(0, forwardBoundary - searchWindow);
+  const fwSearchEnd = Math.max(0, forwardBoundary - minLen);
+  for (let pos = fwSearchStart; pos <= fwSearchEnd; pos += 1) {
+    for (let len = minLen; len <= maxLen; len += 1) {
+      if (pos + len > forwardBoundary) continue;
+      const primer = sequence.slice(pos, pos + len);
+      if (primer.length !== len || primer.includes("N")) continue;
+      const gc = calculatePrimerGcPercent(primer);
+      if (gc < gcMin || gc > gcMax || hasPrimerHomopolymerRun(primer)) continue;
+      const tm = calculateNearestNeighborTm(primer);
+      if (tm < tmMin || tm > tmMax) continue;
+      const qc = assessPrimerSequence(primer);
+      if (qc.selfThreePrimeRun >= 4 || qc.hairpinRun >= 6 || qc.penalty > 22) continue;
+      fwCandidates.push({ seq: primer, start: pos, end: pos + len, tm, gc, len, clamp: countThreePrimeClamp(primer) });
+    }
+  }
+
+  const revSearchEnd = Math.min(sequence.length - minLen, reverseBoundary + searchWindow);
+  for (let pos = reverseBoundary; pos <= revSearchEnd; pos += 1) {
+    for (let len = minLen; len <= maxLen; len += 1) {
+      if (pos + len > sequence.length) break;
+      const primer = reverseComplement(sequence.slice(pos, pos + len));
+      if (primer.includes("N")) continue;
+      const gc = calculatePrimerGcPercent(primer);
+      if (gc < gcMin || gc > gcMax || hasPrimerHomopolymerRun(primer)) continue;
+      const tm = calculateNearestNeighborTm(primer);
+      if (tm < tmMin || tm > tmMax) continue;
+      const qc = assessPrimerSequence(primer);
+      if (qc.selfThreePrimeRun >= 4 || qc.hairpinRun >= 6 || qc.penalty > 22) continue;
+      revCandidates.push({ seq: primer, start: pos, end: pos + len, tm, gc, len, clamp: countThreePrimeClamp(primer) });
+    }
+  }
+
+  const scoreOutsideCandidate = (candidate, boundary, side) => {
+    const flank = side === "forward" ? boundary - candidate.start : candidate.end - boundary;
+    return Math.abs(flank - desiredOutsideFlank)
+      + Math.abs(candidate.tm - 60) * 8
+      + Math.abs(candidate.gc - 50) * 2
+      - candidate.clamp * 4;
+  };
+  const rankedFwCandidates = fwCandidates
+    .sort((left, right) => scoreOutsideCandidate(left, leftBoundary, "forward") - scoreOutsideCandidate(right, leftBoundary, "forward"))
+    .slice(0, candidateLimit);
+  const rankedRevCandidates = revCandidates
+    .sort((left, right) => scoreOutsideCandidate(left, rightBoundary, "reverse") - scoreOutsideCandidate(right, rightBoundary, "reverse"))
+    .slice(0, candidateLimit);
+
+  const pairs = [];
+  for (const fw of rankedFwCandidates) {
+    for (const rev of rankedRevCandidates) {
+      const amp = rev.end - fw.start;
+      if (amp < minAmp || amp > maxAmp) continue;
+      if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
+      if (reverseComplement(fw.seq.slice(-4)) === rev.seq.slice(-4)) continue;
+      const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
+      if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
+      const leftFlank = leftBoundary - fw.start;
+      const rightFlank = rev.end - rightBoundary;
+      const placementPenalty = (Math.abs(leftFlank - desiredOutsideFlank) + Math.abs(rightFlank - desiredOutsideFlank)) / 25;
+      const ampliconGc = calculatePrimerGcPercent(sequence.slice(fw.start, rev.end));
+      const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp, placementPenalty);
+      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, ampliconGc, score }));
+    }
+  }
+  if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
+
+  const fallbackFwLen = Math.min(24, maxLen, forwardBoundary);
+  const fallbackRevLen = Math.min(24, maxLen, sequence.length - reverseBoundary);
+  if (fallbackFwLen < minLen || fallbackRevLen < minLen) return [];
+  const fwStart = forwardBoundary - fallbackFwLen;
+  const revStart = reverseBoundary;
+  const fwSeq = sequence.slice(fwStart, forwardBoundary);
+  const revSeq = reverseComplement(sequence.slice(revStart, revStart + fallbackRevLen));
+  const fallback = buildPrimerCandidatePair(
+    {
+      seq: fwSeq,
+      start: fwStart,
+      end: forwardBoundary,
+      tm: calculateNearestNeighborTm(fwSeq),
+      gc: calculatePrimerGcPercent(fwSeq),
+      len: fwSeq.length,
+      clamp: countThreePrimeClamp(fwSeq),
+    },
+    {
+      seq: revSeq,
+      start: revStart,
+      end: revStart + fallbackRevLen,
+      tm: calculateNearestNeighborTm(revSeq),
+      gc: calculatePrimerGcPercent(revSeq),
+      len: revSeq.length,
+      clamp: countThreePrimeClamp(revSeq),
+    },
+    {
+      amp: revStart + fallbackRevLen - fwStart,
+      ampliconGc: calculatePrimerGcPercent(sequence.slice(fwStart, revStart + fallbackRevLen)),
+      score: -999,
+    },
+  );
+  return [fallback];
+}
+
+function buildOutsideHomologyPrimerWarning(seq, homology5Start, homology3End, primerPairs = []) {
+  const sequenceLength = String(seq || "").length;
+  if (primerPairs[0]?.score <= -900) return "Only fallback validation primers could be placed outside the homology arms; review primer QC before ordering.";
+  if (primerPairs.length) return "";
+  const missing = [];
+  if (homology5Start < 18) missing.push("upstream of the 5' homology arm");
+  if (sequenceLength - homology3End < 18) missing.push("downstream of the 3' homology arm");
+  if (missing.length) {
+    return `Outside-homology-arm validation primers need at least 18 bp of reference sequence ${missing.join(" and ")}. Upload a reference with additional flank or shorten the homology arms.`;
+  }
+  return "No validated primer pair could be placed outside both homology arms; review this locus manually.";
+}
+
+function getOutsideHomologyPrimerStrategy(primerPairs = []) {
+  if (!primerPairs.length) return "outside-homology-arms-unavailable";
+  if (primerPairs[0]?.score <= -900) return "outside-homology-arms-fallback";
+  return "validated-outside-homology-arms";
+}
+
 function scorePrimerSequence(primer) {
   const seq = String(primer || "").toUpperCase();
   if (!seq) return Number.MAX_SAFE_INTEGER;
@@ -2037,10 +2185,11 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
     ),
   );
   const lastAA = getCodonAtAa(gb, gb.proteinLength, toAA);
-  const primerPairs = designFlankingPrimerPairs(seq, stopStart, stopStart + 3);
+  const primerPairs = designOutsideHomologyArmPrimerPairs(seq, homology5Start, homology3End);
   const primerPair = primerPairs[0] || null;
-  const wtAmpliconLength = primerPair ? primerPair.amp : Math.max(48, Math.min(seq.length, 480));
-  const kiAmpliconLength = wtAmpliconLength + preset.seq.length - 3;
+  const wtAmpliconLength = primerPair?.amp || null;
+  const kiAmpliconLength = wtAmpliconLength ? wtAmpliconLength + preset.seq.length - 3 : null;
+  const primerWarning = buildOutsideHomologyPrimerWarning(seq, homology5Start, homology3End, primerPairs);
   const guideProtection = guides.slice(0, 2).map((guide, index) => {
     const guideIndex = index + 1;
     const mutation = silentMutations.find((entry) => entry.gi === guideIndex) || null;
@@ -2075,12 +2224,13 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
     guideProtection,
     gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: appendGuideContext(buildInsertGuideNote(guide, "stop", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
-    ps: [
-      buildPrimerRecord(makePrimerName(gb.gene, "ct", "Fw", "", tag), primerPair?.fw?.seq || seq.slice(Math.max(0, stopStart - 240), Math.max(0, stopStart - 216))),
-      buildPrimerRecord(makePrimerName(gb.gene, "ct", "Rev", "", tag), primerPair?.rev?.seq || reverseComplement(seq.slice(Math.min(seq.length, stopStart + 216), Math.min(seq.length, stopStart + 240)))),
-    ],
-    amp: `WT ~${wtAmpliconLength} bp | KI ~${kiAmpliconLength} bp`,
-    primerStrategy: "validated-flanking",
+    ps: primerPair ? [
+      buildPrimerRecord(makePrimerName(gb.gene, "ct", "Fw", "", tag), primerPair.fw.seq),
+      buildPrimerRecord(makePrimerName(gb.gene, "ct", "Rev", "", tag), primerPair.rev.seq),
+    ] : [],
+    amp: primerPair ? `WT ~${wtAmpliconLength} bp | KI ~${kiAmpliconLength} bp` : "",
+    primerStrategy: getOutsideHomologyPrimerStrategy(primerPairs),
+    primerWarning,
     primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }
@@ -2242,7 +2392,11 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
       protected: !!mutation || byInsertion,
     };
   });
-  const primerPairs = designFlankingPrimerPairs(seq, startCodonPos, startCodonPos + 3);
+  const primerPairs = designOutsideHomologyArmPrimerPairs(seq, homology5Start, homology3End);
+  const primerPair = primerPairs[0] || null;
+  const wtAmpliconLength = primerPair?.amp || null;
+  const kiAmpliconLength = wtAmpliconLength ? wtAmpliconLength + preset.seq.length - 3 : null;
+  const primerWarning = buildOutsideHomologyPrimerWarning(seq, homology5Start, homology3End, primerPairs);
   return {
     type: "nt",
     gene: gb.gene,
@@ -2263,23 +2417,13 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
     guideProtection,
     gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, note: appendGuideContext(buildInsertGuideNote(guide, "start codon replacement site", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
-    ps: (() => {
-      const primerPair = primerPairs[0] || null;
-      const fallbackFwStart = Math.max(0, startCodonPos - 240);
-      const fallbackFwEnd = Math.min(seq.length, fallbackFwStart + 24);
-      const fallbackRevStart = Math.min(seq.length, startCodonPos + 216);
-      const fallbackRevEnd = Math.min(seq.length, fallbackRevStart + 24);
-      return [
-        buildPrimerRecord(makePrimerName(gb.gene, "nt", "Fw", "", tag), primerPair?.fw?.seq || seq.slice(fallbackFwStart, fallbackFwEnd)),
-        buildPrimerRecord(makePrimerName(gb.gene, "nt", "Rev", "", tag), primerPair?.rev?.seq || reverseComplement(seq.slice(fallbackRevStart, fallbackRevEnd))),
-      ];
-    })(),
-    amp: (() => {
-      const primerPair = primerPairs[0] || null;
-      const wtAmpliconLength = primerPair ? primerPair.amp : Math.max(48, Math.min(seq.length, 480));
-      return `WT ~${wtAmpliconLength} bp | KI ~${wtAmpliconLength + preset.seq.length - 3} bp`;
-    })(),
-    primerStrategy: "validated-flanking",
+    ps: primerPair ? [
+      buildPrimerRecord(makePrimerName(gb.gene, "nt", "Fw", "", tag), primerPair.fw.seq),
+      buildPrimerRecord(makePrimerName(gb.gene, "nt", "Rev", "", tag), primerPair.rev.seq),
+    ] : [],
+    amp: primerPair ? `WT ~${wtAmpliconLength} bp | KI ~${kiAmpliconLength} bp` : "",
+    primerStrategy: getOutsideHomologyPrimerStrategy(primerPairs),
+    primerWarning,
     primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }

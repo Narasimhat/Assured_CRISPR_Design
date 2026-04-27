@@ -542,8 +542,9 @@ function buildDesignSummary(result) {
   }
   lines.push("");
   lines.push("Validation primers:");
-  result.ps.forEach((primer) => lines.push(`- ${primer.n}: ${primer.s}`));
+  (result.ps || []).forEach((primer) => lines.push(`- ${primer.n}: ${primer.s}`));
   if (result.amp) lines.push(`Expected amplicon: ${result.amp}`);
+  if (result.primerWarning) lines.push(`Primer warning: ${result.primerWarning}`);
   const primerQuality = getPrimerQualitySummary(result);
   if (primerQuality) lines.push(`Primer QC: ${primerQuality.confidence} confidence | pair penalty ${primerQuality.penalty} | Tm delta ${primerQuality.tmDelta} C`);
   return lines.join("\n");
@@ -2165,6 +2166,7 @@ function buildReviewItems(meta, result, fileName) {
     });
     if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the insertion site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
     if ((result.donor || "").length > 2200) items.push({ level: "warning", text: "HDR donor is long for routine synthesis and cloning. Confirm assembly plan and QC strategy." });
+    if (result.primerWarning) items.push({ level: "warning", text: result.primerWarning });
     items.push({ level: "check", text: "Review donor frame across both homology junctions and confirm the expected translated product at the protein level." });
   }
 
