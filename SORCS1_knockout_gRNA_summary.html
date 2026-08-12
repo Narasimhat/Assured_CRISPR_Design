@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SORCS1 Knockout gRNA Design Summary</title>
+  <style>
+    :root {
+      --ink: #1a2332;
+      --muted: #5a6577;
+      --line: #d7dde8;
+      --panel: #f4f7fb;
+      --accent: #0f5c6e;
+      --accent-soft: #e6f3f5;
+      --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+      --sans: "Source Sans 3", "Segoe UI", Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #eef2f7;
+      font: 15px/1.5 var(--sans);
+    }
+    .page {
+      max-width: 880px;
+      margin: 28px auto;
+      padding: 40px 44px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 30px rgba(26, 35, 50, 0.06);
+    }
+    header {
+      display: grid;
+      gap: 8px;
+      padding-bottom: 18px;
+      border-bottom: 2px solid var(--accent);
+      margin-bottom: 24px;
+    }
+    .eyebrow {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    h2 {
+      margin: 28px 0 10px;
+      font-size: 16px;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    p { margin: 0 0 12px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .card dt {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .card dd {
+      margin: 2px 0 0;
+      font-weight: 600;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    code, .seq {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      letter-spacing: 0.02em;
+    }
+    .seq {
+      display: inline-block;
+      padding: 2px 6px;
+      background: #f0f4f8;
+      border-radius: 4px;
+      white-space: nowrap;
+    }
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    li { margin: 4px 0; }
+    .note {
+      margin-top: 18px;
+      padding: 12px 14px;
+      background: var(--accent-soft);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 6px 6px 0;
+      font-size: 13px;
+    }
+    footer {
+      margin-top: 28px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .print-hint {
+      margin: 0 auto 8px;
+      max-width: 880px;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+    }
+    @media print {
+      body { background: #fff; }
+      .page {
+        margin: 0;
+        padding: 0;
+        border: none;
+        box-shadow: none;
+        max-width: none;
+      }
+      .print-hint { display: none; }
+      a { color: inherit; text-decoration: none; }
+    }
+    @media (max-width: 720px) {
+      .page { margin: 0; padding: 24px 18px; border: none; box-shadow: none; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <p class="print-hint">Open in a browser → Print → Save as PDF</p>
+  <main class="page">
+    <header>
+      <div class="eyebrow">ASSURED CRISPR Design</div>
+      <h1>SORCS1 knockout gRNA summary</h1>
+      <div class="meta">
+        SpCas9 · NHEJ frameshift · Homo sapiens · RefSeqGene NG_029120.2<br />
+        MANE transcript NM_052918.5 / ENST00000263054 · Generated 2026-08-12
+      </div>
+    </header>
+
+    <h2>Strategy</h2>
+    <p>
+      Dual SpCas9 guide RNAs targeting coding <strong>exon 4</strong> to induce NHEJ indels
+      and frameshift knockout. Early constitutive exons are preferred; extreme N- and C-terminal
+      exons are avoided to reduce alternative start usage and residual protein risk.
+    </p>
+
+    <div class="grid">
+      <div class="card"><dl><dt>Gene</dt><dd>SORCS1</dd></dl></div>
+      <div class="card"><dl><dt>Species</dt><dd>Homo sapiens</dd></dl></div>
+      <div class="card"><dl><dt>Target exon</dt><dd>Exon 4 (159 bp coding)</dd></dl></div>
+      <div class="card"><dl><dt>Nuclease / PAM</dt><dd>SpCas9 · NGG</dd></dl></div>
+    </div>
+
+    <h2>Recommended pair (designer auto-select)</h2>
+    <p class="meta">Source: ASSURED designer on NG_029120.2 · Cut spacing 103 bp</p>
+    <table>
+      <thead>
+        <tr>
+          <th>Guide</th>
+          <th>Spacer (20 nt, order without PAM)</th>
+          <th>PAM</th>
+          <th>Strand</th>
+          <th>GC%</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SORCS1_KO_gRNA1</td>
+          <td><span class="seq">ATAAACTGCTCTCAATCTCC</span></td>
+          <td><code>GGG</code></td>
+          <td>−</td>
+          <td>40</td>
+        </tr>
+        <tr>
+          <td>SORCS1_KO_gRNA2</td>
+          <td><span class="seq">TTCACCCCAAACAAGAAGAC</span></td>
+          <td><code>TGG</code></td>
+          <td>+</td>
+          <td>45</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Screening primers (recommended pair)</h2>
+    <table>
+      <thead>
+        <tr><th>Primer</th><th>Sequence</th><th>Amplicon</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SORCS1_KO_Fw</td>
+          <td><span class="seq">AAGCATTCTTTGCCTGCC</span></td>
+          <td rowspan="2">~450 bp</td>
+        </tr>
+        <tr>
+          <td>SORCS1_KO_Rev</td>
+          <td><span class="seq">TTTAAACAAGCAACCTGAGACTC</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Validated historical exon-4 pair</h2>
+    <p class="meta">
+      Historical hiPSC KO projects (SorCS1-Exn4-gRNA1/2); established lines MDCi053-A-27 / HMGUi001-A-28 · Spacing 7 bp
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Guide</th>
+          <th>Spacer (20 nt)</th>
+          <th>PAM</th>
+          <th>Strand</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SorCS1-Exn4-gRNA1</td>
+          <td><span class="seq">GATAATGTTACTCACAGACC</span></td>
+          <td><code>CGG</code></td>
+          <td>+</td>
+        </tr>
+        <tr>
+          <td>SorCS1-Exn4-gRNA2</td>
+          <td><span class="seq">ATAAACTGCTCTCAATCTCC</span></td>
+          <td><code>GGG</code></td>
+          <td>−</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="meta" style="margin-top:8px">
+      Primers: <span class="seq">TCAAGGTCCCTGTTTGGC</span> /
+      <span class="seq">AGACTCTCCTTGCTTTCCC</span> (~452 bp)
+    </p>
+
+    <h2>Brunello library guides (human)</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Spacer</th>
+          <th>PAM</th>
+          <th>Exon</th>
+          <th>Rule Set 2</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="seq">AGAACAGGGGACGCACTACG</span></td>
+          <td><code>AGG</code></td>
+          <td>1</td>
+          <td>0.6693</td>
+        </tr>
+        <tr>
+          <td><span class="seq">AGCTCTATGACTATAACCTG</span></td>
+          <td><code>GGG</code></td>
+          <td>2</td>
+          <td>0.7234</td>
+        </tr>
+        <tr>
+          <td><span class="seq">ATGTGTGTTTCATAGCAACC</span></td>
+          <td><code>AGG</code></td>
+          <td>13</td>
+          <td>0.6807</td>
+        </tr>
+        <tr>
+          <td><span class="seq">CCTCGTGACATACCTCATAG</span></td>
+          <td><code>AGG</code></td>
+          <td>9</td>
+          <td>0.6690</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Mouse ortholog candidates (NM_021377)</h2>
+    <table>
+      <thead>
+        <tr><th>Spacer</th><th>PAM</th><th>Exon</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="seq">GTTGATCAGCTCAGATGAAG</span></td>
+          <td><code>GGG</code></td>
+          <td>4</td>
+        </tr>
+        <tr>
+          <td><span class="seq">GATTATGTTACTCACAGACC</span></td>
+          <td><code>CGG</code></td>
+          <td>4</td>
+        </tr>
+        <tr>
+          <td><span class="seq">GCAGCTTATCCAGGAATCAG</span></td>
+          <td><code>TGG</code></td>
+          <td>5</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Ordering &amp; validation notes</h2>
+    <ul>
+      <li>Order spacers <strong>without</strong> PAM; use SpCas9 (NGG).</li>
+      <li>For U6 expression, prepend a leading <code>G</code> if the spacer does not start with G.</li>
+      <li>Sanger-sequence the target locus in your parental line before ordering (SNPs can block cutting).</li>
+      <li>Test 2–4 guides; dual-guide RNP increases indel rate.</li>
+      <li>Validate KO by ICE/TIDE plus protein loss (western/IF); prefer frameshifting indels.</li>
+    </ul>
+
+    <div class="note">
+      Files: <code>outputs/sorcs1_knockout_design_card.json</code>,
+      <code>outputs/sorcs1_ko_auto.json</code>,
+      <code>outputs/sorcs1_ko_validated.json</code>,
+      <code>references/sorcs1-ng_029120.2.gb</code>
+    </div>
+
+    <footer>
+      ASSURED CRISPR Designer · SORCS1 knockout design summary · Print this page to PDF for archival sharing.
+    </footer>
+  </main>
+</body>
+</html>
