@@ -11,6 +11,22 @@ cd assured-crispr-designer
 node scripts/run_design.mjs --manifest examples/manifest_knockout.json
 ```
 
+## SORCS1 knockout example
+
+```bash
+cd assured-crispr-designer
+node scripts/run_design.mjs \
+  --manifest examples/manifest_sorcs1_knockout.json \
+  --output outputs/sorcs1_ko_auto.json
+
+# Validated exon-4 pair from historical ASSURED hiPSC KO projects
+node scripts/run_design.mjs \
+  --manifest examples/manifest_sorcs1_knockout_validated.json \
+  --output outputs/sorcs1_ko_validated.json
+```
+
+Requires `references/sorcs1-ng_029120.2.gb` (NCBI RefSeqGene NG_029120.2). A compact design card is saved at `outputs/sorcs1_knockout_design_card.json`.
+
 ## Write result to a file
 
 ```bash

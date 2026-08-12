@@ -1,0 +1,107 @@
+{
+  "gene": "SORCS1",
+  "species": "Homo sapiens",
+  "reference": "NG_029120.2",
+  "mane_transcript": "NM_052918.5 / ENST00000263054",
+  "strategy": "SpCas9 NHEJ frameshift knockout in coding exon 4 (ASSURED preference: avoid extreme N/C termini; early constitutive exon)",
+  "recommended_pair": {
+    "source": "ASSURED designer auto-select (NG_029120.2)",
+    "exon": "Exon 4 (159 bp coding)",
+    "spacing_bp": 103,
+    "guides": [
+      {
+        "name": "SORCS1_KO_gRNA1",
+        "spacer": "ATAAACTGCTCTCAATCTCC",
+        "pam": "GGG",
+        "strand": "-",
+        "gc": 40
+      },
+      {
+        "name": "SORCS1_KO_gRNA2",
+        "spacer": "TTCACCCCAAACAAGAAGAC",
+        "pam": "TGG",
+        "strand": "+",
+        "gc": 45
+      }
+    ],
+    "screening_primers": {
+      "Fw": "AAGCATTCTTTGCCTGCC",
+      "Rev": "TTTAAACAAGCAACCTGAGACTC",
+      "amplicon_bp": 450
+    }
+  },
+  "validated_historical_pair": {
+    "source": "Historical hiPSC KO projects (SorCS1-Exn4-gRNA1/2); established lines MDCi053-A-27 / HMGUi001-A-28",
+    "exon": "Exon 4",
+    "spacing_bp": 7,
+    "guides": [
+      {
+        "name": "SorCS1-Exn4-gRNA1",
+        "spacer": "GATAATGTTACTCACAGACC",
+        "pam": "CGG",
+        "strand": "+"
+      },
+      {
+        "name": "SorCS1-Exn4-gRNA2",
+        "spacer": "ATAAACTGCTCTCAATCTCC",
+        "pam": "GGG",
+        "strand": "-"
+      }
+    ],
+    "screening_primers": {
+      "Fw": "TCAAGGTCCCTGTTTGGC",
+      "Rev": "AGACTCTCCTTGCTTTCCC",
+      "amplicon_bp": 452
+    }
+  },
+  "brunello_library_guides": [
+    {
+      "spacer": "AGAACAGGGGACGCACTACG",
+      "pam": "AGG",
+      "exon": 1,
+      "rule_set_2": 0.6693
+    },
+    {
+      "spacer": "AGCTCTATGACTATAACCTG",
+      "pam": "GGG",
+      "exon": 2,
+      "rule_set_2": 0.7234
+    },
+    {
+      "spacer": "ATGTGTGTTTCATAGCAACC",
+      "pam": "AGG",
+      "exon": 13,
+      "rule_set_2": 0.6807
+    },
+    {
+      "spacer": "CCTCGTGACATACCTCATAG",
+      "pam": "AGG",
+      "exon": 9,
+      "rule_set_2": 0.669
+    }
+  ],
+  "mouse_ortholog_nm_021377_candidates": [
+    {
+      "spacer": "GTTGATCAGCTCAGATGAAG",
+      "pam": "GGG",
+      "exon": 4
+    },
+    {
+      "spacer": "GATTATGTTACTCACAGACC",
+      "pam": "CGG",
+      "exon": 4
+    },
+    {
+      "spacer": "GCAGCTTATCCAGGAATCAG",
+      "pam": "TGG",
+      "exon": 5
+    }
+  ],
+  "ordering_notes": [
+    "Order spacers without PAM; use SpCas9 (NGG).",
+    "For U6 expression, prepend a leading G if the spacer does not start with G.",
+    "Sanger-sequence the target locus in your parental line before ordering (SNPs can block cutting).",
+    "Test 2-4 guides; dual-guide RNP increases indel rate.",
+    "Validate KO by ICE/TIDE plus protein loss (western/IF); prefer clones with frameshifting indels."
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "gene_symbol": "SORCS1",
+  "ensembl_id": "ENSG00000108018",
+  "mutation": "",
+  "edit_type": "knockout",
+  "species": "human",
+  "cell_line": "BIHi005-A",
+  "extra": {
+    "reference_file": "../../references/sorcs1-ng_029120.2.gb",
+    "custom_guides": [
+      "GATAATGTTACTCACAGACC",
+      "ATAAACTGCTCTCAATCTCC"
+    ],
+    "notes": "Validated exon-4 knockout pair from ASSURED/historical hiPSC projects (SorCS1-Exn4-gRNA1/2)."
+  }
+}

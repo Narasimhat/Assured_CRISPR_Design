@@ -1,0 +1,494 @@
+{
+  "ok": true,
+  "input": {
+    "manifest_path": "/workspace/assured-crispr-designer/examples/manifest_sorcs1_knockout_validated.json",
+    "reference_file": "/workspace/references/sorcs1-ng_029120.2.gb",
+    "edit_type": "knockout",
+    "gene_symbol": "SORCS1",
+    "ensembl_id": "ENSG00000108018"
+  },
+  "result": {
+    "dbg": "Parsed 614476 bp with 50 features. CDS: SORCS1, 26 segments, 1168 aa.",
+    "type": "ko",
+    "gene": "SORCS1",
+    "exon": "Exon 4 (409446-409604, 159 bp)",
+    "exSz": 159,
+    "prot": 1168,
+    "gs": [
+      {
+        "n": "SORCS1_KO_gRNA1",
+        "sp": "GATAATGTTACTCACAGACC",
+        "pm": "CGG",
+        "str": "+",
+        "gc": 40,
+        "cut": 409461,
+        "d": null,
+        "note": "Cut at 409462, exon 4 (16 bp into exon 4) | crosses exon 4 boundary: Guide overlaps exon 4 and adjacent noncoding sequence. | pair spacing 7 bp"
+      },
+      {
+        "n": "SORCS1_KO_gRNA2",
+        "sp": "ATAAACTGCTCTCAATCTCC",
+        "pm": "GGG",
+        "str": "-",
+        "gc": 40,
+        "cut": 409468,
+        "d": null,
+        "note": "Cut at 409469, exon 4 (23 bp into exon 4) | exonic (exon 4): Guide spans 23 bp within exon 4. | pair spacing 7 bp"
+      }
+    ],
+    "ps": [
+      {
+        "n": "SORCS1_KO_Fw",
+        "s": "TCAAGGTCCCTGTTTGGC",
+        "len": 18,
+        "gc": 55.6,
+        "tm": 60.5,
+        "dg3": -6.53,
+        "clamp": 3,
+        "qc": {
+          "penalty": 1.6,
+          "status": "high",
+          "gc": 55.6,
+          "tm": 60.5,
+          "selfDimerRun": 3,
+          "selfThreePrimeRun": 2,
+          "hairpinRun": 3,
+          "threePrimeDeltaG": -6.53,
+          "warnings": []
+        },
+        "notes": ""
+      },
+      {
+        "n": "SORCS1_KO_Rev",
+        "s": "AGACTCTCCTTGCTTTCCC",
+        "len": 19,
+        "gc": 52.6,
+        "tm": 59.6,
+        "dg3": -5.99,
+        "clamp": 3,
+        "qc": {
+          "penalty": 0.8,
+          "status": "high",
+          "gc": 52.6,
+          "tm": 59.6,
+          "selfDimerRun": 3,
+          "selfThreePrimeRun": 2,
+          "hairpinRun": 2,
+          "threePrimeDeltaG": -5.99,
+          "warnings": []
+        },
+        "notes": ""
+      }
+    ],
+    "amp": "~452 bp",
+    "strat": "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
+    "primerStrategy": "validated-centered",
+    "primerCandidates": [
+      {
+        "rank": 1,
+        "score": 5.51,
+        "ampliconLength": 452,
+        "ampliconGc": 41.4,
+        "ampliconGcWarning": null,
+        "wtAmpliconLength": null,
+        "deletionAmpliconLength": null,
+        "quality": {
+          "confidence": "high",
+          "penalty": 5.9,
+          "heteroDimerRun": 5,
+          "heteroThreePrimeRun": 2,
+          "tmDelta": 0.9,
+          "forward": {
+            "penalty": 1.6,
+            "status": "high",
+            "gc": 55.6,
+            "tm": 60.5,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 3,
+            "threePrimeDeltaG": -6.53,
+            "warnings": []
+          },
+          "reverse": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "warnings": []
+        },
+        "forward": {
+          "n": "Fw",
+          "s": "TCAAGGTCCCTGTTTGGC",
+          "len": 18,
+          "gc": 55.6,
+          "tm": 60.5,
+          "dg3": -6.53,
+          "clamp": 3,
+          "qc": {
+            "penalty": 1.6,
+            "status": "high",
+            "gc": 55.6,
+            "tm": 60.5,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 3,
+            "threePrimeDeltaG": -6.53,
+            "warnings": []
+          },
+          "notes": ""
+        },
+        "reverse": {
+          "n": "Rev",
+          "s": "AGACTCTCCTTGCTTTCCC",
+          "len": 19,
+          "gc": 52.6,
+          "tm": 59.6,
+          "dg3": -5.99,
+          "clamp": 3,
+          "qc": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "notes": ""
+        }
+      },
+      {
+        "rank": 2,
+        "score": 5.4,
+        "ampliconLength": 461,
+        "ampliconGc": 41.6,
+        "ampliconGcWarning": null,
+        "wtAmpliconLength": null,
+        "deletionAmpliconLength": null,
+        "quality": {
+          "confidence": "medium",
+          "penalty": 21.7,
+          "heteroDimerRun": 6,
+          "heteroThreePrimeRun": 3,
+          "tmDelta": 0.7,
+          "forward": {
+            "penalty": 7.6,
+            "status": "medium",
+            "gc": 57.9,
+            "tm": 60.3,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -6.42,
+            "warnings": []
+          },
+          "reverse": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "warnings": []
+        },
+        "forward": {
+          "n": "Fw",
+          "s": "CTGACAGAGTCAAGGTCCC",
+          "len": 19,
+          "gc": 57.9,
+          "tm": 60.3,
+          "dg3": -6.42,
+          "clamp": 3,
+          "qc": {
+            "penalty": 7.6,
+            "status": "medium",
+            "gc": 57.9,
+            "tm": 60.3,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -6.42,
+            "warnings": []
+          },
+          "notes": ""
+        },
+        "reverse": {
+          "n": "Rev",
+          "s": "AGACTCTCCTTGCTTTCCC",
+          "len": 19,
+          "gc": 52.6,
+          "tm": 59.6,
+          "dg3": -5.99,
+          "clamp": 3,
+          "qc": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "notes": ""
+        }
+      },
+      {
+        "rank": 3,
+        "score": 5.09,
+        "ampliconLength": 465,
+        "ampliconGc": 41.5,
+        "ampliconGcWarning": null,
+        "wtAmpliconLength": null,
+        "deletionAmpliconLength": null,
+        "quality": {
+          "confidence": "medium",
+          "penalty": 20.1,
+          "heteroDimerRun": 6,
+          "heteroThreePrimeRun": 3,
+          "tmDelta": 0.2,
+          "forward": {
+            "penalty": 6.2,
+            "status": "medium",
+            "gc": 47.6,
+            "tm": 59.8,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 1,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -5.88,
+            "warnings": []
+          },
+          "reverse": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "warnings": []
+        },
+        "forward": {
+          "n": "Fw",
+          "s": "AATCCTGACAGAGTCAAGGTC",
+          "len": 21,
+          "gc": 47.6,
+          "tm": 59.8,
+          "dg3": -5.88,
+          "clamp": 2,
+          "qc": {
+            "penalty": 6.2,
+            "status": "medium",
+            "gc": 47.6,
+            "tm": 59.8,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 1,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -5.88,
+            "warnings": []
+          },
+          "notes": ""
+        },
+        "reverse": {
+          "n": "Rev",
+          "s": "AGACTCTCCTTGCTTTCCC",
+          "len": 19,
+          "gc": 52.6,
+          "tm": 59.6,
+          "dg3": -5.99,
+          "clamp": 3,
+          "qc": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "notes": ""
+        }
+      },
+      {
+        "rank": 4,
+        "score": 5.06,
+        "ampliconLength": 467,
+        "ampliconGc": 41.3,
+        "ampliconGcWarning": null,
+        "wtAmpliconLength": null,
+        "deletionAmpliconLength": null,
+        "quality": {
+          "confidence": "medium",
+          "penalty": 21.2,
+          "heteroDimerRun": 6,
+          "heteroThreePrimeRun": 3,
+          "tmDelta": 0.3,
+          "forward": {
+            "penalty": 7.2,
+            "status": "medium",
+            "gc": 43.5,
+            "tm": 59.9,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 1,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -5.88,
+            "warnings": []
+          },
+          "reverse": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "warnings": []
+        },
+        "forward": {
+          "n": "Fw",
+          "s": "ATAATCCTGACAGAGTCAAGGTC",
+          "len": 23,
+          "gc": 43.5,
+          "tm": 59.9,
+          "dg3": -5.88,
+          "clamp": 2,
+          "qc": {
+            "penalty": 7.2,
+            "status": "medium",
+            "gc": 43.5,
+            "tm": 59.9,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 1,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -5.88,
+            "warnings": []
+          },
+          "notes": ""
+        },
+        "reverse": {
+          "n": "Rev",
+          "s": "AGACTCTCCTTGCTTTCCC",
+          "len": 19,
+          "gc": 52.6,
+          "tm": 59.6,
+          "dg3": -5.99,
+          "clamp": 3,
+          "qc": {
+            "penalty": 0.8,
+            "status": "high",
+            "gc": 52.6,
+            "tm": 59.6,
+            "selfDimerRun": 3,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 2,
+            "threePrimeDeltaG": -5.99,
+            "warnings": []
+          },
+          "notes": ""
+        }
+      },
+      {
+        "rank": 5,
+        "score": 4.86,
+        "ampliconLength": 453,
+        "ampliconGc": 41.5,
+        "ampliconGcWarning": null,
+        "wtAmpliconLength": null,
+        "deletionAmpliconLength": null,
+        "quality": {
+          "confidence": "medium",
+          "penalty": 19.8,
+          "heteroDimerRun": 5,
+          "heteroThreePrimeRun": 3,
+          "tmDelta": 1.1,
+          "forward": {
+            "penalty": 7.6,
+            "status": "medium",
+            "gc": 57.9,
+            "tm": 60.3,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -6.42,
+            "warnings": []
+          },
+          "reverse": {
+            "penalty": 1.7,
+            "status": "high",
+            "gc": 55.6,
+            "tm": 59.2,
+            "selfDimerRun": 2,
+            "selfThreePrimeRun": 1,
+            "hairpinRun": 1,
+            "threePrimeDeltaG": -6.42,
+            "warnings": []
+          },
+          "warnings": []
+        },
+        "forward": {
+          "n": "Fw",
+          "s": "CTGACAGAGTCAAGGTCCC",
+          "len": 19,
+          "gc": 57.9,
+          "tm": 60.3,
+          "dg3": -6.42,
+          "clamp": 3,
+          "qc": {
+            "penalty": 7.6,
+            "status": "medium",
+            "gc": 57.9,
+            "tm": 60.3,
+            "selfDimerRun": 4,
+            "selfThreePrimeRun": 2,
+            "hairpinRun": 4,
+            "threePrimeDeltaG": -6.42,
+            "warnings": []
+          },
+          "notes": ""
+        },
+        "reverse": {
+          "n": "Rev",
+          "s": "CTTGCTTTCCCTTGTCCC",
+          "len": 18,
+          "gc": 55.6,
+          "tm": 59.2,
+          "dg3": -6.42,
+          "clamp": 3,
+          "qc": {
+            "penalty": 1.7,
+            "status": "high",
+            "gc": 55.6,
+            "tm": 59.2,
+            "selfDimerRun": 2,
+            "selfThreePrimeRun": 1,
+            "hairpinRun": 1,
+            "threePrimeDeltaG": -6.42,
+            "warnings": []
+          },
+          "notes": ""
+        }
+      }
+    ]
+  }
+}

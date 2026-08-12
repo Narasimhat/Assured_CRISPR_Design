@@ -1,0 +1,12 @@
+{
+  "gene_symbol": "SORCS1",
+  "ensembl_id": "ENSG00000108018",
+  "mutation": "",
+  "edit_type": "knockout",
+  "species": "human",
+  "cell_line": "BIHi005-A",
+  "extra": {
+    "reference_file": "../../references/sorcs1-ng_029120.2.gb",
+    "notes": "SpCas9 NHEJ knockout targeting early coding exon (ASSURED protocol preference: exon 4). Preferentially uses designer auto-pair across CDS exons 2-4."
+  }
+}

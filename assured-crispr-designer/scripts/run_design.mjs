@@ -96,6 +96,10 @@ async function main() {
     options,
   );
 
+  // Omit the embedded transcript model (`gb`) from CLI JSON — it can be hundreds of kb
+  // and is already available via the reference file. Keep `dbg` and design fields.
+  const { gb: _omitGb, cds: _omitCds, ...designResult } = result || {};
+
   const payload = {
     ok: !result?.err,
     input: {
@@ -105,7 +109,7 @@ async function main() {
       gene_symbol: manifest.gene_symbol || "",
       ensembl_id: manifest.ensembl_id || "",
     },
-    result,
+    result: designResult,
   };
 
   const serialized = JSON.stringify(payload, null, 2);
