@@ -25,7 +25,7 @@ node scripts/run_design.mjs \
   --output outputs/sorcs1_ko_validated.json
 ```
 
-Requires `references/sorcs1-ng_029120.2.gb` (NCBI RefSeqGene NG_029120.2). A compact design card is saved at `outputs/sorcs1_knockout_design_card.json`.
+Requires `references/sorcs1-ng_029120.2.gb` (NCBI RefSeqGene NG_029120.2). A compact design card is saved at `outputs/sorcs1_knockout_design_card.json`. Printable summary: `outputs/sorcs1_knockout_design_summary.html` (and `.pdf`).
 
 ## Write result to a file
 
