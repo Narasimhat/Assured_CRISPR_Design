@@ -1,0 +1,13 @@
+{
+  "gene_symbol": "POLQ",
+  "ensembl_id": "ENSG00000197608",
+  "mutation": "",
+  "edit_type": "c-terminal tag",
+  "species": "human",
+  "cell_line": "BIHi005-A",
+  "extra": {
+    "reference_file": "../../polq-ensg00000197608.gb",
+    "tag": "dTAG-2xHA",
+    "homology_arm_length": 250
+  }
+}

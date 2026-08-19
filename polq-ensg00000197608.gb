@@ -1,0 +1,531 @@
+LOCUS       NM_199420               8787 bp    mRNA    linear   PRI 12-NOV-2018
+DEFINITION  Homo sapiens DNA polymerase theta (POLQ), mRNA.
+ACCESSION   NM_199420 NM_014125
+VERSION     NM_199420.3
+KEYWORDS    RefSeq.
+SOURCE      Homo sapiens (human)
+  ORGANISM  Homo sapiens
+            Eukaryota; Metazoa; Chordata; Craniata; Vertebrata; Euteleostomi;
+            Mammalia; Eutheria; Euarchontoglires; Primates; Haplorrhini;
+            Catarrhini; Hominidae; Homo.
+REFERENCE   1  (bases 1 to 8787)
+  AUTHORS   Laverty DJ and Greenberg MM.
+  TITLE     In Vitro Bypass of Thymidine Glycol by DNA Polymerase theta Forms
+            Sequence-Dependent Frameshift Mutations
+  JOURNAL   Biochemistry 56 (51), 6726-6733 (2017)
+   PUBMED   29243925
+  REMARK    GeneRIF: results suggest that bypass of Tg by Pol theta; results in
+            mutations opposite the lesion, as well as frameshift mutations
+REFERENCE   2  (bases 1 to 8787)
+  AUTHORS   Yoon JH, Roy Choudhury J, Park J, Prakash S and Prakash L.
+  TITLE     Translesion synthesis DNA polymerases promote error-free
+            replication through the minor-groove DNA adduct
+            3-deaza-3-methyladenine
+  JOURNAL   J. Biol. Chem. 292 (45), 18682-18688 (2017)
+   PUBMED   28939775
+  REMARK    GeneRIF: Data suggest that error-free DNA replication through
+            3-deaza-3-methyladenine adduct is mediated via three different
+            pathways dependent upon POL-iota/POL-kappa, POL-theta, and
+            POL-zeta.
+REFERENCE   3  (bases 1 to 8787)
+  AUTHORS   Malaby AW, Martin SK, Wood RD and Doublie S.
+  TITLE     Expression and Structural Analyses of Human DNA Polymerase theta
+            (POLQ)
+  JOURNAL   Meth. Enzymol. 592, 103-121 (2017)
+   PUBMED   28668117
+  REMARK    GeneRIF: This article summarizes work on the expression and
+            purification of the full-length protein, and then focus on the
+            design, expression, and purification of an active C-terminal
+            polymerase fragment. Strategies to obtain and improve crystals of a
+            ternary POLQ complex (enzyme:DNA:nucleotide) are also presented,
+            along with key elements of the structure.
+REFERENCE   4  (bases 1 to 8787)
+  AUTHORS   Dai CH, Chen P, Li J, Lan T, Chen YC, Qian H, Chen K and Li MY.
+  TITLE     Co-inhibition of pol theta and HR genes efficiently synergize with
+            cisplatin to suppress cisplatin-resistant lung cancer cells
+            survival
+  JOURNAL   Oncotarget 7 (40), 65157-65170 (2016)
+   PUBMED   27533083
+  REMARK    GeneRIF: Our results indicate that there is a synthetic lethal
+            relationship between pol theta;-mediated DNA repair and homologous
+            recombination pathways
+REFERENCE   5  (bases 1 to 8787)
+  AUTHORS   Zahn KE, Averill AM, Aller P, Wood RD and Doublie S.
+  TITLE     Human DNA polymerase theta grasps the primer terminus to mediate
+            DNA repair
+  JOURNAL   Nat. Struct. Mol. Biol. 22 (4), 304-311 (2015)
+   PUBMED   25775267
+  REMARK    GeneRIF: Polymerase theta; uses a specialized thumb subdomain to
+            establish unique upstream contacts to the primer DNA strand.
+REFERENCE   6  (bases 1 to 8787)
+  AUTHORS   Kawamura K, Bahar R, Seimiya M, Chiyo M, Wada A, Okada S, Hatano M,
+            Tokuhisa T, Kimura H, Watanabe S, Honda I, Sakiyama S, Tagawa M and
+            O-Wang J.
+  TITLE     DNA polymerase theta is preferentially expressed in lymphoid
+            tissues and upregulated in human cancers
+  JOURNAL   Int. J. Cancer 109 (1), 9-16 (2004)
+   PUBMED   14735462
+  REMARK    GeneRIF: DNA Pol theta has a specialized function in lymphocytes
+            and in tumor progression
+REFERENCE   7  (bases 1 to 8787)
+  AUTHORS   Seki M, Marini F and Wood RD.
+  TITLE     POLQ (Pol theta), a DNA polymerase and DNA-dependent ATPase in
+            human cells
+  JOURNAL   Nucleic Acids Res. 31 (21), 6117-6126 (2003)
+   PUBMED   14576298
+  REMARK    GeneRIF: the isolation of the full-length human DNA POLQ gene, and
+            an initial characterization of its gene product, DNA polymerase
+            theta
+REFERENCE   8  (bases 1 to 8787)
+  AUTHORS   Maga G, Shevelev I, Ramadan K, Spadari S and Hubscher U.
+  TITLE     DNA polymerase theta purified from human cells is a high-fidelity
+            enzyme
+  JOURNAL   J. Mol. Biol. 319 (2), 359-369 (2002)
+   PUBMED   12051913
+  REMARK    GeneRIF: DNA polymerase theta purified from human cells is a
+            high-fidelity enzyme.
+REFERENCE   9  (bases 1 to 8787)
+  AUTHORS   Sharief FS, Vojta PJ, Ropp PA and Copeland WC.
+  TITLE     Cloning and chromosomal mapping of the human DNA polymerase theta
+            (POLQ), the eighth human DNA polymerase
+  JOURNAL   Genomics 59 (1), 90-96 (1999)
+   PUBMED   10395804
+REFERENCE   10 (bases 1 to 8787)
+  AUTHORS   Robertson NG, Khetarpal U, Gutierrez-Espeleta GA, Bieber FR and
+            Morton CC.
+  TITLE     Isolation of novel and known genes from a human fetal cochlear cDNA
+            library using subtractive hybridization and differential screening
+  JOURNAL   Genomics 23 (1), 42-50 (1994)
+   PUBMED   7829101
+COMMENT     VALIDATED REFSEQ: This record has undergone validation or
+            preliminary review. The reference sequence was derived from
+            AY338826.2, AC069239.16, AB209867.1, AC079841.10 and AA767021.1.
+            
+            [WARNING] On Nov 22, 2018 this sequence was replaced by
+            NM_199420.4.
+            
+            On Apr 3, 2007 this sequence version replaced NM_199420.2.
+            
+            Sequence Note: This RefSeq record was created from transcript and
+            genomic sequence data because no single transcript matching the
+            genomic sequence was available for the full length of the gene. The
+            extent of this transcript is supported by transcript alignments.
+            
+            Publication Note:  This RefSeq record includes a subset of the
+            publications that are available for this gene. Please see the Gene
+            record to access additional publications.
+            
+            ##Evidence-Data-START##
+            Transcript exon combination :: AY338826.2, AB209867.1 [ECO:0000332]
+            RNAseq introns              :: mixed/partial sample support
+                                           SAMEA1965299, SAMEA1966682
+                                           [ECO:0000350]
+            ##Evidence-Data-END##
+            COMPLETENESS: complete on the 3' end.
+PRIMARY     REFSEQ_SPAN         PRIMARY_IDENTIFIER PRIMARY_SPAN        COMP
+            1-325               AY338826.2         1-325
+            326-326             AC069239.16        53292-53292
+            327-1079            AY338826.2         327-1079
+            1080-1277           AB209867.1         1008-1205
+            1278-1565           AY338826.2         1278-1565
+            1566-1566           AC069239.16        78263-78263
+            1567-3073           AY338826.2         1567-3073
+            3074-3074           AC079841.10        147708-147708       c
+            3075-7666           AY338826.2         3075-7666
+            7667-7667           AC079841.10        93849-93849         c
+            7668-8775           AY338826.2         7668-8775
+            8776-8787           AA767021.1         1-12                c
+FEATURES             Location/Qualifiers
+     source          1..8787
+                     /organism="Homo sapiens"
+                     /mol_type="mRNA"
+                     /db_xref="taxon:9606"
+                     /chromosome="3"
+                     /map="3q13.33"
+     gene            1..8787
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /note="DNA polymerase theta"
+                     /db_xref="GeneID:10721"
+                     /db_xref="HGNC:HGNC:9186"
+                     /db_xref="MIM:604419"
+     exon            1..292
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     CDS             130..7902
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /EC_number="2.7.7.7"
+                     /note="polymerase (DNA directed), theta; polymerase (DNA)
+                     theta; epididymis secretory sperm binding protein"
+                     /codon_start=1
+                     /product="DNA polymerase theta"
+                     /protein_id="NP_955452.3"
+                     /db_xref="CCDS:CCDS33833.1"
+                     /db_xref="GeneID:10721"
+                     /db_xref="HGNC:HGNC:9186"
+                     /db_xref="MIM:604419"
+                     /translation="MNLLRRSGKRRRSESGSDSFSGSGGDSSASPQFLSGSVLSPPPG
+                     LGRCLKAAAAGECKPTVPDYERDKLLLANWGLPKAVLEKYHSFGVKKMFEWQAECLLL
+                     GQVLEGKNLVYSAPTSAGKTLVAELLILKRVLEMRKKALFILPFVSVAKEKKYYLQSL
+                     FQEVGIKVDGYMGSTSPSRHFSSLDIAVCTIERANGLINRLIEENKMDLLGMVVVDEL
+                     HMLGDSHRGYLLELLLTKICYITRKSASCQADLASSLSNAVQIVGMSATLPNLELVAS
+                     WLNAELYHTDFRPVPLLESVKVGNSIYDSSMKLVREFEPMLQVKGDEDHVVSLCYETI
+                     CDNHSVLLFCPSKKWCEKLADIIAREFYNLHHQAEGLVKPSECPPVILEQKELLEVMD
+                     QLRRLPSGLDSVLQKTVPWGVAFHHAGLTFEERDIIEGAFRQGLIRVLAATSTLSSGV
+                     NLPARRVIIRTPIFGGRPLDILTYKQMVGRAGRKGVDTVGESILICKNSEKSKGIALL
+                     QGSLKPVRSCLQRREGEEVTGSMIRAILEIIVGGVASTSQDMHTYAACTFLAASMKEG
+                     KQGIQRNQESVQLGAIEACVMWLLENEFIQSTEASDGTEGKVYHPTHLGSATLSSSLS
+                     PADTLDIFADLQRAMKGFVLENDLHILYLVTPMFEDWTTIDWYRFFCLWEKLPTSMKR
+                     VAELVGVEEGFLARCVKGKVVARTERQHRQMAIHKRFFTSLVLLDLISEVPLREINQK
+                     YGCNRGQIQSLQQSAAVYAGMITVFSNRLGWHNMELLLSQFQKRLTFGIQRELCDLVR
+                     VSLLNAQRARVLYASGFHTVADLARANIVEVEVILKNAVPFKSARKAVDEEEEAVEER
+                     RNMRTIWVTGRKGLTEREAAALIVEEARMILQQDLVEMGVQWNPCALLHSSTCSLTHS
+                     ESEVKEHTFISQTKSSYKKLTSKNKSNTIFSDSYIKHSPNIVQDLNKSREHTSSFNCN
+                     FQNGNQEHQTCSIFRARKRASLDINKEKPGASQNEGKTSDKKVVQTFSQKTKKAPLNF
+                     NSEKMSRSFRSWKRRKHLKRSRDSSPLKDSGACRIHLQGQTLSNPSLCEDPFTLDEKK
+                     TEFRNSGPFAKNVSLSGKEKDNKTSFPLQIKQNCSWNITLTNDNFVEHIVTGSQSKNV
+                     TCQATSVVSEKGRGVAVEAEKINEVLIQNGSKNQNVYMKHHDIHPINQYLRKQSHEQT
+                     STITKQKNIIERQMPCEAVSSYINRDSNVTINCERIKLNTEENKPSHFQALGDDISRT
+                     VIPSEVLPSAGAFSKSEGQHENFLNISRLQEKTGTYTTNKTKNNHVSDLGLVLCDFED
+                     SFYLDTQSEKIIQQMATENAKLGAKDTNLAAGIMQKSLVQQNSMNSFQKECHIPFPAE
+                     QHPLGATKIDHLDLKTVGTMKQSSDSHGVDILTPESPIFHSPILLEENGLFLKKNEVS
+                     VTDSQLNSFLQGYQTQETVKPVILLIPQKRTPTGVEGECLPVPETSLNMSDSLLFDSF
+                     SDDYLVKEQLPDMQMKEPLPSEVTSNHFSDSLCLQEDLIKKSNVNENQDTHQQLTCSN
+                     DESIIFSEMDSVQMVEALDNVDIFPVQEKNHTVVSPRALELSDPVLDEHHQGDQDGGD
+                     QDERAEKSKLTGTRQNHSFIWSGASFDLSPGLQRILDKVSSPLENEKLKSMTINFSSL
+                     NRKNTELNEEQEVISNLETKQVQGISFSSNNEVKSKIEMLENNANHDETSSLLPRKES
+                     NIVDDNGLIPPTPIPTSASKLTFPGILETPVNPWKTNNVLQPGESYLFGSPSDIKNHD
+                     LSPGSRNGFKDNSPISDTSFSLQLSQDGLQLTPASSSSESLSIIDVASDQNLFQTFIK
+                     EWRCKKRFSISLACEKIRSLTSSKTATIGSRFKQASSPQEIPIRDDGFPIKGCDDTLV
+                     VGLAVCWGGRDAYYFSLQKEQKHSEISASLVPPSLDPSLTLKDRMWYLQSCLRKESDK
+                     ECSVVIYDFIQSYKILLLSCGISLEQSYEDPKVACWLLDPDSQEPTLHSIVTSFLPHE
+                     LPLLEGMETSQGIQSLGLNAGSEHSGRYRASVESILIFNSMNQLNSLLQKENLQDVFR
+                     KVEMPSQYCLALLELNGIGFSTAECESQKHIMQAKLDAIETQAYQLAGHSFSFTSSDD
+                     IAEVLFLELKLPPNREMKNQGSKKTLGSTRRGIDNGRKLRLGRQFSTSKDVLNKLKAL
+                     HPLPGLILEWRRITNAITKVVFPLQREKCLNPFLGMERIYPVSQSHTATGRITFTEPN
+                     IQNVPRDFEIKMPTLVGESPPSQAVGKGLLPMGRGKYKKGFSVNPRCQAQMEERAADR
+                     GMPFSISMRHAFVPFPGGSILAADYSQLELRILAHLSHDRRLIQVLNTGADVFRSIAA
+                     EWKMIEPESVGDDLRQQAKQICYGIIYGMGAKSLGEQMGIKENDAACYIDSFKSRYTG
+                     INQFMTETVKNCKRDGFVQTILGRRRYLPGIKDNNPYRKAHAERQAINTIVQGSAADI
+                     VKIATVNIQKQLETFHSTFKSHGHREGMLQSDQTGLSRKRKLQGMFCPIRGGFFILQL
+                     HDELLYEVAEEDVVQVAQIVKNEMESAVKLSVKLKVKVKIGASWGELKDFDV"
+     misc_feature    775..786
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /experiment="experimental evidence, no additional details
+                     recorded"
+                     /note="propagated from UniProtKB/Swiss-Prot (O75417.2);
+                     Region: DEAH box"
+     misc_feature    2668..2811
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /experiment="experimental evidence, no additional details
+                     recorded"
+                     /note="propagated from UniProtKB/Swiss-Prot (O75417.2);
+                     Region: Interaction with RAD51.
+                     {ECO:0000269|PubMed:25642963}"
+     misc_feature    3097..3099
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /experiment="experimental evidence, no additional details
+                     recorded"
+                     /note="N6-acetyllysine. {ECO:0000244|PubMed:19608861};
+                     propagated from UniProtKB/Swiss-Prot (O75417.2); other
+                     site"
+     misc_feature    6553..6660
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /experiment="experimental evidence, no additional details
+                     recorded"
+                     /note="propagated from UniProtKB/Swiss-Prot (O75417.2);
+                     Region: Loop 1. {ECO:0000269|PubMed:21050863}"
+     misc_feature    6898..7095
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /experiment="experimental evidence, no additional details
+                     recorded"
+                     /note="propagated from UniProtKB/Swiss-Prot (O75417.2);
+                     Region: Loop 2. {ECO:0000269|PubMed:21050863,
+                     ECO:0000269|PubMed:25643323}"
+     misc_feature    7600..7734
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /experiment="experimental evidence, no additional details
+                     recorded"
+                     /note="propagated from UniProtKB/Swiss-Prot (O75417.2);
+                     Region: Loop 3. {ECO:0000269|PubMed:21050863}"
+     exon            293..472
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            473..603
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            604..760
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            761..869
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            870..1089
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            1090..1237
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            1238..1384
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            1385..1597
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            1598..1740
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            1741..1945
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            1946..2088
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            2089..2282
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            2283..2407
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            2408..2651
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            2652..5758
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            5759..5902
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            5903..6099
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            6100..6340
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            6341..6534
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            6535..6672
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            6673..6847
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            6848..6974
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            6975..7096
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            7097..7281
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            7282..7393
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            7394..7518
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            7519..7672
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            7673..7788
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     exon            7789..8780
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+                     /inference="alignment:Splign:2.1.0"
+     regulatory      8754..8759
+                     /regulatory_class="polyA_signal_sequence"
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+     polyA_site      8780
+                     /gene="POLQ"
+                     /gene_synonym="PRO0327"
+ORIGIN      
+        1 gggcgggccg ggaggtttga gtttgaagac tggcgggaag atgtccgcag ctgttgccag
+       61 gccagggttc tcccgagagg gaggacgctg ggactgtggc ttgccctgat cggccgagaa
+      121 gagtttgcca tgaatcttct gcgtcggagt gggaaacggc ggcgttcaga atcaggctca
+      181 gattcgttct cgggaagcgg cggtgacagc agtgccagcc cccagttcct ctccgggtcc
+      241 gtgctgagcc cgccgcccgg ccttggtcgc tgcctgaagg ccgcagctgc aggagaatgc
+      301 aagcctacag ttcctgacta cgaaagagac aagctactat tggcaaactg gggacttcct
+      361 aaagcagttc tggaaaaata ccacagtttt ggtgtaaaaa agatgtttga atggcaggca
+      421 gagtgccttt tgcttggaca agtcctggaa ggaaagaatt tagtttattc agctcctaca
+      481 agtgctggga agactcttgt ggcagaatta cttattttga agcgggtttt ggaaatgcgg
+      541 aagaaagctt tgtttattct tccctttgtt tctgtggcta aagagaagaa atactacctc
+      601 cagagtctgt ttcaggaagt aggaataaaa gtagacggtt atatgggcag cacctctcca
+      661 tcaaggcatt tctcttcatt ggatattgca gtctgcacaa ttgagagagc caatggtctg
+      721 atcaatcgcc tcatagagga aaataagatg gatctgttag gaatggtggt tgtggatgaa
+      781 ttacatatgc tgggagactc tcaccgaggg tatctgctgg aacttttgct gaccaagatt
+      841 tgctatatta ctcggaaatc agcatcttgt caggcagatc tagccagttc tctgtctaat
+      901 gctgtgcaaa tcgttggcat gagtgctacc cttcctaatt tggagcttgt ggcttcctgg
+      961 ttgaatgctg aactctacca taccgacttt cgccctgtac cgcttttgga gtcagtaaaa
+     1021 gttggaaatt ccatatatga ctcttcaatg aaacttgtga gggaatttga gcccatgcta
+     1081 caagtgaagg gagatgagga ccatgttgtt agtttatgtt atgagacgat ttgtgataac
+     1141 cattcagtat tacttttttg tccatcaaag aaatggtgtg agaagctggc agatatcatt
+     1201 gctcgagagt tttataatct acatcatcaa gctgagggat tggtgaaacc ctctgaatgc
+     1261 ccaccagtaa ttctggaaca aaaagaactc ctggaagtga tggatcagtt aagacgtttg
+     1321 ccttcaggac tggactctgt attacagaaa actgtaccat ggggagtagc atttcatcat
+     1381 gcaggtctta cttttgagga gagggatatc attgaaggag cctttcgtca aggtctcatt
+     1441 cgggtcttgg cggcaacttc tactctttct tctggggtga atttacctgc acgtcgtgtg
+     1501 attattcgaa cccctatttt tggtggtcga cctctagata ttcttactta taagcagatg
+     1561 gttggccgtg ctggcaggaa aggagtggac acagtaggcg agagtatctt aatttgtaag
+     1621 aactctgaga aatcaaaagg catagctctc cttcagggtt ctctaaagcc tgttcgcagc
+     1681 tgtctgcaaa gacgagaagg agaagaagta actggcagca tgatacgagc tattctggag
+     1741 ataatagttg gtggagtggc aagtacatca caagatatgc atacttatgc tgcctgcaca
+     1801 tttttggctg caagtatgaa agaagggaag caaggaattc agagaaatca agagtctgtt
+     1861 cagcttggag cgattgaggc ctgtgtgatg tggctactag aaaatgaatt catccagagt
+     1921 acagaagcca gtgatggaac agaaggaaag gtgtatcatc caacacatct tggttcggcc
+     1981 actctttctt cttcactttc tccagctgat actttagata tttttgctga cctgcaaaga
+     2041 gcaatgaagg gctttgtttt agagaatgat cttcatattc tctatctggt tacacctatg
+     2101 tttgaggatt ggactactat tgattggtat cgatttttct gtttatggga gaagttgcca
+     2161 acttcaatga aaagggtggc agagctagtg ggagttgaag aggggttctt ggcccgttgt
+     2221 gtgaaaggaa aagtagtagc cagaactgag agacagcatc gacaaatggc catccataaa
+     2281 aggtttttca ccagtcttgt gctattagat ttaatcagtg aagttccctt aagggaaata
+     2341 aatcagaaat atggatgcaa tcgtgggcag attcaatctt tgcaacagtc agctgctgtt
+     2401 tatgcaggga tgattacagt attttccaac cgtctgggct ggcacaacat ggaactacta
+     2461 ctttcccaat ttcagaagcg tcttacgttt ggcatccaga gggagctgtg tgacctggtt
+     2521 cgggtatcct tactaaatgc tcagagagcc agggttctct atgcttctgg ctttcatact
+     2581 gtggcagacc ttgctagagc aaatattgtg gaggtggagg tgattctgaa aaatgctgtg
+     2641 cctttcaaaa gtgcccggaa ggcagtggat gaggaagagg aagcagttga agaacgtcgc
+     2701 aatatgcgaa ctatctgggt gactggcaga aaaggtttaa ctgaaaggga agcagcagcc
+     2761 cttatagtgg aagaagccag aatgattctg cagcaggact tagttgaaat gggagtgcaa
+     2821 tggaatccat gtgccctgtt acattctagt acatgctcat tgactcatag tgagtccgaa
+     2881 gtaaaggaac acacatttat atcccaaact aagagttctt ataaaaaatt aacatcaaag
+     2941 aacaaaagta acacaatatt tagtgattct tatattaagc attcaccaaa tatagtgcaa
+     3001 gacttaaata aaagtagaga gcatacaagt tcctttaatt gtaatttcca gaatgggaat
+     3061 caagaacatc agacatgttc cattttcaga gcaagaaaac gggcctcttt agatataaat
+     3121 aaagagaagc caggagcctc tcagaatgag gggaaaacaa gtgataagaa agttgttcag
+     3181 actttttcac agaaaacaaa aaaggcacct ttgaatttca attcagaaaa gatgagcaga
+     3241 agttttcgat cttggaaacg tagaaagcat ctaaagcgat ctagggacag cagccccctg
+     3301 aaagactctg gagcgtgtag aatccattta caaggacaga ctctgtctaa tcctagtctt
+     3361 tgtgaagacc cgtttacctt agatgagaag aaaacggaat ttagaaattc agggccattt
+     3421 gctaaaaatg tatctttgag tggtaaggaa aaagataata aaacatcatt cccattacaa
+     3481 ataaagcaaa attgttcatg gaacataaca ctaactaatg ataattttgt ggagcatatt
+     3541 gtcacaggat ctcagagtaa aaatgtgact tgtcaggcca ctagtgtggt tagtgaaaag
+     3601 ggcagaggag tagctgttga ggcagaaaaa ataaatgaag tgctgataca aaatggttca
+     3661 aaaaaccaga atgtttatat gaaacaccat gacatccatc caattaacca gtacctgcga
+     3721 aagcaatctc atgaacagac aagcactatt accaaacaga aaaatataat agagagacaa
+     3781 atgccctgtg aagcagtcag tagttacata aatagagact caaatgttac tatcaattgt
+     3841 gaaaggataa agcttaatac agaggaaaat aaaccaagtc attttcaggc attaggagat
+     3901 gatataagca gaactgtgat acccagtgaa gtacttccat cagctggagc atttagcaaa
+     3961 tcagaaggcc agcatgagaa ttttctaaat atttctagac tacaagaaaa aacaggtact
+     4021 tatacaacaa acaaaactaa aaataatcat gtttctgact taggtttagt cctctgtgat
+     4081 tttgaagata gtttctatct ggatactcag tcagagaaaa taatacaaca gatggcaact
+     4141 gaaaatgcca aactaggagc aaaggacacc aacctggcag cagggataat gcagaagagc
+     4201 ttagtccaac agaactcaat gaactctttt cagaaggagt gtcacattcc ttttcctgct
+     4261 gaacagcacc ctctaggagc gactaagata gatcatttgg accttaagac tgtaggtact
+     4321 atgaaacaaa gcagtgattc acatggggtt gatatcctga ctccagaaag cccgattttc
+     4381 cattctccaa tactattgga ggaaaatggt ctttttttaa aaaagaatga agtttctgtt
+     4441 actgattcac aattaaatag ttttcttcaa ggttatcaaa cacaagaaac tgtgaaacca
+     4501 gttatacttc tgattcctca aaagagaact cccactggtg tagaaggaga atgtcttcca
+     4561 gttcctgaaa caagtttgaa tatgagtgat agtttactat ttgatagctt cagtgatgac
+     4621 tatctagtaa aagaacaatt acctgatatg caaatgaaag aaccccttcc ttcagaagta
+     4681 acatcaaacc attttagtga ttctctgtgt ctacaagaag acctaattaa aaaatcaaat
+     4741 gtaaatgaga atcaagatac ccaccagcag ttgacttgtt ccaatgatga atctattata
+     4801 ttttcagaaa tggattctgt tcagatggtt gaagctttgg acaatgtgga tatatttcct
+     4861 gtccaagaga agaatcatac tgtagtatct cctagagcat tagaactaag tgatccagta
+     4921 cttgatgagc accaccaagg tgatcaagat ggaggagatc aagatgaaag ggctgaaaaa
+     4981 tcaaaattaa ctgggaccag gcaaaatcat tcattcatat ggtcaggggc atcatttgat
+     5041 ctaagtccag gactgcaaag gattttagat aaagtatcca gtcctctaga aaatgaaaag
+     5101 ctaaaatcaa tgactataaa cttttccagt ttgaatagaa aaaatacaga gttaaatgaa
+     5161 gaacaagaag ttatttcaaa cttggagaca aaacaagtgc agggaatttc attttcttct
+     5221 aataatgaag taaaaagcaa gattgagatg ctagaaaaca atgccaatca tgatgaaacc
+     5281 tcatccctct tacctcgtaa agaaagtaat atagttgatg ataatggtct cattcctcct
+     5341 acacccattc caacatctgc ttctaagctg acatttccag ggattcttga aacacctgta
+     5401 aacccttgga aaactaataa tgttttacaa cctggtgaaa gttatttatt tggctcacct
+     5461 tcagatatta aaaaccacga tttaagtcca gggagtagaa atgggttcaa agacaacagc
+     5521 cctattagtg acacaagctt ttcacttcag ttatcacagg atggattaca gttaactcca
+     5581 gcctcaagca gttcagaaag tttgtccata attgatgtag caagtgacca aaatcttttc
+     5641 caaacattca ttaaggagtg gcggtgcaaa aagcgatttt ccatctcact ggcttgtgaa
+     5701 aagattagaa gtttgacatc ttctaaaact gctactattg gcagtaggtt taagcaagct
+     5761 agctcacctc aggaaattcc tattagagat gatggatttc ccattaaagg ttgtgatgac
+     5821 accttggtgg ttggactggc agtatgctgg ggtggaaggg atgcctatta tttttcactg
+     5881 cagaaggaac aaaagcattc tgaaattagt gccagtttgg ttccaccttc tttagatcca
+     5941 agcctgactt tgaaagacag gatgtggtac cttcaatctt gcttgcgaaa ggaatctgat
+     6001 aaagaatgtt ctgttgtcat ctatgacttc atccagagct ataaaattct tcttctttct
+     6061 tgtggcatct ccttggagca aagttatgaa gatcctaagg tggcatgctg gttactagat
+     6121 ccagattctc aggagccgac tcttcatagc atagttacca gttttcttcc tcatgagctt
+     6181 ccactcctag aagggatgga gaccagccaa gggattcaaa gcctggggct aaatgctggc
+     6241 agtgagcatt ctgggcgata cagagcatct gtggagtcca ttctcatctt caactctatg
+     6301 aatcagctca actctttgtt gcagaaggaa aaccttcaag atgttttccg taaggtggaa
+     6361 atgccctctc agtactgctt ggccttgcta gaactaaatg gaattggctt tagtactgca
+     6421 gaatgtgaaa gtcagaaaca tataatgcaa gccaagctgg atgcaattga gacccaggcc
+     6481 tatcaactag ctggccacag tttttctttc accagttcag atgacatcgc tgaggtttta
+     6541 tttttggaat tgaagttgcc cccaaataga gagatgaaaa accaaggcag caagaaaact
+     6601 ctgggttcta ccagaagagg gattgacaat ggacgcaagc taaggctggg aagacagttc
+     6661 agcactagta aggacgtttt aaataaatta aaggcattac atcctttacc aggcttgata
+     6721 ttagaatgga gaagaatcac taatgctatt accaaagtgg tctttcccct tcagcgggaa
+     6781 aagtgtctta atccttttct tggaatggaa agaatctatc ctgtatcaca gtcgcacact
+     6841 gctacaggac gaataacctt tacagaacca aatattcaga atgtgccaag agattttgaa
+     6901 atcaaaatgc caacactagt aggagaaagc ccaccttctc aagctgtagg caaaggccta
+     6961 cttcccatgg gcagaggaaa atataagaag ggtttcagcg tgaatcctag atgccaggca
+     7021 cagatggagg agagagctgc agacagagga atgccatttt caattagcat gcgacatgcc
+     7081 tttgtgcctt tcccaggtgg ttcaatactg gctgctgact actctcagct tgaactgagg
+     7141 atcttggctc atttatccca tgatcgtcgt ctcattcaag tgttaaacac tggagctgat
+     7201 gttttcagga gcattgcagc agagtggaag atgattgagc cagagtctgt tggggatgat
+     7261 ctgaggcagc aggcaaaaca gatttgctat gggatcattt atggaatggg agctaaatct
+     7321 ttgggagagc agatgggcat taaagaaaat gatgctgcat gctatattga ctccttcaaa
+     7381 tccagataca cagggattaa tcaattcatg acagagacag tgaagaattg taaaagagac
+     7441 ggatttgttc agaccatttt gggaaggcgt agatatttgc caggaatcaa agacaacaac
+     7501 ccttatcgta aagctcacgc tgagcgtcaa gctatcaaca caatagtcca aggatcagca
+     7561 gctgatattg tcaaaatagc cacagttaac attcagaagc aattagagac cttccactca
+     7621 accttcaaat cccatggtca tcgagagggt atgctccaaa gtgaccaaac aggattgtca
+     7681 cgaaagagaa aactgcaagg gatgttctgc ccaatcagag gaggcttctt catccttcaa
+     7741 ctccatgatg aactcctata tgaagtggca gaagaagatg ttgttcaggt agctcagatt
+     7801 gtcaagaatg aaatggaaag tgctgtaaaa ctgtctgtga aattgaaagt gaaagtgaaa
+     7861 ataggcgcca gctggggaga gctaaaggac tttgatgtgt aactgtgctg ttgatgaagt
+     7921 cctcccaggg aagcctgtgc agatgcagtc acctggaaag aacagagatt accctttcac
+     7981 ctacctcagc aaaacaaact ttcaagtctt gatagactta gcctagtaat tttatagtga
+     8041 gagtttcaaa ctatatatca gtgtctatag catcaaaaac ttctgggggc gtgggggaag
+     8101 tagaatacca agtataatag ttacattcac tttcaaagag catctatgaa tttgcctttt
+     8161 gtaacttact gtggctttaa acatattcag aacagatgct tgaaatatgc acttagcact
+     8221 ttggttccac atctgtctgg gtaaaccatg aagaaaatga agctgctgcc tcaatcgacc
+     8281 cagacagcag ccataggcag ataaagattt ggtttcaccc tggtggtggt aggcatcgtg
+     8341 tgtgactttt tttcctctaa tatcaatttt acagtacgga aatagtattt taaaatagta
+     8401 ttggctaata aattatgaat tctataaagt agtaagactt ggtatggttg gagtgtagga
+     8461 atgaatattc atgaaatgtt tcttattgct tttccttccc taattcatac aatgaatgta
+     8521 tttggaatac ttacatatta taaaataaac tatacctctt caagaggtat cctgttctgt
+     8581 aagatcagat gtttttattg caggtcaata taatactgcc agagacagaa aataccccct
+     8641 tatcagtccc ttagtgcctc tttctgtttg tggcatggtg agaaaaccca tgctgaaaag
+     8701 attgtacttt gtgatcccaa tcagagggat ggagctaatc tttttgctgt tgaaataaaa
+     8761 tgaatttatg agaaacttta aaaaaaa
+//
+
