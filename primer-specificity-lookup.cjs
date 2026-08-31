@@ -8,13 +8,17 @@ function normalizePrimerSequence(sequence) {
   return String(sequence || "").toUpperCase().replace(/[^ACGT]/g, "");
 }
 
+// Returns { clean } or { error }. Bad caller input must surface as an { ok: false }
+// result so the API handlers answer 400, matching brunello-lookup.cjs and
+// cas-database-lookup.cjs. Throwing is reserved for upstream/network failures, which
+// the handlers correctly report as 500.
 function validatePrimerSequence(sequence, label) {
   const clean = normalizePrimerSequence(sequence);
-  if (!clean) throw new Error(`${label} primer sequence is required.`);
+  if (!clean) return { error: `${label} primer sequence is required.` };
   if (clean.length < MIN_PRIMER_LENGTH || clean.length > MAX_PRIMER_LENGTH) {
-    throw new Error(`${label} primer must be between ${MIN_PRIMER_LENGTH} and ${MAX_PRIMER_LENGTH} nt for the remote specificity check.`);
+    return { error: `${label} primer must be between ${MIN_PRIMER_LENGTH} and ${MAX_PRIMER_LENGTH} nt for the remote specificity check.` };
   }
-  return clean;
+  return { clean };
 }
 
 function buildLocusKey(accession, hitFrom, hitTo) {
@@ -261,8 +265,12 @@ async function lookupPrimerSpecificity({ forwardPrimer, reversePrimer, genome = 
     return { ok: false, error: "Only hg38 remote specificity is currently enabled." };
   }
 
-  const forwardSequence = validatePrimerSequence(forwardPrimer, "Forward");
-  const reverseSequence = validatePrimerSequence(reversePrimer, "Reverse");
+  const forward = validatePrimerSequence(forwardPrimer, "Forward");
+  if (forward.error) return { ok: false, error: forward.error };
+  const reverse = validatePrimerSequence(reversePrimer, "Reverse");
+  if (reverse.error) return { ok: false, error: reverse.error };
+  const forwardSequence = forward.clean;
+  const reverseSequence = reverse.clean;
 
   const [forwardResult, reverseResult] = await Promise.all([
     runBlastSpecificityForPrimer(forwardSequence),
