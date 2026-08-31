@@ -497,6 +497,48 @@ test("co-delivery reports the deletion product two cut sites can create", () => 
   assert.equal(apoeDesign({}).dualCutDeletionRisk, undefined);
 });
 
+test("co-delivery guide selection searches for a strongly blockable pair", () => {
+  const result = apoeDesign({ coDeliveryBlocking: true });
+  const selection = result.coDeliverySelection;
+  assert.ok(selection, "co-delivery mode must report how guides were selected");
+  // Proximity-only selection never looked at blockability at all.
+  assert.ok(selection.searched >= 2, "should have searched more than the chosen pair");
+  assert.equal(typeof selection.allStronglyBlockable, "boolean");
+});
+
+test("co-delivery says so when a single guide would be better protected than any pair", () => {
+  // Co-delivery is a choice, not a free upgrade. At sites where no pair can be strongly
+  // blocked but one guide can, handing over the weaker two-guide design silently would be
+  // the wrong answer.
+  const result = apoeDesign({ coDeliveryBlocking: true });
+  assert.equal(result.coDeliverySafe, false);
+  const alternative = result.coDeliverySelection.singleGuideAlternative;
+  assert.ok(alternative, "expected a single-guide alternative to be identified");
+  assert.match(alternative.spacer, /^[ACGT]{20}$/);
+  // The advice must name the guide, not just gesture at the idea.
+  assert.ok(
+    result.guideDonorInstruction.includes(alternative.spacer),
+    "instruction does not name the safer single guide",
+  );
+  assert.match(result.guideDonorInstruction, /safer at this site than co-delivering two/i);
+});
+
+test("internal-tag co-delivery also blocks every offered guide", () => {
+  const gb = readFixture("synthetic-tagging.gb");
+  const opts = { deliveryMethod: "rnp", expectedGene: "TAGME" };
+  const single = runDesign("it", gb, "R100", "alphaBtx", 400, opts);
+  const co = runDesign("it", gb, "R100", "alphaBtx", 400, { ...opts, coDeliveryBlocking: true });
+
+  const tiers = (result) => result.os.map((donor) => donor.guideProtection.map((entry) => entry.tier));
+  // Default leaves the other guide's target untouched in at least one donor.
+  assert.ok(tiers(single).flat().includes("none"), "fixture expected to show an unprotected guide by default");
+  // Co-delivery must not leave any offered guide fully intact in any donor.
+  tiers(co).flat().forEach((tier) => assert.notEqual(tier, "none"));
+  // And the tag insert must still be correct.
+  assert.equal(co.insertValidation.matchesPreset, true);
+  assert.equal(co.insertValidation.framePreserved, true);
+});
+
 test("an insert that does not match its preset blocks procurement", () => {
   // Now that internal-tag inserts are validated in the right orientation, no fixture
   // produces a mismatched insert - so this gate needs asserting directly, or removing it

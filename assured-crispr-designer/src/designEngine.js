@@ -4,6 +4,7 @@ import {
   describeKoGenomicContextFromModel,
   extractCodingDonorWindowFromModel,
   findKoDesignTargetFromModel,
+  findSpCas9Guides,
   genomicPosToAa,
   getFeatureCount,
   getCdsFromModel,
@@ -1964,6 +1965,82 @@ function selectKoGuidePair(guides, maxSpacing = 140) {
   return candidatePairs[0] || null;
 }
 
+/**
+ * Guide selection for co-delivery.
+ *
+ * selectNearbyGuidesForModel picks the closest guide and one distinct partner, judged only
+ * on proximity and strand. That is the right objective for a single matched guide/donor
+ * pair, and the wrong one when both guides go into the same well: there, the pair is only
+ * usable if BOTH targets can be silently destroyed, and the closest pair frequently cannot
+ * be. This searches the whole candidate set in the window and prefers pairs where each
+ * guide admits a strong (PAM-destroying) synonymous change, falling back to proximity when
+ * no such pair exists.
+ */
+function selectCoDeliveryGuidesWithFallback(model, targetPos, reservedPositions, silentOptions = {}) {
+  const minimumAlternativeCutOffset = 10;
+  for (const window of [10, 20, 30]) {
+    const candidates = findSpCas9Guides(model, reverseComplement, targetPos, window)
+      .slice()
+      .sort((left, right) => Math.abs(left.d) - Math.abs(right.d));
+    if (!candidates.length) continue;
+
+    const scored = candidates.map((guide) => {
+      const silent = findSilent(model, guide, new Set(reservedPositions), silentOptions);
+      return { guide, stronglyBlockable: silent?.blockingTier === "strong" };
+    });
+    const tier = window === 10 ? "preferred" : window === 20 ? "fallback" : "distant fallback";
+
+    let best = null;
+    for (let i = 0; i < scored.length; i += 1) {
+      for (let j = i + 1; j < scored.length; j += 1) {
+        const left = scored[i];
+        const right = scored[j];
+        if (Math.abs(left.guide.cut - right.guide.cut) < minimumAlternativeCutOffset) continue;
+        // Both strongly blockable dominates everything else; opposite strands are preferred
+        // as before; proximity breaks remaining ties.
+        const strongCount = (left.stronglyBlockable ? 1 : 0) + (right.stronglyBlockable ? 1 : 0);
+        const oppositeStrand = left.guide.str !== right.guide.str ? 1 : 0;
+        const proximity = Math.abs(left.guide.d) + Math.abs(right.guide.d);
+        const score = strongCount * 1000 + oppositeStrand * 10 - proximity / 1000;
+        if (!best || score > best.score) {
+          best = { score, strongCount, guides: [left.guide, right.guide] };
+        }
+      }
+    }
+    const bestSingle = scored.find((entry) => entry.stronglyBlockable) || null;
+    if (best) {
+      return {
+        guides: best.guides,
+        window,
+        tier,
+        coDeliverySelection: {
+          searched: candidates.length,
+          stronglyBlockableSelected: best.strongCount,
+          allStronglyBlockable: best.strongCount === 2,
+          // Co-delivery is a choice, not a free upgrade: at some sites the best two-guide
+          // pair is less well protected than a single guide would be. Say so rather than
+          // silently handing over the weaker design.
+          singleGuideAlternative: best.strongCount < 2 && bestSingle
+            ? { spacer: bestSingle.guide.sp, pam: bestSingle.guide.pam, strand: bestSingle.guide.str }
+            : null,
+        },
+      };
+    }
+    return {
+      guides: [scored[0].guide],
+      window,
+      tier,
+      coDeliverySelection: {
+        searched: candidates.length,
+        stronglyBlockableSelected: scored[0].stronglyBlockable ? 1 : 0,
+        allStronglyBlockable: !!scored[0].stronglyBlockable,
+        note: "Only one guide with a distinct cut site was available in this window.",
+      },
+    };
+  }
+  return null;
+}
+
 function selectInsertGuidesWithFallback(model, targetPos) {
   const windows = [10, 20, 30];
   for (const window of windows) {
@@ -2165,13 +2242,19 @@ function mkInternalOdn(model, guide, insertionPos, insertSequence, silentMutatio
   const wtOrder = guide.str === "+" ? reverseComplement(wtWindow) : wtWindow;
   const orderedInsertStart = guide.str === "+" ? donorSense.length - (insertIndex + insertSequence.length) : insertIndex;
   const orderedInsertEnd = orderedInsertStart + insertSequence.length;
-  const silentIndexes = silentMutations
-    .map((mutation) => {
-      let donorIndex = mutation.gp - donorStart;
-      if (mutation.gp >= insertionPos) donorIndex += insertSequence.length;
-      return guide.str === "+" ? donorSense.length - 1 - donorIndex : donorIndex;
-    })
-    .filter((index) => Number.isFinite(index))
+  const toSilentDonorIndex = (mutation) => {
+    let donorIndex = mutation.gp - donorStart;
+    if (mutation.gp >= insertionPos) donorIndex += insertSequence.length;
+    return guide.str === "+" ? donorSense.length - 1 - donorIndex : donorIndex;
+  };
+  // silentIndexes is sorted for rendering, which destroys the correspondence with
+  // silentMutations. Callers annotating several blocking changes need the pairing, so it is
+  // returned separately rather than reconstructed by position in the array.
+  const silentPlacements = silentMutations
+    .map((mutation) => ({ gp: mutation.gp, index: toSilentDonorIndex(mutation) }))
+    .filter((entry) => Number.isFinite(entry.index));
+  const silentIndexes = silentPlacements
+    .map((entry) => entry.index)
     .sort((left, right) => left - right);
   const sitePositions = guide.str === "+"
     ? Array.from({ length: 20 }, (_, index) => guide.ps + index)
@@ -2205,6 +2288,7 @@ function mkInternalOdn(model, guide, insertionPos, insertSequence, silentMutatio
     senseInsertStart: insertIndex,
     senseInsertEnd: insertIndex + insertSequence.length,
     silentIndexes,
+    silentPlacements,
     guideSiteIndexes: sitePositions.map((position) => toOrderedIndex(position)).filter((index) => index >= 0),
     guidePamIndexes: pamPositions.map((position) => toOrderedIndex(position)).filter((index) => index >= 0),
     silentMutations,
@@ -2402,7 +2486,12 @@ export function designPM(gb, mutationString, options = {}) {
   const mutationBases = bestChanges.map((change) => change.m);
   const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, codonInfo.g, { maxDistance: 30, desiredCount: 2 }) : null;
   if (customGuideSelection?.err) return { err: customGuideSelection.err };
-  const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, codonInfo.g);
+  // Guide choice has to change with the delivery plan, not just the donor: the closest pair
+  // is often not the pair that can both be silently destroyed.
+  const guideSelection = customGuideSelection
+    || (options.coDeliveryBlocking
+      ? selectCoDeliveryGuidesWithFallback(gb, codonInfo.g, codonInfo.genomicPositions)
+      : selectInsertGuidesWithFallback(gb, codonInfo.g));
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the mutation site." };
   const { guides: rawSelectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
   const minimumAlternativeCutOffset = 10;
@@ -2471,10 +2560,23 @@ export function designPM(gb, mutationString, options = {}) {
   }));
   result.coDeliverySafe = result.os.every((donor) => donor.guideProtection.every((entry) => entry.tier === "strong"));
   result.coDeliveryBlockingRequested = coDeliveryBlocking;
+  if (guideSelection.coDeliverySelection) result.coDeliverySelection = guideSelection.coDeliverySelection;
+  // (guideDonorInstruction below reads result.coDeliverySelection, so it must be set first.)
+  // "unknown" means the other guide's target lies outside this donor's window entirely, so
+  // no amount of extra blocking changes can cover it - that needs different guides.
+  if (coDeliveryBlocking && result.os.some((donor) => donor.guideProtection.some((entry) => entry.tier === "unknown"))) {
+    result.coDeliveryOutOfWindow = true;
+  }
   result.guideDonorInstruction = result.coDeliverySafe
     ? "Each ssODN strongly disrupts every offered guide target, so the guides and donors may be co-delivered together."
     : coDeliveryBlocking
-      ? "Co-delivery blocking was requested but could not be achieved: at least one guide is still not strongly disrupted in every donor. Co-delivering these reagents risks the surviving guide re-cutting a correctly repaired allele. Use one matched guide/ssODN pair, or supply guides whose targets can both be silently disrupted."
+      ? [
+        "Co-delivery blocking was requested but could not be achieved: at least one guide is still not strongly disrupted in every donor.",
+        "Co-delivering these reagents risks the surviving guide re-cutting a correctly repaired allele.",
+        result.coDeliverySelection?.singleGuideAlternative
+          ? `A single-guide design using ${result.coDeliverySelection.singleGuideAlternative.spacer} (${result.coDeliverySelection.singleGuideAlternative.pam}, ${result.coDeliverySelection.singleGuideAlternative.strand} strand) can be strongly protected, so one matched guide/ssODN pair is safer at this site than co-delivering two.`
+          : "No guide at this site admits a synonymous PAM-destroying change, so neither one guide nor two can be strongly protected here.",
+      ].join(" ")
       : "Use one guide with its explicitly matched ssODN only. Do not co-deliver or pool the alternative guides unless every guide is independently shown as strongly blocked in that donor.";
 
   // Two guides cutting the same allele can delete the fragment between them by NHEJ. This
@@ -2528,10 +2630,24 @@ export function designIT(gb, siteString, tag, options = {}) {
   const blockedPositions = new Set();
   const donors = [];
   const allBlockingMutations = [];
-  guides.slice(0, 2).forEach((guide, index) => {
+  // See designPM: under co-transfection a donor that disrupts only its matched guide leaves
+  // the other guide free to re-cut the allele it just repaired. Note that for internal tags
+  // the insert itself strongly disrupts any guide whose protospacer it splits, so this mode
+  // often has less work to do here than for a point mutation.
+  const coDeliveryBlocking = !!options.coDeliveryBlocking;
+  const selectedItGuides = guides.slice(0, 2);
+  const blockingByGuide = selectedItGuides.map((guide, index) => {
     const blocking = findSilent(gb, guide, blockedPositions, { allowNonCoding: true });
     if (blocking) blockedPositions.add(blocking.gp);
-    const donor = mkInternalOdn(gb, guide, insertionPos, preset.seq, blocking ? [{ ...blocking, gi: index + 1 }] : []);
+    return blocking ? { ...blocking, gi: index + 1 } : null;
+  });
+
+  selectedItGuides.forEach((guide, index) => {
+    const blocking = blockingByGuide[index];
+    const donorBlocking = coDeliveryBlocking
+      ? blockingByGuide.filter(Boolean)
+      : (blocking ? [blocking] : []);
+    const donor = mkInternalOdn(gb, guide, insertionPos, preset.seq, donorBlocking);
     const guideName = makeGuideName(gb.gene, "it", index, `AFTER_${wtAA || ""}${aaNumber}`, tag);
     if (donor) {
       const annotationBase = [
@@ -2539,7 +2655,8 @@ export function designIT(gb, siteString, tag, options = {}) {
         { label: tag, color: DONOR_COLORS.TAG, start: donor.insertStart, end: donor.insertEnd, priority: 1, badgeLabel: tag, title: `${tag} insert` },
         { label: "3' arm", color: DONOR_COLORS.HA3, start: donor.insertEnd, end: donor.od.length, priority: 1, badgeLabel: "3' arm" },
       ];
-      const blockingAnnotations = buildSilentAnnotations(blocking ? [{ ...blocking, gi: index + 1 }] : [], (mutation) => donor.silentIndexes[0] ?? -1);
+      const silentPlacement = new Map((donor.silentPlacements || []).map((entry) => [entry.gp, entry.index]));
+      const blockingAnnotations = buildSilentAnnotations(donorBlocking, (mutation) => silentPlacement.get(mutation.gp) ?? -1);
       const guideAnnotations = buildGuideAnnotationsFromIndexes(guide, index + 1, donor.guideSiteIndexes, donor.guidePamIndexes);
       donors.push({
         ...donor,
@@ -2550,7 +2667,7 @@ export function designIT(gb, siteString, tag, options = {}) {
         donorAnnotations: annotationBase.concat(guideAnnotations, blockingAnnotations),
       });
     }
-    if (blocking) allBlockingMutations.push({ ...blocking, gi: index + 1 });
+    if (blocking) allBlockingMutations.push(blocking);
   });
 
   donors.forEach((donor) => {
