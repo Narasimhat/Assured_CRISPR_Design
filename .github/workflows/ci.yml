@@ -1,0 +1,67 @@
+# Runs the design-engine safety suite and a production build on every push and PR.
+#
+# test/review-fixes.test.js encodes the findings from audit/2026_GE_design_audit.md
+# (strict PAM classification, final donor translation, cross-guide protection,
+# primer thermodynamics, outside-homology-arm margins). Nothing enforced it before
+# this workflow existed, so a regression that re-introduced an audited defect could
+# reach the deployed app unnoticed.
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Design engine safety suite
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: assured-crispr-designer/package-lock.json
+
+      - name: Install
+        working-directory: assured-crispr-designer
+        run: npm ci
+
+      - name: Run safety suite
+        working-directory: assured-crispr-designer
+        run: npm test
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: assured-crispr-designer/package-lock.json
+
+      - name: Install
+        working-directory: assured-crispr-designer
+        run: npm ci
+
+      - name: Build
+        working-directory: assured-crispr-designer
+        run: npm run build

@@ -30,13 +30,21 @@ jobs:
           cache: npm
           cache-dependency-path: assured-crispr-designer/package-lock.json
 
-      - name: Install and build
+      - name: Install
+        working-directory: assured-crispr-designer
+        run: npm ci
+
+      # Gate the deploy on the safety suite: never publish an app whose design-engine
+      # checks are failing. See .github/workflows/ci.yml for the rationale.
+      - name: Run safety suite
+        working-directory: assured-crispr-designer
+        run: npm test
+
+      - name: Build
+        working-directory: assured-crispr-designer
         env:
           GITHUB_PAGES: "1"
-        run: |
-          cd assured-crispr-designer
-          npm ci
-          npm run build
+        run: npm run build
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
