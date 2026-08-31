@@ -8,7 +8,8 @@
     "build": "vite build",
     "build:gh-pages": "GITHUB_PAGES=1 vite build",
     "preview": "vite preview",
-    "design": "node scripts/run_design.mjs"
+    "design": "node scripts/run_design.mjs",
+    "test": "node --test"
   },
   "dependencies": {
     "react": "^18.3.1",

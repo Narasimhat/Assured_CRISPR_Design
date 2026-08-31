@@ -289,10 +289,11 @@ export function findSpCas9Guides(model, reverseComplement, target, range = 50) {
 export function selectNearbyGuidesForModel(model, reverseComplement, targetPos, window = 10) {
   const guidesInWindow = findSpCas9Guides(model, reverseComplement, targetPos, window).sort((left, right) => Math.abs(left.d) - Math.abs(right.d));
   if (!guidesInWindow.length) return [];
-  const plusGuide = guidesInWindow.find((guide) => guide.str === "+");
-  const minusGuide = guidesInWindow.find((guide) => guide.str === "-");
-  if (plusGuide && minusGuide) return [plusGuide, minusGuide];
-  return guidesInWindow.slice(0, Math.min(2, guidesInWindow.length));
+  const minimumAlternativeCutOffset = 10;
+  const firstGuide = guidesInWindow[0];
+  const distinctCandidates = guidesInWindow.filter((guide) => guide !== firstGuide && Math.abs(guide.cut - firstGuide.cut) >= minimumAlternativeCutOffset);
+  const secondGuide = distinctCandidates.find((guide) => guide.str !== firstGuide.str) || distinctCandidates[0] || null;
+  return secondGuide ? [firstGuide, secondGuide] : [firstGuide];
 }
 
 export function describeKoGenomicContextFromModel(model, cut) {

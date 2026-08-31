@@ -46,7 +46,7 @@ const FULL_CONFIG = {
   projectTypes: FULL_PROJECT_TYPES,
   defaultTag: "dTAG-V5",
   unsupportedMessage: "",
-  footerLabel: "Hosted build • 31 Mar 2026",
+  footerLabel: "Hosted build • 31 Aug 2026",
   batchTypeHelp: "pm, ko, it, ct, or nt",
 };
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, summarizePrimerPairQuality } from "./designEngine";
+import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { EDITION_CONFIG, getEditionUnsupportedIssue, isProjectTypeEnabled, IS_COMMUNITY_EDITION } from "./editionConfig";
@@ -491,6 +491,7 @@ function buildRowMeta(row, result = null) {
     cellLine: row?.cellLine || "",
     editSummary: row?.editSummary || row?.label || "",
     notes: row?.notes || "",
+    deliveryMethod: row?.deliveryMethod || result?.deliveryMethod || "unknown",
     projectType: row?.projectType || result?.type || "pm",
     referenceSource: row?.referenceSource || "genbank",
   };
@@ -526,12 +527,17 @@ function buildDesignSummary(result) {
     if (result.gs?.length >= 2 && Number.isFinite(result.gs[0]?.d) && Number.isFinite(result.gs[1]?.d)) {
       lines.push(`Pair spacing: ${Math.abs(result.gs[1].d - result.gs[0].d)} bp`);
     }
+    if (result.deletionOutcome) {
+      lines.push(`Expected deletion: ${result.deletionOutcome.deletionSize} bp (mod 3 = ${result.deletionOutcome.deletionMod3}; ${result.deletionOutcome.frameshiftPredicted ? "frameshift predicted" : "in-frame"})`);
+      if (result.deletionOutcome.spliceDonorRemoved) lines.push(`Splice donor removed: exon skipping is plausible; exon length ${result.deletionOutcome.exonLength} bp (mod 3 = ${result.deletionOutcome.exonSkippingMod3}).`);
+    }
     if (result.strat) lines.push(`Strategy: ${result.strat}`);
     return lines.join("\n");
   }
   if (result.type === "it") lines.push(`Insert after ${result.wA}${result.an}, before ${result.nextAA}${result.an + 1}`);
   if (result.type === "ct" || result.type === "nt") lines.push(`Donor length: ${result.dl} bp`);
   if (result.type === "it") lines.push(`Insert length: ${result.il} bp`);
+  if (result.type === "pm" && result.guideDonorInstruction) lines.push(`Guide/donor use: ${result.guideDonorInstruction}`);
   lines.push("");
   lines.push("gRNAs:");
   result.gs.forEach((guide) => lines.push(`- ${guide.n}: ${guide.sp} ${guide.pm} | ${guide.str} strand | GC ${guide.gc}%`));
@@ -560,6 +566,8 @@ function buildGeneInfoRows(meta, result, fileName) {
     ["Design class", getProjectTypeMeta(meta.projectType).label],
     ["Target", buildDisplayedEditLabel(meta, result)],
     ["Cell line", meta.cellLine || "n/a"],
+    ["Delivery", meta.deliveryMethod === "u6" ? "U6 / Pol III expression" : meta.deliveryMethod === "rnp" ? "Synthetic guide / Cas RNP" : "not specified"],
+    ["Transcript", result?.gb?.transcriptId || "not recorded"],
     ["Protein / CDS", result.prot ? `${result.prot} aa` : "n/a"],
     ["Reference", referenceLabel],
   ];
@@ -1176,6 +1184,7 @@ function createBatchRow(index) {
     editSummary: "",
     projectFolderName: "",
     notes: "",
+    deliveryMethod: "unknown",
     projectType: "pm",
     referenceSource: "genbank",
     requestedReporter: "",
@@ -1312,12 +1321,15 @@ function buildBatchOrderRows(entries) {
     const { row, result, slot } = entry;
     const designType = getProjectTypeMeta(result.type).label;
     const designLabel = formatBatchDesignLabel({ ...row, slot }, result);
+    const procurementReadiness = summarizeProcurementReadiness(result);
     const common = {
       slot,
       designLabel,
       gene: result.gene,
       designType,
       referenceFile: row.referenceSource === "raw" ? "Raw DNA + CDS coordinates" : (row.fileName || "Uploaded GenBank"),
+      reviewStatus: procurementReadiness.status,
+      reviewNotes: procurementReadiness.blockers.concat(procurementReadiness.warnings).join(" "),
     };
     const guides = (result.gs || []).map((guide) => ({
       ...common,
@@ -1399,7 +1411,7 @@ function escapeDelimitedValue(value) {
 }
 
 function buildBatchOrderDelimited(rows, delimiter = ",") {
-  const headers = ["Slot", "Design", "Gene", "Design Type", "Reference File", "Item Type", "Name", "Sequence To Order", "Spacer", "PAM", "Strand", "Length", "Linked Guide", "Recommended", "Notes"];
+  const headers = ["Slot", "Design", "Gene", "Design Type", "Reference File", "Review Status", "Review Notes", "Item Type", "Name", "Sequence To Order", "Spacer", "PAM", "Strand", "Length", "Linked Guide", "Recommended", "Notes"];
   const lines = [headers.join(delimiter)];
   rows.forEach((row) => {
     lines.push([
@@ -1408,6 +1420,8 @@ function buildBatchOrderDelimited(rows, delimiter = ",") {
       row.gene,
       row.designType,
       row.referenceFile,
+      row.reviewStatus,
+      row.reviewNotes,
       row.itemType,
       row.name,
       row.sequence,
@@ -1758,14 +1772,15 @@ function parseBatchDefinitionText(text) {
 }
 
 function buildIdtTemplateRows(orderRows, defaults) {
+  const exportableRows = orderRows.filter((row) => row.reviewStatus !== "blocked");
   return {
-    crispr: orderRows
+    crispr: exportableRows
       .filter((row) => row.itemType === "gRNA")
       .map((row) => ({ Name: row.name, Sequence: row.sequence, Scale: defaults.crisprScale })),
-    oligo: orderRows
+    oligo: exportableRows
       .filter((row) => row.itemType === "Primer")
       .map((row) => ({ Name: row.name, Sequence: row.sequence, Scale: defaults.oligoScale, Purification: defaults.oligoPurification })),
-    hdr: orderRows
+    hdr: exportableRows
       .filter((row) => row.itemType === "Donor")
       .map((row) => ({ Name: row.name, Sequence: row.sequence, Scale: defaults.hdrScale, Modification: defaults.hdrModification })),
   };
@@ -2117,18 +2132,32 @@ function buildReviewItems(meta, result, fileName) {
   const items = [];
 
   if (!fileName && result?.gb?.source !== "raw-sequence" && !result?.referenceOnly) items.push({ level: "warning", text: "Reference sequence filename is missing from the report. Keep the exact GenBank record with the final design package." });
+  if (!meta.irisId?.trim()) items.push({ level: "warning", text: "IRIS/internal project ID is missing. Assign it before release so the design can be joined to downstream clone-verification records." });
+  if (!meta.clientName?.trim()) items.push({ level: "warning", text: "Requesting group is missing from the provenance metadata." });
+  if (!result?.gb?.transcriptId && !result?.referenceOnly) items.push({ level: "warning", text: "Transcript identifier is not recorded. Terminal-tag designs must be checked against the intended transcript before ordering." });
+  else if (["ct", "nt"].includes(result.type)) items.push({ level: "check", text: `Confirm transcript ${result.gb.transcriptId} against MANE Select or document why another isoform is intended.` });
   if (!meta.notes.trim()) items.push({ level: "check", text: "Record transcript assumptions, exon numbering assumptions, and delivery method before final sign-off." });
+
+  (result.guideSequenceQc || []).forEach((assessment) => {
+    assessment.warnings.forEach((warning) => items.push({ level: "warning", text: `${assessment.guideName}: ${warning}` }));
+  });
 
   const outOfRangeGuides = (result.gs || []).filter((guide) => typeof guide.gc === "number" && (guide.gc < 30 || guide.gc > 80));
   if (outOfRangeGuides.length) items.push({ level: "warning", text: `Guide GC content is atypical for ${outOfRangeGuides.length} guide${outOfRangeGuides.length === 1 ? "" : "s"}; review activity and synthesis risk manually.` });
 
   if (result.type === "pm") {
+    const invalidDonors = (result.os || []).filter((donor) => !donor.proteinValidation?.valid);
+    if (invalidDonors.length) items.push({ level: "warning", text: `${invalidDonors.length} donor${invalidDonors.length === 1 ? "" : "s"} failed final translated-product validation and must not be ordered.` });
+    if (!result.coDeliverySafe && (result.gs || []).length > 1) items.push({ level: "warning", text: result.guideDonorInstruction || "Alternative guides are not jointly blocked in every donor. Use only the matched guide/ssODN pair and do not co-deliver alternatives." });
+    if (result.guideDistinctness?.removedRedundantGuideCount) items.push({ level: "check", text: `${result.guideDistinctness.removedRedundantGuideCount} near-duplicate guide option was removed because its cut was within ${result.guideDistinctness.minimumCutOffset} bp of a higher-ranked guide.` });
+    if (result.guideDistinctness?.customGuidesRequireReview) items.push({ level: "warning", text: `Custom guide alternatives cut less than ${result.guideDistinctness.minimumCutOffset} bp apart and are not independent options.` });
     if (!(result.ss || []).length) items.push({ level: "warning", text: "No silent guide-blocking mutation was introduced. Re-cut after HDR may remain possible." });
     if (typeof result.guideWindow === "number" && result.guideWindow > 10) items.push({ level: "warning", text: `No guide was available within 10 bp of the mutation site. This design is using the best available ${result.guideTier || "fallback"} guide set within ${result.guideWindow} bp.` });
     items.push({ level: "check", text: "Confirm the desired amino-acid change against the intended transcript and verify that the donor does not create unwanted amino-acid substitutions." });
   }
 
   if (result.type === "it") {
+    if (!result.coDeliverySafe && (result.gs || []).length > 1) items.push({ level: "warning", text: result.guideDonorInstruction || "Use only matched internal-guide/ssODN pairs; do not pool the alternative guides." });
     if (!(result.os || []).length) items.push({ level: "warning", text: "No guide-linked internal ssODN donor could be rendered. Review the insertion-site window and sequence bounds before ordering." });
     if (!(result.ss || []).length) items.push({ level: "warning", text: "No guide-blocking mutation was introduced in the internal ssODN donors. Re-cut after HDR may remain possible." });
     if ((result.os || []).length !== (result.gs || []).length) items.push({ level: "warning", text: "A donor was not generated for every selected guide. Review guide-linked donor coverage before ordering." });
@@ -2145,18 +2174,14 @@ function buildReviewItems(meta, result, fileName) {
     const guideCount = (result.gs || []).length;
     if (guideCount < 2) items.push({ level: "warning", text: "Knockout design has fewer than two guides. Deletion-based screening will be weaker than expected." });
     if (result.referenceOnly) items.push({ level: "warning", text: "This knockout was generated from gene-name reference guides only. Upload a GenBank file to calculate exact exon geometry, pair spacing, and validation primers on your target sequence." });
+    if (result.deletionOutcome?.spliceDonorRemoved) items.push({ level: "warning", text: `The predicted ${result.deletionOutcome.deletionSize} bp deletion removes the splice donor. Direct deletion is mod 3 = ${result.deletionOutcome.deletionMod3}; possible exon skipping is mod 3 = ${result.deletionOutcome.exonSkippingMod3}. Confirm transcript structure experimentally.` });
     items.push({ level: "check", text: "Validate the expected deletion by junction PCR and confirm frameshift or protein loss in established clones." });
   }
 
   if (result.type === "ct" || result.type === "nt") {
     const labels = new Set((result.donorAnnotations || []).map((annotation) => annotation.label));
-    const guideProtection = Array.isArray(result.guideProtection) ? result.guideProtection : [];
-    const unprotectedGuides = guideProtection.filter((entry) => !entry.protected);
-    if (guideProtection.length && unprotectedGuides.length) {
-      items.push({ level: "warning", text: `${unprotectedGuides.length} of ${guideProtection.length} tag-insertion guide${guideProtection.length === 1 ? "" : "s"} remain unblocked in the donor design. Re-cut of the edited allele may still be possible.` });
-    } else if (!guideProtection.length && !(result.ss || []).length) {
-      items.push({ level: "warning", text: "No guide-disrupting mutation was captured in the HDR donor arms. Re-cut of the edited allele is still possible." });
-    }
+    const blocking = summarizeGuideBlocking(result);
+    if (blocking.status !== "pass") items.push({ level: "warning", text: `Guide blocking is ${blocking.tier}, not strong for every selected guide. ${blocking.detail}` });
     if (result.type === "nt" && !labels.has("Start")) items.push({ level: "warning", text: "N-terminal donor annotation does not include a start codon block. Verify start codon replacement before ordering." });
     if (result.type === "ct" && !labels.has("Stop")) items.push({ level: "warning", text: "C-terminal donor annotation does not include a terminal stop codon block. Verify stop codon placement before ordering." });
     if (result.insertValidation && !result.insertValidation.matchesPreset) items.push({ level: "warning", text: "The designed HDR donor insert does not match the intended cassette preset. Review the insert sequence before ordering." });
@@ -2369,9 +2394,15 @@ function buildPmDonorHtml(donor) {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
+  const proteinValidation = donor.proteinValidation?.valid
+    ? `Pass: final donor encodes ${donor.proteinValidation.observedAa} at residue ${donor.proteinValidation.targetAaNumber} with no unintended coding changes.`
+    : `FAIL: ${(donor.proteinValidation?.errors || ["final translated-product validation unavailable"]).join("; ")}`;
+  const crossGuideSummary = (donor.guideProtection || []).map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join("<br/>");
   return `
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
+    <p style="font-size:12px;color:${donor.proteinValidation?.valid ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>Final donor protein assertion:</strong> ${proteinValidation}</p>
+    ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
     ${strands.map((strand) => buildPmStrandCardHtml(strand)).join("")}
     <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
@@ -2484,9 +2515,8 @@ function buildInsertValidationHtml(validation) {
 function buildKnockinQcChecks(result) {
   if (!result || !["it", "ct", "nt"].includes(result.type)) return [];
   const canonicalChecks = result.insertValidation?.canonicalChecks || [];
-  const anyGuideProtection = result.type === "it"
-    ? (result.ss || []).length > 0
-    : ((result.guideProtection || []).some((entry) => entry.protected) || (result.ss || []).length > 0);
+  const blocking = summarizeGuideBlocking(result);
+  const primerReadiness = summarizePrimerReadiness(result);
   const checks = [
     {
       label: "Insert matches preset",
@@ -2508,14 +2538,19 @@ function buildKnockinQcChecks(result) {
         : "No external canonical protein reference attached to this cassette.",
     },
     {
-      label: "Guide blocking present",
-      status: anyGuideProtection ? "pass" : "warn",
-      detail: anyGuideProtection ? "At least one selected guide is blocked by donor mutation or insertion geometry." : "No selected guide is clearly blocked by the donor.",
+      label: "Guide blocking strength",
+      status: blocking.status,
+      detail: blocking.detail,
     },
     {
-      label: "Primer strategy ready",
-      status: (result.ps || []).length >= 2 && result.amp ? "pass" : "warn",
-      detail: (result.ps || []).length >= 2 && result.amp ? `Validation primers are present (${result.amp}).` : "Validation primers or amplicon sizing are incomplete.",
+      label: "Primer thermodynamics",
+      status: primerReadiness.status,
+      detail: primerReadiness.detail,
+    },
+    {
+      label: "Primer genome specificity",
+      status: "na",
+      detail: "Genome-wide primer specificity is not automatic; run the specificity check before ordering.",
     },
   ];
   return checks;
@@ -2552,7 +2587,7 @@ function buildDesignReadinessChecks(result) {
   if (!result) return [];
   const referenceAvailable = Boolean(result.gb?.genomicSequence || result.gbRaw || result.gene);
   const guideCount = (result.gs || []).length;
-  const primerReady = (result.ps || []).length >= 2 && !!result.amp;
+  const primerReadiness = summarizePrimerReadiness(result);
   const checks = [
     {
       label: "Reference anchored",
@@ -2564,8 +2599,17 @@ function buildDesignReadinessChecks(result) {
           : "Reference sequence is missing.",
     },
   ];
+  const guideQc = result.guideSequenceQc || [];
+  if (guideQc.length) checks.push({
+    label: "Guide expression compatibility",
+    status: guideQc.every((entry) => entry.status === "pass") ? "pass" : "warn",
+    detail: guideQc.every((entry) => entry.status === "pass")
+      ? `Guide sequence checks pass for ${result.deliveryMethod === "rnp" ? "synthetic-guide RNP" : result.deliveryMethod === "u6" ? "U6/Pol III expression" : "the current delivery setting"}.`
+      : guideQc.flatMap((entry) => entry.warnings.map((warning) => `${entry.guideName}: ${warning}`)).join(" "),
+  });
 
   if (result.type === "pm") {
+    const donorProteinValid = (result.os || []).length > 0 && (result.os || []).every((donor) => donor.proteinValidation?.valid);
     checks.push(
       {
         label: "Requested edit validated",
@@ -2582,16 +2626,31 @@ function buildDesignReadinessChecks(result) {
           : "No usable guide was found near the mutation.",
       },
       {
-        label: "Guide blocking present",
-        status: (result.ss || []).length ? "pass" : "warn",
-        detail: (result.ss || []).length
-          ? "At least one silent guide-blocking change was added to the donor."
-          : "No silent guide-blocking change was captured.",
+        label: "Guide blocking strength",
+        status: summarizeGuideBlocking(result).status,
+        detail: summarizeGuideBlocking(result).detail,
       },
       {
-        label: "Primer strategy ready",
-        status: primerReady ? "pass" : "warn",
-        detail: primerReady ? `Centered validation primers are ready (${result.amp}).` : "Validation primers are incomplete.",
+        label: "Final donor protein",
+        status: donorProteinValid ? "pass" : "warn",
+        detail: donorProteinValid
+          ? `Every emitted donor translates to the intended ${result.wA}${result.an}${result.mA} product without additional amino-acid changes.`
+          : "One or more donors failed the final assembled-protein assertion.",
+      },
+      {
+        label: "Guide/donor pairing",
+        status: (result.gs || []).length <= 1 || result.coDeliverySafe ? "pass" : "warn",
+        detail: result.guideDonorInstruction || "Use each guide only with its matched donor.",
+      },
+      {
+        label: "Primer thermodynamics",
+        status: primerReadiness.status,
+        detail: primerReadiness.detail,
+      },
+      {
+        label: "Primer genome specificity",
+        status: "na",
+        detail: "Genome-wide primer specificity is not automatic; run the specificity check before ordering.",
       },
     );
     return checks;
@@ -2601,7 +2660,7 @@ function buildDesignReadinessChecks(result) {
     checks.push(
       {
         label: "Guide pair ready",
-        status: guideCount >= 2 ? "pass" : "warn",
+        status: guideCount >= 2 && !result.referenceOnly ? "pass" : "warn",
         detail: guideCount >= 2
           ? result.referenceOnly
             ? "Two reference knockout guides are selected. Sequence-backed spacing still needs GenBank."
@@ -2616,13 +2675,9 @@ function buildDesignReadinessChecks(result) {
           : "Cut spacing and exon context were calculated on the uploaded reference.",
       },
       {
-        label: "Primer strategy ready",
-        status: primerReady ? "pass" : result.referenceOnly ? "na" : "warn",
-        detail: primerReady
-          ? `${String(result.primerStrategy || "").includes("deletion-screen") ? "Deletion-junction" : "Validation"} primers are ready (${result.amp}).`
-          : result.referenceOnly
-            ? "Primer design is deferred until a GenBank reference is uploaded."
-            : "Validation primers are incomplete.",
+        label: "Primer thermodynamics",
+        status: result.referenceOnly ? "na" : primerReadiness.status,
+        detail: result.referenceOnly ? "Primer design is deferred until a GenBank reference is uploaded." : primerReadiness.detail,
       },
     );
     return checks;
@@ -2630,9 +2685,7 @@ function buildDesignReadinessChecks(result) {
 
   if (["it", "ct", "nt"].includes(result.type)) {
     const canonicalChecks = result.insertValidation?.canonicalChecks || [];
-    const anyGuideProtection = result.type === "it"
-      ? (result.ss || []).length > 0
-      : ((result.guideProtection || []).some((entry) => entry.protected) || (result.ss || []).length > 0);
+    const blocking = summarizeGuideBlocking(result);
     checks.push(
       {
         label: "Insert matches preset",
@@ -2652,14 +2705,24 @@ function buildDesignReadinessChecks(result) {
           : "No canonical reporter check attached to this construct.",
       },
       {
-        label: "Guide blocking present",
-        status: anyGuideProtection ? "pass" : "warn",
-        detail: anyGuideProtection ? "At least one selected guide is blocked by donor mutation or insertion geometry." : "No selected guide is clearly blocked by the donor.",
+        label: "Guide blocking strength",
+        status: blocking.status,
+        detail: blocking.detail,
+      },
+      ...(result.type === "it" ? [{
+        label: "Guide/donor pairing",
+        status: (result.gs || []).length <= 1 || result.coDeliverySafe ? "pass" : "warn",
+        detail: result.guideDonorInstruction || "Use each guide only with its matched donor.",
+      }] : []),
+      {
+        label: "Primer thermodynamics",
+        status: primerReadiness.status,
+        detail: primerReadiness.detail,
       },
       {
-        label: "Primer strategy ready",
-        status: primerReady ? "pass" : "warn",
-        detail: primerReady ? `Validation primers are ready (${result.amp}).` : "Validation primers are incomplete.",
+        label: "Primer genome specificity",
+        status: "na",
+        detail: "Genome-wide primer specificity is not automatic; run the specificity check before ordering.",
       },
     );
     return checks;
@@ -3002,10 +3065,12 @@ function buildInternalSequenceHtml(label, sequence, guideSiteIndexes = [], guide
 
 function buildInternalDonorHtml(donor) {
   const blockingSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
+  const crossGuideSummary = (donor.guideProtection || []).map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join("<br/>");
   const strands = buildInternalStrandModels(donor);
   return `
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
+    ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${blockingSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Guide-blocking mutation:</strong><br/>${blockingSummary}</p>` : ""}
     ${strands.map((strand) => `
       <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
@@ -3515,6 +3580,17 @@ function PmDonorPreview({ donor }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
       <div style={{ color: "#555", fontSize: 12, marginBottom: 10 }}>Linked guide: {donor.guideName}</div>
+      <InlineNotice tone={donor.proteinValidation?.valid ? "success" : "warning"} style={{ marginBottom: 10 }}>
+        {donor.proteinValidation?.valid
+          ? `Final donor translation preserves the intended amino-acid product (${donor.proteinValidation.observedAa} at residue ${donor.proteinValidation.targetAaNumber}).`
+          : `Final donor translation failed: ${(donor.proteinValidation?.errors || ["validation unavailable"]).join("; ")}`}
+      </InlineNotice>
+      {!!(donor.guideProtection || []).length && (
+        <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", fontSize: 12 }}>
+          <strong>Protection against all offered guides:</strong>{" "}
+          {donor.guideProtection.map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join(" | ")}
+        </div>
+      )}
       {!!(donor.silentMutations || []).length && (
         <div style={{ color: "#7F1D1D", fontSize: 12, marginBottom: 10 }}>
           <strong>Silent mutation:</strong> {(donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join(" ; ")}
@@ -3780,6 +3856,12 @@ function InternalDonorPreview({ donor }) {
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
       <div style={{ color: "#555", fontSize: 12, marginBottom: 10 }}>Linked guide: {donor.guideName}</div>
+      {!!(donor.guideProtection || []).length && (
+        <div style={{ marginBottom: 10, padding: 10, borderRadius: 10, background: "#F8FAFC", border: "1px solid #D0D5DD", fontSize: 12 }}>
+          <strong>Protection against all offered guides:</strong>{" "}
+          {donor.guideProtection.map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join(" | ")}
+        </div>
+      )}
       {!!(donor.silentMutations || []).length && (
         <div style={{ color: "#7F1D1D", fontSize: 12, marginBottom: 10 }}>
           <strong>Guide-blocking mutation:</strong> {(donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join(" ; ")}
@@ -3971,11 +4053,21 @@ export default function App() {
       result: selectedEntry.result,
     }]);
   }, [selectedEntry]);
+  const selectedProcurementReadiness = useMemo(
+    () => selectedEntry?.result ? summarizeProcurementReadiness(selectedEntry.result) : null,
+    [selectedEntry],
+  );
   const batchOrderRows = useMemo(() => buildBatchOrderRows(batchSuccessfulResults), [batchSuccessfulResults]);
   const batchFolderLibrary = useMemo(() => buildFolderLibrary(batchFolderEntries), [batchFolderEntries]);
   const singleIdtTemplateRows = useMemo(() => buildIdtTemplateRows(singleOrderRows, idtDefaults), [singleOrderRows, idtDefaults]);
   const idtTemplateRows = useMemo(() => buildIdtTemplateRows(batchOrderRows, idtDefaults), [batchOrderRows, idtDefaults]);
   const batchDonorRows = useMemo(() => batchOrderRows.filter((row) => row.itemType === "Donor"), [batchOrderRows]);
+  const procurementReadiness = useMemo(
+    () => batchSuccessfulResults.map((entry) => ({ slot: entry.slot, ...summarizeProcurementReadiness(entry.result) })),
+    [batchSuccessfulResults],
+  );
+  const procurementBlockedCount = procurementReadiness.filter((entry) => entry.status === "blocked").length;
+  const procurementReviewCount = procurementReadiness.filter((entry) => entry.status === "review").length;
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -4382,7 +4474,7 @@ export default function App() {
   const saveSelectedToWorkspace = useCallback(async () => {
     try {
       const savedFolder = await saveEntryToWorkspace(selectedEntry);
-      setWorkspaceStatus(`Saved selected report and order files into ${savedFolder}.`);
+      setWorkspaceStatus(`Saved the selected report and eligible procurement drafts into ${savedFolder}.`);
     } catch (error) {
       setWorkspaceStatus(error?.message || "Failed to save the selected project files.");
     }
@@ -4594,6 +4686,7 @@ export default function App() {
         }
         const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm, {
           customGuides: parseCustomGuideInput(row.customGuides),
+          deliveryMethod: row.deliveryMethod || "unknown",
           rawReference: row.referenceSource === "raw" ? {
             gene: row.gene,
             sequence: parseRawSequenceInput(row.rawSequence),
@@ -5057,6 +5150,7 @@ export default function App() {
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Team or client</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal program or sponsor" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide delivery</div><select value={row.deliveryMethod || "unknown"} onChange={(event) => updateBatchRow(index, "deliveryMethod", event.target.value)} style={SELECT_STYLE}><option value="unknown">Not decided</option><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression plasmid</option></select></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
@@ -5379,8 +5473,15 @@ export default function App() {
             <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: "linear-gradient(180deg, rgba(240, 228, 204, 0.10), rgba(16,34,52,0.70))", border: `1px solid ${COLORS.borderSoft}` }}>
               <div style={{ color: COLORS.text, fontWeight: 700, marginBottom: 8 }}>Selected Design Order Export</div>
               <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
-                Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. The generated files remain compatible with your current upload workflow.
+                Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. Blocked designs cannot produce vendor templates; review-required designs remain procurement drafts until the listed checks are resolved.
               </div>
+              {selectedProcurementReadiness && (
+                <div title={selectedProcurementReadiness.blockers.concat(selectedProcurementReadiness.warnings).join(" ")} style={{ marginBottom: 10 }}>
+                  <Badge color={selectedProcurementReadiness.status === "blocked" ? COLORS.danger : selectedProcurementReadiness.status === "review" ? "#B45309" : COLORS.success}>
+                    Procurement: {selectedProcurementReadiness.status}
+                  </Badge>
+                </div>
+              )}
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 <button type="button" disabled={!singleIdtTemplateRows.crispr.length} onClick={() => downloadSingleIdtTemplate("crispr")} style={{ ...FIELD_STYLE, width: "auto", cursor: singleIdtTemplateRows.crispr.length ? "pointer" : "not-allowed", fontWeight: 700 }}>
                   Download single CRISPR template
@@ -6187,11 +6288,13 @@ export default function App() {
         <div style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>4. Order Exports</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-            Successful designs are flattened into order-ready spreadsheet files for gRNAs, primers, and donors. The same export area works whether you designed one project or many.
+            Successful designs are flattened into procurement-draft spreadsheets for gRNAs, primers, and donors. A successful computation is not the same as an order-ready design; resolve the review status shown below before uploading a template to a vendor.
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
             <Badge color={COLORS.success}>{batchSuccessfulResults.length} successful designs</Badge>
             <Badge>{batchOrderRows.length} order lines</Badge>
+            {!!procurementBlockedCount && <Badge color={COLORS.danger}>{procurementBlockedCount} procurement blocked</Badge>}
+            {!!procurementReviewCount && <Badge color="#B45309">{procurementReviewCount} require review</Badge>}
             {batchCopyState && <Badge color={COLORS.success}>{batchCopyState}</Badge>}
           </div>
           {batchError && <div style={{ marginBottom: 12, padding: 12, borderRadius: 12, background: "rgba(251,113,133,0.10)", border: `1px solid ${COLORS.danger}55`, color: COLORS.danger }}>{batchError}</div>}
@@ -6201,7 +6304,7 @@ export default function App() {
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Spreadsheet Template Export</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
                 These downloads match the headers in your current upload templates:
-                `template-paste-entry-crispr.xlsx`, `template-paste-entry.xlsx`, and `template-paste-entry-hdr.xlsx`.
+                `template-paste-entry-crispr.xlsx`, `template-paste-entry.xlsx`, and `template-paste-entry-hdr.xlsx`. Designs with blocked procurement status are excluded. The vendor-format sheets cannot carry the full safety review, so retain the combined preview or saved `order_preview.csv` with them.
               </div>
               <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
                 <Grid>
@@ -6241,17 +6344,18 @@ export default function App() {
 
               <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Combined Order Preview</div>
               <div style={{ color: "#667085", fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-                This is a review table only. The actual upload files are the separate spreadsheet template downloads above. For gRNAs, the exported sequence is the spacer without PAM. For SNP donors, the exported donor is the recommended order strand.
+                This preview carries the procurement status that vendor templates cannot. For gRNAs, the exported sequence is the spacer without PAM. For SNP donors, the exported donor is the recommended order strand.
               </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1180 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1280 }}>
                 <thead>
-                  <tr>{["Slot", "Design", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                  <tr>{["Slot", "Design", "Review Status", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {batchOrderRows.map((row, rowIndex) => (
                     <tr key={`${row.slot}-${row.itemType}-${row.name}-${rowIndex}`}>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.slot}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.designLabel}</td>
+                      <td title={row.reviewNotes || ""} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: row.reviewStatus === "blocked" ? "#FEE2E2" : row.reviewStatus === "review" ? "#FEF3C7" : "#DCFCE7", fontWeight: 700 }}>{row.reviewStatus}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.itemType}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.name}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff", fontFamily: "Consolas, monospace", wordBreak: "break-all" }}>{row.sequence}</td>

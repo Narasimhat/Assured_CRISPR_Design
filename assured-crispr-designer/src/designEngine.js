@@ -176,6 +176,89 @@ function armType(guide, mutationPos) {
   return guide.str === "+" ? (mutationPos > guide.cut ? "PROX" : "DIST") : (mutationPos < guide.cut ? "PROX" : "DIST");
 }
 
+export function classifySpCas9PamDisruption(originalPam, mutatedPam) {
+  const before = String(originalPam || "").toUpperCase();
+  const after = String(mutatedPam || "").toUpperCase();
+  if (!/^[ACGT]{3}$/.test(before) || !/^[ACGT]{3}$/.test(after)) {
+    return { acceptable: false, tier: "none", reason: "PAM sequence is incomplete." };
+  }
+  if (before.slice(1) !== "GG") {
+    return { acceptable: false, tier: "none", reason: `${before} is not a canonical NGG PAM.` };
+  }
+  if (after.slice(1) === "GG") {
+    return { acceptable: false, tier: "none", reason: `${after} remains a canonical NGG PAM.` };
+  }
+  if (after.slice(1) === "AG") {
+    return { acceptable: false, tier: "weak", reason: `${after} is an NAG alternative PAM and is not accepted as a blocking mutation.` };
+  }
+  if (after[1] === "G" && after[2] === "A") {
+    return { acceptable: false, tier: "weak", reason: `${after} is an NGA alternative PAM and is not accepted as a blocking mutation.` };
+  }
+  if (["C", "T"].includes(after[1]) || ["C", "T"].includes(after[2])) {
+    return { acceptable: true, tier: "strong", reason: `${before}->${after} removes the NGG PAM with a C/T substitution at PAM position 2 or 3.` };
+  }
+  return { acceptable: false, tier: "weak", reason: `${before}->${after} is not treated as a reliably dead SpCas9 PAM.` };
+}
+
+export function assessGuideSequence(spacer, deliveryMethod = "unknown") {
+  const sequence = String(spacer || "").toUpperCase();
+  const gc = calculatePrimerGcPercent(sequence);
+  const polyT = sequence.includes("TTTT");
+  const polyG = sequence.includes("GGGG");
+  const warnings = [];
+  if (!/^[ACGT]+$/.test(sequence)) warnings.push("Guide spacer must contain DNA bases A, C, G, and T only.");
+  if (sequence.length !== 20) warnings.push(`Guide spacer is ${sequence.length} nt; the design engine requires an explicit 20 nt SpCas9 spacer.`);
+  if (gc < 40 || gc > 60) warnings.push(`GC ${gc}% is outside the preferred 40-60% guide window.`);
+  if (polyG) warnings.push("Guide contains GGGG, which may reduce synthesis or activity reliability.");
+  if (polyT && deliveryMethod === "u6") warnings.push("Guide contains TTTT, a Pol III termination risk for U6-driven expression.");
+  if (polyT && deliveryMethod === "unknown") warnings.push("Guide contains TTTT; choose a delivery method to determine whether the U6/Pol III termination rule applies.");
+  return { status: warnings.length ? "warn" : "pass", gc, polyT, polyG, deliveryMethod, warnings };
+}
+
+function assessOrientedGuideSite(guide, rawSite) {
+  const donorSpacer = guide.str === "+" ? rawSite.slice(0, 20) : reverseComplement(rawSite.slice(3));
+  const donorPam = guide.str === "+" ? rawSite.slice(20) : reverseComplement(rawSite.slice(0, 3));
+  const pamAssessment = classifySpCas9PamDisruption(guide.pam, donorPam);
+  if (pamAssessment.acceptable) return { tier: "strong", protected: true, donorPam, mismatches: [], reason: pamAssessment.reason };
+  const mismatches = [];
+  for (let index = 0; index < 20; index += 1) if (donorSpacer[index] !== guide.sp[index]) mismatches.push(index + 1);
+  const seedMismatches = mismatches.filter((position) => position >= 11);
+  const weakenedPam = donorPam !== guide.pam && pamAssessment.tier === "weak";
+  if (weakenedPam && seedMismatches.length) {
+    return { tier: "moderate", protected: true, donorPam, mismatches, reason: `${donorPam} is a weakened PAM plus ${seedMismatches.length} seed mismatch${seedMismatches.length === 1 ? "" : "es"}.` };
+  }
+  if (seedMismatches.length >= 2) return { tier: "moderate", protected: true, donorPam, mismatches, reason: `${seedMismatches.length} seed mismatches with PAM ${donorPam}.` };
+  if (mismatches.length) return { tier: "weak", protected: true, donorPam, mismatches, reason: `${mismatches.length} protospacer mismatch${mismatches.length === 1 ? "" : "es"} with PAM ${donorPam}.` };
+  return { tier: "none", protected: false, donorPam, mismatches, reason: `The full protospacer and ${donorPam} PAM remain intact.` };
+}
+
+function assessGuideAgainstPointMutationDonor(guide, donor) {
+  const start = guide.ps;
+  const end = guide.ps + 23;
+  if (!donor?.genomicDonor || start < donor.donorStart || end > donor.donorEnd) {
+    return { tier: "unknown", protected: false, reason: "The complete guide target is outside this ssODN window." };
+  }
+  return assessOrientedGuideSite(guide, donor.genomicDonor.slice(start - donor.donorStart, end - donor.donorStart));
+}
+
+function assessGuideAgainstInternalDonor(guide, donor) {
+  const start = guide.ps;
+  const end = guide.ps + 23;
+  if (!donor?.donorSense || start < donor.donorStart || end > donor.donorEnd) {
+    return { tier: "unknown", protected: false, reason: "The complete guide target is outside this ssODN window." };
+  }
+  if (donor.insertionPos > start && donor.insertionPos < end) {
+    return { tier: "strong", protected: true, reason: "The internal-tag insertion splits the original protospacer/PAM sequence." };
+  }
+  const rawSite = Array.from({ length: 23 }, (_, offset) => {
+    const genomicPos = start + offset;
+    let donorIndex = genomicPos - donor.donorStart;
+    if (genomicPos >= donor.insertionPos) donorIndex += donor.insertSequence.length;
+    return donor.donorSense[donorIndex] || "N";
+  }).join("");
+  return assessOrientedGuideSite(guide, rawSite);
+}
+
 function findSilent(model, guide, blockedPositions = new Set(), options = {}) {
   const allowNonCoding = !!options.allowNonCoding;
   const seq = getGenomicSequence(model);
@@ -228,31 +311,75 @@ function findSilent(model, guide, blockedPositions = new Set(), options = {}) {
         if (stillPam) continue;
         const oldPam = guide.str === "+" ? seq.slice(pamStart, pamStart + 3) : reverseComplement(seq.slice(pamStart, pamStart + 3));
         const newPam = guide.str === "+" ? mutantPam.join("") : reverseComplement(mutantPam.join(""));
+        const pamDisruption = classifySpCas9PamDisruption(oldPam, newPam);
+        if (!pamDisruption.acceptable) continue;
 
         if (!codonInfo || codonIndex < 0) {
           if (!allowNonCoding) continue;
-          return { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `PAM ${oldPam}->${newPam} outside CDS`, mt: "noncoding" };
+          return { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `PAM ${oldPam}->${newPam} outside CDS`, mt: "noncoding", blockingTier: pamDisruption.tier, blockingReason: pamDisruption.reason, pamBefore: oldPam, pamAfter: newPam };
         }
 
         const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
         if (toAA(mutantCodon) !== originalAA) continue;
-        return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: `PAM ${oldPam}->${newPam}`, mt: "silent" };
+        return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: `PAM ${oldPam}->${newPam}`, mt: "silent", blockingTier: pamDisruption.tier, blockingReason: pamDisruption.reason, pamBefore: oldPam, pamAfter: newPam };
       }
 
       if (!codonInfo || codonIndex < 0) {
         if (!allowNonCoding) continue;
-        return { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `${label} outside CDS`, mt: "noncoding" };
+        return { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `${label} outside CDS`, mt: "noncoding", blockingTier: "weak", blockingReason: `A single ${label.toLowerCase()} mismatch with an intact PAM is weak protection.` };
       }
 
       const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
       if (toAA(mutantCodon) !== originalAA) continue;
-      return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: label, mt: "silent" };
+      return { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: label, mt: "silent", blockingTier: "weak", blockingReason: `A single ${label.toLowerCase()} mismatch with an intact PAM is weak protection.` };
     }
   }
   return null;
 }
 
-function mkODN(model, guide, mutationPositions, mutationBases, silentMutations = []) {
+export function validatePointMutationPayload(model, donorStart, payload, targetAaNumber, intendedAa) {
+  const reference = getGenomicSequence(model);
+  const changedAaNumbers = new Set();
+  payload.forEach((base, index) => {
+    const genomicPos = donorStart + index;
+    if (base !== reference[genomicPos]) {
+      const aaNumber = genomicPosToAa(model, genomicPos);
+      if (aaNumber) changedAaNumbers.add(aaNumber);
+    }
+  });
+  changedAaNumbers.add(targetAaNumber);
+  const codons = [...changedAaNumbers].sort((left, right) => left - right).map((aaNumber) => {
+    const codonInfo = getCodonAtAa(model, aaNumber, toAA);
+    if (!codonInfo) return { aaNumber, valid: false, reason: "Codon could not be mapped." };
+    const finalCodon = codonInfo.genomicPositions.map((genomicPos) => {
+      const donorIndex = genomicPos - donorStart;
+      return donorIndex >= 0 && donorIndex < payload.length ? payload[donorIndex] : reference[genomicPos];
+    }).join("");
+    const observedAa = toAA(finalCodon);
+    const expectedAa = aaNumber === targetAaNumber ? intendedAa : codonInfo.aa;
+    return {
+      aaNumber,
+      referenceCodon: codonInfo.cod,
+      finalCodon,
+      referenceAa: codonInfo.aa,
+      expectedAa,
+      observedAa,
+      valid: observedAa === expectedAa,
+    };
+  });
+  const target = codons.find((entry) => entry.aaNumber === targetAaNumber);
+  const valid = !!target && target.valid && codons.every((entry) => entry.valid);
+  return {
+    valid,
+    targetAaNumber,
+    intendedAa,
+    observedAa: target?.observedAa || "?",
+    codons,
+    errors: codons.filter((entry) => !entry.valid).map((entry) => `AA ${entry.aaNumber}: expected ${entry.expectedAa}, observed ${entry.observedAa} (${entry.finalCodon})`),
+  };
+}
+
+function mkODN(model, guide, mutationPositions, mutationBases, silentMutations = [], validationTarget = null) {
   const seq = getGenomicSequence(model);
   let donorStart;
   let donorEnd;
@@ -290,6 +417,9 @@ function mkODN(model, guide, mutationPositions, mutationBases, silentMutations =
   const ssOdn = guide.str === "+" ? reverseComplement(payload.join("")) : payload.join("");
   const wtOdn = guide.str === "+" ? reverseComplement(wildType) : wildType;
   const { codingWt, codingDonor } = extractCodingDonorWindowFromModel(model, donorStart, donorEnd, payload);
+  const proteinValidation = validationTarget
+    ? validatePointMutationPayload(model, donorStart, payload, validationTarget.aaNumber, validationTarget.intendedAa)
+    : null;
   const orderedIndex = (genomicPos) => {
     const payloadIndex = genomicPos - donorStart;
     if (payloadIndex < 0 || payloadIndex >= payload.length) return null;
@@ -309,6 +439,10 @@ function mkODN(model, guide, mutationPositions, mutationBases, silentMutations =
     sl: guide.str === "+" ? "- strand target" : "+ strand target",
     codingWt,
     codingDonor,
+    proteinValidation,
+    donorStart,
+    donorEnd,
+    genomicDonor: payload.join(""),
     guideSiteStart,
     guideSiteEnd,
     guidePamStart,
@@ -991,6 +1125,127 @@ export function summarizePrimerPairQuality(forwardSequence, reverseSequence) {
   };
 }
 
+export function summarizePrimerReadiness(result) {
+  const primers = result?.ps || [];
+  if (primers.length < 2 || !result?.amp) {
+    return { ready: false, status: "warn", detail: "Validation primers or amplicon sizing are incomplete." };
+  }
+  const quality = summarizePrimerPairQuality(primers[0]?.s || "", primers[1]?.s || "");
+  const candidate = result?.primerCandidates?.[0] || null;
+  const isFallback = String(result?.primerStrategy || "").includes("fallback") || Number(candidate?.score) <= -900;
+  const primerBoundsPass = primers.every((primer) => Number.isFinite(primer?.tm)
+    && primer.tm >= 55 && primer.tm <= 67
+    && Number.isFinite(primer?.gc) && primer.gc >= 38 && primer.gc <= 67);
+  const pairPass = quality.tmDelta <= 5 && quality.confidence !== "review" && quality.heteroThreePrimeRun < 4;
+  const marginRequired = String(result?.primerStrategy || "").includes("outside-homology-arms");
+  const requiredMargin = Number(candidate?.minimumOutsideMargin);
+  const marginPass = !marginRequired || (Number.isFinite(requiredMargin)
+    && Number(candidate?.leftOutsideMargin) >= requiredMargin
+    && Number(candidate?.rightOutsideMargin) >= requiredMargin);
+  const ready = !isFallback && primerBoundsPass && pairPass && marginPass;
+  const marginText = marginRequired && Number.isFinite(requiredMargin)
+    ? ` Nearest primer edges are ${candidate.leftOutsideMargin}/${candidate.rightOutsideMargin} bp outside the 5'/3' arms (minimum ${requiredMargin} bp).`
+    : "";
+  if (ready) {
+    return { ready: true, status: "pass", quality, detail: `Thermodynamic primer checks pass (${result.amp}; Tm delta ${quality.tmDelta} C).${marginText}` };
+  }
+  const reasons = [];
+  if (isFallback) reasons.push("only fallback placement was available");
+  if (!primerBoundsPass) reasons.push("Tm or GC is outside the accepted range");
+  if (!pairPass) reasons.push("pair thermodynamics need review");
+  if (!marginPass) reasons.push("the outside-homology-arm margin is below the required floor or was not recorded");
+  return { ready: false, status: "warn", quality, detail: `Primer pair is not ordering-ready: ${reasons.join("; ")}.${marginText}` };
+}
+
+function inferBlockingTier(mutation) {
+  if (mutation?.blockingTier) return mutation.blockingTier;
+  const pamMatch = String(mutation?.pur || "").match(/PAM\s+([ACGT]{3})->([ACGT]{3})/i);
+  if (pamMatch) return classifySpCas9PamDisruption(pamMatch[1], pamMatch[2]).tier;
+  return mutation ? "weak" : "none";
+}
+
+export function summarizeGuideBlocking(result) {
+  const guides = result?.gs || [];
+  if (!guides.length) return { tier: "none", status: "warn", detail: "No selected guides are available for blocking assessment.", guides: [] };
+  const explicitProtection = Array.isArray(result?.guideProtection) ? result.guideProtection : [];
+  const mutations = Array.isArray(result?.ss) ? result.ss : [];
+  const assessments = guides.map((guide, index) => {
+    const guideIndex = index + 1;
+    const explicit = explicitProtection.find((entry) => Number(entry.guideIndex) === guideIndex);
+    const guideMutations = mutations.filter((entry) => Number(entry.gi) === guideIndex);
+    let tier = explicit?.tier || "none";
+    let reason = explicit?.reason || "";
+    if (!explicit?.tier && explicit?.byInsertion) {
+      tier = "strong";
+      reason = "The donor insertion disrupts the original guide target.";
+    }
+    if (tier === "none" && guideMutations.length) {
+      const tiers = guideMutations.map(inferBlockingTier);
+      const hasWeakenedPam = guideMutations.some((entry) => /^PAM\b/i.test(String(entry?.pur || "")) && inferBlockingTier(entry) === "weak");
+      const hasSeedMismatch = guideMutations.some((entry) => /^Seed\b/i.test(String(entry?.pur || "")));
+      if (tiers.includes("strong")) tier = "strong";
+      else if (tiers.includes("moderate") || (hasWeakenedPam && hasSeedMismatch)) tier = "moderate";
+      else tier = "weak";
+      reason = guideMutations.map((entry) => entry.blockingReason || entry.pur).filter(Boolean).join("; ");
+    }
+    if (!reason) reason = tier === "none" ? "No donor change clearly disrupts this target." : "Guide protection needs review.";
+    return { guideIndex, guideName: guide.n || `gRNA${guideIndex}`, tier, reason };
+  });
+  const allStrong = assessments.every((entry) => entry.tier === "strong");
+  const anyNone = assessments.some((entry) => entry.tier === "none");
+  const anyWeak = assessments.some((entry) => entry.tier === "weak");
+  const overallTier = allStrong ? "strong" : anyNone ? "none" : anyWeak ? "weak" : "moderate";
+  const detail = assessments.map((entry) => `${entry.guideName}: ${entry.tier} (${entry.reason})`).join(" ");
+  return { tier: overallTier, status: allStrong ? "pass" : "warn", detail, guides: assessments };
+}
+
+export function summarizeProcurementReadiness(result) {
+  if (!result || result.err) {
+    return { status: "blocked", blockers: [result?.err || "No completed design is available."], warnings: [] };
+  }
+
+  const blockers = [];
+  const warnings = [];
+  const guides = result.gs || [];
+  if (!guides.length) blockers.push("No guide sequence is available.");
+  guides.forEach((guide) => {
+    const assessment = assessGuideSequence(guide.sp, result.deliveryMethod || "unknown");
+    if (assessment.warnings.length) warnings.push(`${guide.n || "Guide"}: ${assessment.warnings.join(" ")}`);
+  });
+
+  if (["pm", "it", "ct", "nt"].includes(result.type)) {
+    const blocking = summarizeGuideBlocking(result);
+    if (blocking.status !== "pass") blockers.push(`Guide blocking is not strong for every selected guide. ${blocking.detail}`);
+  }
+
+  if (result.type === "pm") {
+    if (!(result.os || []).length) blockers.push("No validated ssODN donor is available.");
+    if ((result.os || []).some((donor) => !donor.proteinValidation?.valid)) blockers.push("A donor fails the final assembled-protein assertion.");
+  }
+
+  if (["it", "ct", "nt"].includes(result.type) && result.insertValidation) {
+    if (!result.insertValidation.matchesPreset) blockers.push("The donor insert does not match the selected preset.");
+    if (!result.insertValidation.framePreserved) blockers.push("The donor insert does not preserve the intended coding frame.");
+  }
+
+  if (result.type === "it" && (result.gs || []).length > 1 && !result.coDeliverySafe) {
+    warnings.push(result.guideDonorInstruction || "Use each guide only with its matched donor; do not pool alternatives.");
+  }
+  if (result.type === "pm" && (result.gs || []).length > 1 && !result.coDeliverySafe) {
+    warnings.push(result.guideDonorInstruction || "Use each guide only with its matched donor; do not pool alternatives.");
+  }
+
+  const primerReadiness = summarizePrimerReadiness(result);
+  if (!primerReadiness.ready && !(result.type === "ko" && result.referenceOnly)) warnings.push(primerReadiness.detail);
+  warnings.push("Genome-wide guide and primer specificity require an external, assembly-matched check before ordering.");
+
+  return {
+    status: blockers.length ? "blocked" : warnings.length ? "review" : "ready",
+    blockers,
+    warnings,
+  };
+}
+
 export function buildPrimerRecord(name, sequence, extra = {}) {
   const clean = String(sequence || "").toUpperCase();
   const assessment = assessPrimerSequence(clean);
@@ -1029,6 +1284,9 @@ function buildPrimerCandidatePair(forwardPrimer, reversePrimer, extra = {}) {
     amp: extra.amp ?? (reversePrimer.end - forwardPrimer.start),
     wtAmpliconLength: extra.wtAmpliconLength ?? null,
     deletionAmpliconLength: extra.deletionAmpliconLength ?? null,
+    leftOutsideMargin: extra.leftOutsideMargin ?? null,
+    rightOutsideMargin: extra.rightOutsideMargin ?? null,
+    minimumOutsideMargin: extra.minimumOutsideMargin ?? null,
     ampliconGc,
     quality,
     score: extra.score ?? 0,
@@ -1074,6 +1332,9 @@ function serializePrimerCandidates(pairs = []) {
       ampliconGcWarning: ampliconGc !== null && ampliconGc > 65 ? "high-GC amplicon — consider adding DMSO or betaine to PCR" : null,
       wtAmpliconLength: pair.wtAmpliconLength ?? null,
       deletionAmpliconLength: pair.deletionAmpliconLength ?? null,
+      leftOutsideMargin: pair.leftOutsideMargin ?? null,
+      rightOutsideMargin: pair.rightOutsideMargin ?? null,
+      minimumOutsideMargin: pair.minimumOutsideMargin ?? null,
       quality: pair.quality || summarizePrimerPairQuality(pair.fw?.seq || pair.forward || "", pair.rev?.seq || pair.reverse || ""),
       forward: buildPrimerRecord("Fw", pair.fw?.seq || pair.forward || ""),
       reverse: buildPrimerRecord("Rev", pair.rev?.seq || pair.reverse || ""),
@@ -1162,18 +1423,19 @@ export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homolog
     tmDelta = 5,
     searchWindow = 650,
     desiredOutsideFlank = 120,
-    outsideBuffer = 0,
+    minimumOutsideMargin = 50,
     candidateLimit = 90,
   } = opts;
   const sequence = String(seq || "").toUpperCase();
   const leftBoundary = Math.max(0, Math.min(sequence.length, homology5Start));
   const rightBoundary = Math.max(leftBoundary, Math.min(sequence.length, homology3End));
-  const forwardBoundary = Math.max(0, leftBoundary - outsideBuffer);
-  const reverseBoundary = Math.min(sequence.length, rightBoundary + outsideBuffer);
+  const enforcedMargin = Math.max(0, Number(minimumOutsideMargin) || 0);
+  const forwardBoundary = Math.max(0, leftBoundary - enforcedMargin);
+  const reverseBoundary = Math.min(sequence.length, rightBoundary + enforcedMargin);
   if (forwardBoundary < minLen || sequence.length - reverseBoundary < minLen) return [];
 
   const protectedLength = Math.max(0, rightBoundary - leftBoundary);
-  const minAmp = opts.minAmp ?? Math.max(protectedLength + minLen * 2 + outsideBuffer * 2, protectedLength + 48);
+  const minAmp = opts.minAmp ?? Math.max(protectedLength + minLen * 2 + enforcedMargin * 2, protectedLength + 48);
   const maxAmp = opts.maxAmp ?? Math.max(minAmp, protectedLength + searchWindow * 2 + maxLen * 2);
   const desiredAmp = opts.desiredAmp ?? Math.max(minAmp, protectedLength + desiredOutsideFlank * 2);
 
@@ -1240,7 +1502,14 @@ export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homolog
       const placementPenalty = (Math.abs(leftFlank - desiredOutsideFlank) + Math.abs(rightFlank - desiredOutsideFlank)) / 25;
       const ampliconGc = calculatePrimerGcPercent(sequence.slice(fw.start, rev.end));
       const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp, placementPenalty);
-      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, ampliconGc, score }));
+      pairs.push(buildPrimerCandidatePair(fw, rev, {
+        amp,
+        ampliconGc,
+        score,
+        leftOutsideMargin: leftBoundary - fw.end,
+        rightOutsideMargin: rev.start - rightBoundary,
+        minimumOutsideMargin: enforcedMargin,
+      }));
     }
   }
   if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
@@ -1275,6 +1544,9 @@ export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homolog
       amp: revStart + fallbackRevLen - fwStart,
       ampliconGc: calculatePrimerGcPercent(sequence.slice(fwStart, revStart + fallbackRevLen)),
       score: -999,
+      leftOutsideMargin: leftBoundary - forwardBoundary,
+      rightOutsideMargin: reverseBoundary - rightBoundary,
+      minimumOutsideMargin: enforcedMargin,
     },
   );
   return [fallback];
@@ -1283,6 +1555,11 @@ export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homolog
 function buildOutsideHomologyPrimerWarning(seq, homology5Start, homology3End, primerPairs = []) {
   const sequenceLength = String(seq || "").length;
   if (primerPairs[0]?.score <= -900) return "Only fallback validation primers could be placed outside the homology arms; review primer QC before ordering.";
+  const selected = primerPairs[0];
+  if (selected && Number.isFinite(selected.minimumOutsideMargin)
+    && (selected.leftOutsideMargin < selected.minimumOutsideMargin || selected.rightOutsideMargin < selected.minimumOutsideMargin)) {
+    return `Validation primer margin is below the required ${selected.minimumOutsideMargin} bp outside one or both homology arms.`;
+  }
   if (primerPairs.length) return "";
   const missing = [];
   if (homology5Start < 18) missing.push("upstream of the 5' homology arm");
@@ -1703,6 +1980,22 @@ function guideOverlapsReplacement(guide, replaceStart, replaceEnd) {
   return start < replaceEnd && end > replaceStart;
 }
 
+function classifyGuideReplacementProtection(guide, replaceStart, replaceEnd, insertionSite = replaceStart) {
+  const { start, end } = getGuideSpan(guide);
+  const overlapsReplacement = guideOverlapsReplacement(guide, replaceStart, replaceEnd);
+  const splitsTarget = insertionSite > start && insertionSite < end;
+  if (overlapsReplacement || splitsTarget) {
+    return {
+      protected: true,
+      tier: "strong",
+      reason: splitsTarget
+        ? "The cassette insertion splits the original protospacer/PAM sequence."
+        : "The replacement removes bases from the original protospacer/PAM sequence.",
+    };
+  }
+  return { protected: false, tier: "none", reason: "The insertion does not disrupt this guide target." };
+}
+
 function parsePointMutationInput(value) {
   const normalized = String(value || "").trim().replace(/^p\./i, "").replace(/\s+/g, "").toUpperCase();
   const canonical = normalized.match(/^([A-Z])(\d+)([A-Z])$/);
@@ -1792,6 +2085,10 @@ function mkInternalOdn(model, guide, insertionPos, insertSequence, silentMutatio
   return {
     od: orderSequence,
     wo: wtOrder,
+    donorStart,
+    donorEnd,
+    donorSense,
+    insertionPos,
     sl: guide.str === "+" ? "- strand target" : "+ strand target",
     donorSenseLength: donorSense.length,
     insertSequence,
@@ -1997,18 +2294,57 @@ export function designPM(gb, mutationString, options = {}) {
   if (customGuideSelection?.err) return { err: customGuideSelection.err };
   const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, codonInfo.g);
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the mutation site." };
-  const { guides: selectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
-  const blockedPositions = new Set(mutationPositions);
+  const { guides: rawSelectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
+  const minimumAlternativeCutOffset = 10;
+  const selectedGuides = customGuideSelection
+    ? rawSelectedGuides
+    : rawSelectedGuides.filter((guide, index, guides) => index === 0 || guides.slice(0, index).every((existing) => Math.abs(existing.cut - guide.cut) >= minimumAlternativeCutOffset));
+  const removedRedundantGuideCount = rawSelectedGuides.length - selectedGuides.length;
+  const blockedPositions = new Set(codonInfo.genomicPositions);
 
-  const result = { type: "pm", gene: gb.gene, an: aaNumber, wA: wtAA.toUpperCase(), mA: mutAA.toUpperCase(), wC: codonInfo.cod, mC: bestMutantCodon, gp: codonInfo.g, ch: bestChanges, gs: [], os: [], ss: [], ps: [], guideWindow, guideTier };
+  const result = {
+    type: "pm",
+    gene: gb.gene,
+    an: aaNumber,
+    wA: wtAA.toUpperCase(),
+    mA: mutAA.toUpperCase(),
+    wC: codonInfo.cod,
+    mC: bestMutantCodon,
+    gp: codonInfo.g,
+    ch: bestChanges,
+    gs: [],
+    os: [],
+    ss: [],
+    ps: [],
+    guideWindow,
+    guideTier,
+    guideDistinctness: {
+      minimumCutOffset: minimumAlternativeCutOffset,
+      removedRedundantGuideCount,
+      customGuidesRequireReview: !!customGuideSelection && rawSelectedGuides.some((guide, index) => rawSelectedGuides.slice(0, index).some((existing) => Math.abs(existing.cut - guide.cut) < minimumAlternativeCutOffset)),
+    },
+  };
   selectedGuides.forEach((guide, index) => {
     const silent = findSilent(gb, guide, blockedPositions);
-    const donor = mkODN(gb, guide, mutationPositions, mutationBases, silent ? [silent] : []);
+    const donor = mkODN(gb, guide, mutationPositions, mutationBases, silent ? [silent] : [], { aaNumber, intendedAa: mutAA.toUpperCase() });
     const guideName = makeGuideName(gb.gene, "pm", index, mutationString);
     result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: appendGuideContext(buildPointMutationGuideNote(guide, guideTier, guideWindow), gb, guide) });
-    if (donor) result.os.push({ ...donor, n: `ssODN${index + 1}`, gi: index, guideName, guideStrand: guide.str });
+    if (donor?.proteinValidation?.valid) result.os.push({ ...donor, n: `ssODN${index + 1} (matched to ${guideName})`, gi: index, guideName, guideStrand: guide.str });
     if (silent) result.ss.push({ ...silent, gi: index + 1 });
   });
+  if (!result.os.length) return { err: `No donor preserved the intended ${wtAA.toUpperCase()}${aaNumber}${mutAA.toUpperCase()} protein change after guide-blocking mutations were assembled.` };
+  result.os = result.os.map((donor) => ({
+    ...donor,
+    guideProtection: selectedGuides.map((guide, guideIndex) => ({
+      guideIndex: guideIndex + 1,
+      guideName: result.gs[guideIndex]?.n || `gRNA${guideIndex + 1}`,
+      ...assessGuideAgainstPointMutationDonor(guide, donor),
+    })),
+  }));
+  result.coDeliverySafe = result.os.every((donor) => donor.guideProtection.every((entry) => entry.tier === "strong"));
+  result.guideDonorInstruction = result.coDeliverySafe
+    ? "Each ssODN strongly disrupts every offered guide target."
+    : "Use one guide with its explicitly matched ssODN only. Do not co-deliver or pool the alternative guides unless every guide is independently shown as strongly blocked in that donor.";
 
   const primerPairs = designCenteredPrimerPairs(seq, codonInfo.g, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
   const primerPair = primerPairs[0];
@@ -2063,7 +2399,7 @@ export function designIT(gb, siteString, tag, options = {}) {
       const guideAnnotations = buildGuideAnnotationsFromIndexes(guide, index + 1, donor.guideSiteIndexes, donor.guidePamIndexes);
       donors.push({
         ...donor,
-        n: `ssODN${index + 1}`,
+        n: `ssODN${index + 1} (matched to ${guideName})`,
         gi: index,
         guideName,
         guideStrand: guide.str,
@@ -2072,6 +2408,18 @@ export function designIT(gb, siteString, tag, options = {}) {
     }
     if (blocking) allBlockingMutations.push({ ...blocking, gi: index + 1 });
   });
+
+  donors.forEach((donor) => {
+    donor.guideProtection = guides.slice(0, 2).map((guide, guideIndex) => ({
+      guideIndex: guideIndex + 1,
+      guideName: makeGuideName(gb.gene, "it", guideIndex, `AFTER_${wtAA || ""}${aaNumber}`, tag),
+      ...assessGuideAgainstInternalDonor(guide, donor),
+    }));
+  });
+  const coDeliverySafe = donors.length > 0 && donors.every((donor) => donor.guideProtection.every((entry) => entry.tier === "strong"));
+  const guideDonorInstruction = coDeliverySafe
+    ? "Each ssODN strongly disrupts every offered guide target."
+    : "Use one guide with its explicitly matched ssODN only. Do not co-deliver or pool the alternative guides unless every guide is independently shown as strongly blocked in that donor.";
 
   const proteinPreview = buildInternalProteinPreview(gb, aaNumber, preset.aa);
   const codingPreview = buildInternalCodingPreview(gb, aaNumber, preset.seq, preset.aa);
@@ -2107,12 +2455,14 @@ export function designIT(gb, siteString, tag, options = {}) {
       arm: appendGuideContext(`Cut-to-insert distance ${Math.abs(guide.d)} bp | ${guideTier === "preferred" ? "preferred window" : guideTier === "fallback" ? "fallback window" : "distant fallback"} <=${guideWindow} bp`, gb, guide),
     })),
     os: donors,
+    coDeliverySafe,
+    guideDonorInstruction,
     ss: allBlockingMutations,
     ps: [
       buildPrimerRecord(makePrimerName(gb.gene, "it", "Fw", `AFTER_${wtAA || ""}${aaNumber}`, tag), primerPair.fw.seq),
       buildPrimerRecord(makePrimerName(gb.gene, "it", "Rev", `AFTER_${wtAA || ""}${aaNumber}`, tag), primerPair.rev.seq),
     ],
-    amp: `~${primerPair.amp} bp`,
+    amp: `WT ~${primerPair.amp} bp | KI ~${primerPair.amp + preset.seq.length} bp`,
     primerStrategy: "validated-centered",
     primerCandidates: serializePrimerCandidates(primerPairs),
   };
@@ -2193,12 +2543,15 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
   const guideProtection = guides.slice(0, 2).map((guide, index) => {
     const guideIndex = index + 1;
     const mutation = silentMutations.find((entry) => entry.gi === guideIndex) || null;
-    const byInsertion = guideOverlapsReplacement(guide, stopStart, stopStart + 3);
+    const insertionProtection = classifyGuideReplacementProtection(guide, stopStart, stopStart + 3, stopStart);
+    const tier = insertionProtection.tier === "strong" ? "strong" : (mutation?.blockingTier || "none");
     return {
       guideIndex,
       byMutation: !!mutation,
-      byInsertion,
-      protected: !!mutation || byInsertion,
+      byInsertion: insertionProtection.protected,
+      protected: tier !== "none",
+      tier,
+      reason: insertionProtection.protected ? insertionProtection.reason : (mutation?.blockingReason || "No guide-blocking change was found."),
     };
   });
   return {
@@ -2282,7 +2635,22 @@ export function designKO(gb, options = {}) {
         // so the indel falls in the optimal Sanger read quality window.
         iceTideOffset: 175,
       });
-  const primerPair = primerPairs[0];
+  const primerPairsWithOutcomes = primerPairs.map((pair) => longDeletion ? pair : ({
+    ...pair,
+    wtAmpliconLength: pair.amp,
+    deletionAmpliconLength: Math.max(48, pair.amp - selectedPair.spacing),
+  }));
+  const primerPair = primerPairsWithOutcomes[0];
+  const spliceDonorRemoved = Number.isFinite(exonEnd) && sortedCuts.length === 2 && sortedCuts[0] < exonEnd && sortedCuts[1] >= exonEnd;
+  const deletionOutcome = {
+    deletionSize: selectedPair.spacing,
+    deletionMod3: ((selectedPair.spacing % 3) + 3) % 3,
+    frameshiftPredicted: selectedPair.spacing % 3 !== 0,
+    spliceDonorRemoved,
+    exonLength: bestLength,
+    exonSkippingMod3: bestLength ? bestLength % 3 : null,
+    exonSkippingFrameshiftPredicted: bestLength ? bestLength % 3 !== 0 : null,
+  };
 
   return {
     type: "ko",
@@ -2308,14 +2676,13 @@ export function designKO(gb, options = {}) {
       buildPrimerRecord(makePrimerName(gb.gene, "ko", "Fw"), primerPair.fw.seq),
       buildPrimerRecord(makePrimerName(gb.gene, "ko", "Rev"), primerPair.rev.seq),
     ],
-    amp: longDeletion
-      ? `WT ~${primerPair.wtAmpliconLength} bp | deletion ~${primerPair.deletionAmpliconLength} bp`
-      : `~${primerPair.amp} bp`,
+    amp: `WT ~${primerPair.wtAmpliconLength} bp | deletion ~${primerPair.deletionAmpliconLength} bp`,
+    deletionOutcome,
     strat: longDeletion
       ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
       : "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
     primerStrategy: longDeletion ? "validated-deletion-screen" : "validated-centered",
-    primerCandidates: serializePrimerCandidates(primerPairs),
+    primerCandidates: serializePrimerCandidates(primerPairsWithOutcomes),
   };
 }
 
@@ -2384,12 +2751,15 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
   const guideProtection = guides.slice(0, 2).map((guide, index) => {
     const guideIndex = index + 1;
     const mutation = silentMutations.find((entry) => entry.gi === guideIndex) || null;
-    const byInsertion = guideOverlapsReplacement(guide, startCodonPos, startCodonPos + 3);
+    const insertionProtection = classifyGuideReplacementProtection(guide, startCodonPos, startCodonPos + 3, startCodonPos);
+    const tier = insertionProtection.tier === "strong" ? "strong" : (mutation?.blockingTier || "none");
     return {
       guideIndex,
       byMutation: !!mutation,
-      byInsertion,
-      protected: !!mutation || byInsertion,
+      byInsertion: insertionProtection.protected,
+      protected: tier !== "none",
+      tier,
+      reason: insertionProtection.protected ? insertionProtection.reason : (mutation?.blockingReason || "No guide-blocking change was found."),
     };
   });
   const primerPairs = designOutsideHomologyArmPrimerPairs(seq, homology5Start, homology3End);
@@ -2445,9 +2815,19 @@ export function runDesignFromTranscriptModel(projectType, model, mutation, tag, 
   else if (projectType === "nt") designResult = designNT(model, tag, homologyArmLength, options);
   else designResult = designKO(model, options);
 
+  if (designResult?.err) return designResult;
+  const deliveryMethod = options.deliveryMethod || "unknown";
+  const guideSequenceQc = (designResult.gs || []).map((guide, index) => ({
+    guideIndex: index + 1,
+    guideName: guide.n || `gRNA${index + 1}`,
+    ...assessGuideSequence(guide.sp, deliveryMethod),
+  }));
+
   return {
     gb: model,
     cds,
+    deliveryMethod,
+    guideSequenceQc,
     dbg: `Parsed ${model.genomicSequence.length} bp with ${getFeatureCount(model)} features. CDS: ${model.gene}, ${model.cdsSegments.length} segments, ${model.proteinLength} aa.`,
     ...designResult,
   };
