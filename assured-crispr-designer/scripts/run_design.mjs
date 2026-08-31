@@ -86,6 +86,10 @@ async function main() {
   if (Array.isArray(manifest.extra?.custom_guides)) {
     options.customGuides = manifest.extra.custom_guides;
   }
+  // The manifest already states the requested gene, so use it to select the CDS rather
+  // than letting feature order in the reference decide. References that annotate a
+  // neighbouring gene are common in NCBI RefSeqGene downloads.
+  if (manifest.gene_symbol) options.expectedGene = manifest.gene_symbol;
 
   const result = runDesign(
     projectType,

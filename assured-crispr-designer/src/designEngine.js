@@ -1256,6 +1256,14 @@ export function summarizeProcurementReadiness(result) {
 
   const blockers = [];
   const warnings = [];
+
+  // Reference validity precedes everything else: if the wrong gene, a partial CDS or an
+  // out-of-frame CDS was used, every downstream coordinate and residue number is wrong.
+  ((result.gb && result.gb.referenceIssues) || []).forEach((issue) => {
+    if (issue.severity === "blocker") blockers.push(issue.message);
+    else warnings.push(issue.message);
+  });
+
   const guides = result.gs || [];
   if (!guides.length) blockers.push("No guide sequence is available.");
   guides.forEach((guide) => {
@@ -2938,7 +2946,7 @@ export function runDesign(projectType, gbRaw, mutation, tag, homologyArmLength, 
     if (!gbRaw) return { err: "Upload a GenBank file first." };
     const parsedGenBank = parseGB(gbRaw);
     if (!parsedGenBank.seq) return { err: "Could not parse a DNA sequence from the file." };
-    model = normalizeGenBankToTranscriptModel(parsedGenBank);
+    model = normalizeGenBankToTranscriptModel(parsedGenBank, { expectedGene: options.expectedGene });
   }
   if (!model?.genomicSequence) return { err: "Could not normalize the GenBank file into a transcript model." };
   return runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength, options);

@@ -13,6 +13,17 @@ function getGeneNameFromFeatures(features) {
   return geneFeature?.q?.label || geneFeature?.q?.gene || "Gene";
 }
 
+function getTranscriptIdForGene(features, gene) {
+  const wanted = String(gene || "").trim().toUpperCase();
+  if (!wanted) return "";
+  const match = (features || []).find((entry) => {
+    if (entry.type !== "mRNA" && entry.type !== "transcript") return false;
+    const entryGene = String(entry?.q?.gene || "").trim().toUpperCase();
+    return entryGene && entryGene === wanted;
+  });
+  return String(match?.q?.transcript_id || match?.q?.label || "").trim();
+}
+
 function getTranscriptIdFromFeatures(features) {
   const mrnaFeature = features.find((entry) => entry.type === "mRNA" || entry.type === "transcript");
   return mrnaFeature?.q?.transcript_id || mrnaFeature?.q?.label || mrnaFeature?.q?.gene || "";
@@ -38,20 +49,145 @@ function normalizeExons(features) {
     .sort((left, right) => left.start - right.start);
 }
 
-function normalizeCds(rawRecord) {
-  for (const feature of rawRecord.feats) {
-    if (feature.type !== "CDS") continue;
-    const cdsSegments = extractFeatureRanges(feature.loc);
-    if (!cdsSegments.length) continue;
-    let cdsSequence = "";
-    for (const [start, end] of cdsSegments) cdsSequence += rawRecord.seq.slice(start, end);
-    return {
-      cdsSegments,
-      cdsSequence,
-      proteinLength: Math.floor(cdsSequence.length / 3) - 1,
-    };
+const STOP_CODONS = new Set(["TAA", "TAG", "TGA"]);
+
+/** GenBank marks an incomplete feature with < or > in its location. */
+function isPartialLocation(loc) {
+  return /[<>]/.test(String(loc || ""));
+}
+
+function getCdsGeneName(feature) {
+  const explicit = String(feature?.q?.gene || "").trim();
+  if (explicit) return explicit;
+  // Fall back to the label, which is conventionally "<GENE> CDS".
+  return String(feature?.q?.label || "").trim().replace(/\s+CDS$/i, "");
+}
+
+function describeCdsCandidate(rawRecord, feature) {
+  const cdsSegments = extractFeatureRanges(feature.loc);
+  if (!cdsSegments.length) return null;
+  const sequence = cdsSegments.map(([start, end]) => rawRecord.seq.slice(start, end)).join("").toUpperCase();
+  const partial = isPartialLocation(feature.loc);
+  const startsAtg = sequence.slice(0, 3) === "ATG";
+  const inFrame = sequence.length > 0 && sequence.length % 3 === 0;
+  const endsStop = STOP_CODONS.has(sequence.slice(-3));
+  return {
+    feature,
+    cdsSegments,
+    sequence,
+    gene: getCdsGeneName(feature),
+    transcriptId: String(feature?.q?.transcript_id || "").trim(),
+    partial,
+    startsAtg,
+    inFrame,
+    endsStop,
+    // Completeness dominates: a partial annotation cannot be trusted for coordinates or
+    // residue numbering, whatever else it has going for it.
+    score: (partial ? 0 : 8) + (startsAtg ? 4 : 0) + (inFrame ? 2 : 0) + (endsStop ? 1 : 0),
+  };
+}
+
+/**
+ * Selects the CDS to design against, and reports why.
+ *
+ * This used to return the FIRST CDS feature in the file with no further checks. NCBI
+ * RefSeqGene records routinely annotate neighbouring genes, so uploading NG_007084 for
+ * APOE silently designed against TOMM40 - whose CDS is additionally partial (<1..71),
+ * out of frame (391 nt) and does not begin with ATG. Nothing was reported to the user.
+ *
+ * `options.expectedGene` lets a caller state the intended gene, which removes the
+ * ambiguity rather than resolving it positionally.
+ */
+function normalizeCds(rawRecord, options = {}) {
+  const expectedGeneRaw = String(options.expectedGene || "").trim();
+  const expectedGene = expectedGeneRaw.toUpperCase();
+  const candidates = rawRecord.feats
+    .filter((feature) => feature.type === "CDS")
+    .map((feature) => describeCdsCandidate(rawRecord, feature))
+    .filter(Boolean);
+  if (!candidates.length) return null;
+
+  const genes = [...new Set(candidates.map((candidate) => candidate.gene).filter(Boolean))];
+  const issues = [];
+
+  let pool = candidates;
+  let matchedExpected = false;
+  if (expectedGene) {
+    const matches = candidates.filter((candidate) => candidate.gene.toUpperCase() === expectedGene);
+    if (matches.length) {
+      pool = matches;
+      matchedExpected = true;
+    } else if (!genes.length) {
+      // Plenty of real references - SnapGene exports especially - carry no /gene
+      // qualifier at all. That is unverifiable rather than wrong, so it is a review item
+      // (which is what the request asks for) rather than a hard block.
+      issues.push({
+        code: "gene-identity-unverifiable",
+        severity: "warning",
+        message: `The reference does not name the gene on any CDS feature, so it cannot be confirmed as ${expectedGeneRaw}. Verify the reference identity before release.`,
+      });
+    } else {
+      issues.push({
+        code: "expected-gene-not-found",
+        severity: "blocker",
+        message: `The reference annotates no CDS for ${expectedGeneRaw}. CDS features present: ${genes.join(", ")}.`,
+      });
+    }
   }
-  return null;
+
+  const selected = pool
+    .slice()
+    .sort((left, right) => right.score - left.score || left.cdsSegments[0][0] - right.cdsSegments[0][0])[0];
+  // Reads as "The APOE CDS ..." with a gene name, "The selected CDS ..." without one.
+  const label = selected.gene || "selected";
+
+  if (genes.length > 1 && !matchedExpected) {
+    issues.push({
+      code: "multiple-genes",
+      severity: "blocker",
+      message: `The reference annotates ${genes.length} genes (${genes.join(", ")}). ${label} was chosen by annotation completeness, not because it was requested. State the intended gene or trim the reference to a single gene before release.`,
+    });
+  }
+  if (selected.partial) {
+    issues.push({
+      code: "partial-cds",
+      severity: "blocker",
+      message: `The ${label} CDS is a partial annotation (${selected.feature.loc}), so its coordinates and residue numbering cannot be trusted.`,
+    });
+  }
+  if (!selected.startsAtg) {
+    issues.push({
+      code: "cds-no-start-codon",
+      severity: "blocker",
+      message: `The ${label} CDS does not begin with ATG (begins ${selected.sequence.slice(0, 3) || "nothing"}), so residue numbering would be wrong.`,
+    });
+  }
+  if (!selected.inFrame) {
+    issues.push({
+      code: "cds-not-in-frame",
+      severity: "blocker",
+      message: `The ${label} CDS is ${selected.sequence.length} nt, which is not a multiple of three.`,
+    });
+  }
+  if (!selected.endsStop) {
+    issues.push({
+      code: "cds-no-stop-codon",
+      severity: "warning",
+      message: `The ${label} CDS does not end in a stop codon; confirm the annotation is complete.`,
+    });
+  }
+
+  return {
+    cdsSegments: selected.cdsSegments,
+    cdsSequence: selected.sequence,
+    // Only subtract the stop codon when there actually is one.
+    proteinLength: selected.endsStop
+      ? Math.floor(selected.sequence.length / 3) - 1
+      : Math.floor(selected.sequence.length / 3),
+    gene: selected.gene,
+    transcriptId: selected.transcriptId,
+    issues,
+  };
 }
 
 function normalizeInterval(input) {
@@ -100,6 +236,7 @@ function buildTranscriptModel({
   source,
   assembly = "",
   rawFeatures = [],
+  referenceIssues = [],
 }) {
   const normalizedSequence = String(genomicSequence || "").toUpperCase();
   if (!normalizedSequence) return null;
@@ -119,16 +256,30 @@ function buildTranscriptModel({
     source: String(source || "unknown"),
     assembly: String(assembly || ""),
     rawFeatures: Array.isArray(rawFeatures) ? rawFeatures : [],
+    referenceIssues: Array.isArray(referenceIssues) ? referenceIssues : [],
   };
 }
 
-export function normalizeGenBankToTranscriptModel(rawRecord) {
+export function normalizeGenBankToTranscriptModel(rawRecord, options = {}) {
   if (!rawRecord?.seq) return null;
-  const normalizedCds = normalizeCds(rawRecord);
+  const normalizedCds = normalizeCds(rawRecord, options);
   if (!normalizedCds) return null;
 
-  const gene = getGeneNameFromFeatures(rawRecord.feats);
-  const transcriptId = getTranscriptIdFromFeatures(rawRecord.feats);
+  // The gene name must come from the CDS actually being designed against, not from
+  // whichever gene feature appears first - otherwise a TOMM40 design can be labelled APOE.
+  const featureGene = getGeneNameFromFeatures(rawRecord.feats);
+  const gene = normalizedCds.gene || featureGene;
+  const referenceIssues = [...normalizedCds.issues];
+  if (normalizedCds.gene && featureGene && featureGene !== normalizedCds.gene) {
+    referenceIssues.push({
+      code: "gene-annotation-mismatch",
+      severity: "warning",
+      message: `The first gene feature is ${featureGene} but the selected CDS belongs to ${normalizedCds.gene}; the CDS is authoritative.`,
+    });
+  }
+  const transcriptId = normalizedCds.transcriptId
+    || getTranscriptIdForGene(rawRecord.feats, gene)
+    || getTranscriptIdFromFeatures(rawRecord.feats);
   const exons = normalizeExons(rawRecord.feats);
 
   return buildTranscriptModel({
@@ -142,6 +293,7 @@ export function normalizeGenBankToTranscriptModel(rawRecord) {
     assembly: "",
     rawFeatures: rawRecord.feats,
     proteinLength: normalizedCds.proteinLength,
+    referenceIssues,
   });
 }
 

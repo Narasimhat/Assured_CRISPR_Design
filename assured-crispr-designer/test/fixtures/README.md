@@ -25,6 +25,16 @@ everything identifying the project is dropped.
   exactly — same guides, PAMs, GC, blocking tiers, donors, amplicon and release status.
 - Public reference sequence only; contains no project or subject data.
 
+### `two-genes-partial-first.gb`
+
+- **Source:** fully synthetic (deterministic generator); no reference, project or subject data.
+- **Reproduces:** the hazard in NCBI RefSeqGene records that annotate a neighbouring gene.
+  The first CDS in the file belongs to `NEIGHBOURA` and is partial (`<1..70`), out of frame
+  (70 nt) and lacks ATG — exactly like TOMM40 in `NG_007084`. `TARGETB` is the complete gene.
+- **What it pins:** selecting a CDS by file order designs against the wrong gene. Selecting
+  by annotation completeness does not, and the choice must still be reported because it was
+  inferred rather than requested. Stating the intended gene removes the ambiguity.
+
 ## Adding a fixture
 
 Add the reference here, then add a case to `CASES` in `../regression-fixtures.test.js`.

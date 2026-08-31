@@ -18,11 +18,13 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
+  parseGB,
   runDesign,
   summarizeGuideBlocking,
   summarizePrimerReadiness,
   summarizeProcurementReadiness,
 } from "../src/designEngine.js";
+import { normalizeGenBankToTranscriptModel } from "../src/transcriptModel.js";
 import { getDonorStrandBadge } from "../src/reportModel.js";
 
 const fixturesDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures");
@@ -53,6 +55,31 @@ const CASES = [
       coDeliverySafe: false,
       blockers: [/not strong/i],
       warnings: [/GC 70%/, /GC 75%/],
+    },
+  },
+  {
+    name: "two-gene reference: the neighbouring gene must not be designed against silently",
+    audit: "reference handling - CDS was selected by file order, so NG_007084 designed TOMM40 for an APOE request",
+    reference: "two-genes-partial-first.gb",
+    design: { type: "ko", options: { deliveryMethod: "rnp" } },
+    expect: {
+      // NEIGHBOURA is first in the file; TARGETB is the complete gene. File order must
+      // not decide this.
+      gene: "TARGETB",
+      procurement: "blocked",
+      blockers: [/annotates 2 genes/i, /chosen by annotation completeness/i],
+    },
+  },
+  {
+    name: "two-gene reference: stating the intended gene resolves the ambiguity",
+    audit: "reference handling - an explicit gene removes the guess rather than papering over it",
+    reference: "two-genes-partial-first.gb",
+    design: { type: "ko", options: { deliveryMethod: "rnp", expectedGene: "TARGETB" } },
+    expect: {
+      gene: "TARGETB",
+      // No longer blocked: the choice was requested, not inferred.
+      procurementNot: "blocked",
+      blockersNotMatching: [/annotates 2 genes/i],
     },
   },
 ];
@@ -136,6 +163,11 @@ for (const entry of CASES) {
 
     const readiness = summarizeProcurementReadiness(result);
     if (e.procurement) assert.equal(readiness.status, e.procurement, `${label}: procurement status`);
+    if (e.procurementNot) assert.notEqual(readiness.status, e.procurementNot, `${label}: procurement status`);
+
+    (e.blockersNotMatching || []).forEach((pattern) => {
+      assert.doesNotMatch(readiness.blockers.join(" "), pattern, `${label}: unexpected blocker ${pattern}`);
+    });
 
     if (e.donorCount !== undefined) assert.equal((result.os || []).length, e.donorCount);
 
@@ -178,6 +210,43 @@ for (const entry of CASES) {
 // because both of its donors are valid. These assert the gates themselves fire, using
 // minimal hand-built results rather than a reference.
 // ---------------------------------------------------------------------------
+
+test("an unusable CDS is reported rather than silently designed against", () => {
+  // NEIGHBOURA reproduces the TOMM40 hazard exactly: partial annotation, no ATG, and a
+  // length that is not a multiple of three. Selecting it must surface all three, because
+  // every downstream coordinate and residue number depends on the CDS being trustworthy.
+  const record = parseGB(readFixture("two-genes-partial-first.gb"));
+
+  const bad = normalizeGenBankToTranscriptModel(record, { expectedGene: "NEIGHBOURA" });
+  assert.equal(bad.gene, "NEIGHBOURA");
+  const codes = bad.referenceIssues.map((issue) => issue.code);
+  assert.ok(codes.includes("partial-cds"), `expected partial-cds, got ${codes}`);
+  assert.ok(codes.includes("cds-no-start-codon"), `expected cds-no-start-codon, got ${codes}`);
+  assert.ok(codes.includes("cds-not-in-frame"), `expected cds-not-in-frame, got ${codes}`);
+  bad.referenceIssues
+    .filter((issue) => ["partial-cds", "cds-no-start-codon", "cds-not-in-frame"].includes(issue.code))
+    .forEach((issue) => assert.equal(issue.severity, "blocker", `${issue.code} must block release`));
+
+  // The complete gene has none of those problems.
+  const good = normalizeGenBankToTranscriptModel(record, { expectedGene: "TARGETB" });
+  assert.equal(good.gene, "TARGETB");
+  assert.equal(good.transcriptId, "SYN_TARGETB.1", "transcript accession must belong to the selected gene");
+  assert.deepEqual(
+    good.referenceIssues.filter((issue) => issue.severity === "blocker"),
+    [],
+    "the complete gene must not be blocked",
+  );
+});
+
+test("a requested gene that the reference does not contain is refused", () => {
+  const record = parseGB(readFixture("two-genes-partial-first.gb"));
+  const model = normalizeGenBankToTranscriptModel(record, { expectedGene: "SORCS1" });
+  const issue = model.referenceIssues.find((entry) => entry.code === "expected-gene-not-found");
+  assert.ok(issue, "expected an expected-gene-not-found issue");
+  assert.equal(issue.severity, "blocker");
+  assert.match(issue.message, /no CDS for SORCS1/i);
+  assert.match(issue.message, /NEIGHBOURA, TARGETB/);
+});
 
 test("a donor that fails its protein assertion blocks procurement", () => {
   // audit finding 1: the archived R154S gRNA2 donor encoded Arg instead of Ser. If the
