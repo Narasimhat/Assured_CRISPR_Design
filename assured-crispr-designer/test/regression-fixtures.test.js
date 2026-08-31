@@ -83,7 +83,7 @@ const CASES = [
     },
   },
   {
-    name: "N-terminal tag: insert intact and validation primers outside the homology arms",
+    name: "N-terminal tag: insert intact and recommended primers outside the homology arms",
     audit: "terminal-tag donor construction; primers outside homology arms",
     reference: "synthetic-tagging.gb",
     design: { type: "nt", tag: "N:SD40-Linker", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "TAGME" } },
@@ -91,13 +91,13 @@ const CASES = [
       gene: "TAGME",
       procurement: "ready",
       insertValid: true,
-      primerStrategy: "validated-outside-homology-arms",
+      primerStrategy: "recommended-outside-homology-arms",
       minOutsideMargin: 50,
       amp: /^WT ~\d+ bp \| KI ~\d+ bp$/,
     },
   },
   {
-    name: "C-terminal tag: insert intact and validation primers outside the homology arms",
+    name: "C-terminal tag: insert intact and recommended primers outside the homology arms",
     audit: "terminal-tag donor construction; primers outside homology arms",
     reference: "synthetic-tagging.gb",
     design: { type: "ct", tag: "SD40-2xHA", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "TAGME" } },
@@ -105,7 +105,7 @@ const CASES = [
       gene: "TAGME",
       procurement: "ready",
       insertValid: true,
-      primerStrategy: "validated-outside-homology-arms",
+      primerStrategy: "recommended-outside-homology-arms",
       minOutsideMargin: 50,
       amp: /^WT ~\d+ bp \| KI ~\d+ bp$/,
     },
@@ -332,7 +332,7 @@ for (const entry of CASES) {
     if (e.amp) assert.match(result.amp, e.amp, `${label}: amplicon reporting`);
 
     if (e.minOutsideMargin !== undefined) {
-      // The README promises validation primers sit wholly outside the homology arms with
+      // The README promises recommended primers sit wholly outside the homology arms with
       // at least this much clearance, and that both margins are recorded.
       const candidate = (result.primerCandidates || [])[0];
       assert.ok(candidate, `${label}: no primer candidate recorded`);

@@ -41,7 +41,7 @@ everything identifying the project is dropped.
 - **Shape:** single gene `TAGME`, two-exon CDS (1200 nt / 399 aa), with 1500 bp of flank
   before the ATG and 1800 bp after the stop codon.
 - **Why those flanks:** N- and C-terminal designs need to place 400 bp homology arms *and*
-  position validation primers wholly outside those arms with ≥50 bp clearance. A tighter
+  position recommended primers wholly outside those arms with ≥50 bp clearance. A tighter
   reference falls back to unvalidated primer placement and stops testing the real path.
 - **What it pins:** terminal-tag donor construction, internal-tag frame validation,
   outside-homology-arm primer margins, and the refusal paths for unsupported cassettes and

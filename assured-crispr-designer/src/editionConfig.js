@@ -57,7 +57,7 @@ const COMMUNITY_CONFIG = {
   metaDescription: "ASSURED CRISPR Community Edition helps scientists generate knockout and SNP knock-in designs, review primer QC, and export ordering-ready reports.",
   socialDescription: "Generate knockout and SNP knock-in designs and export ordering-ready reports from a hosted browser app.",
   heroHeadline: "Community-ready CRISPR design for knockout and SNP knock-in projects.",
-  heroDescription: "Built for sequence-backed SNP edits, knockout programs, and validation primer review. Start from a request, a GenBank file, or raw sequence, then move directly into a scientist-readable report and ordering package.",
+  heroDescription: "Built for sequence-backed SNP edits, knockout programs, and primer review. Start from a request, a GenBank file, or raw sequence, then move directly into a scientist-readable report and ordering package.",
   heroBadges: ["Knockout and SNP only", "Primer QC and validation views", "Spreadsheet-ready exports"],
   valueBlurb: "One place for guides, donor geometry, primer QC checkpoints, and export files for the two most common community use cases.",
   emptyFolderNotice: "No GenBank folder loaded yet. KO can still start from gene name alone, but SNP projects need a GenBank file or raw DNA reference.",

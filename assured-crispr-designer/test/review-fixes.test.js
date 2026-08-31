@@ -79,7 +79,7 @@ test("outside-arm primer pairs enforce and report a 50 bp nearest-edge margin", 
   const readiness = summarizePrimerReadiness({
     ps: [buildPrimerRecord("Fw", pair.fw.seq), buildPrimerRecord("Rev", pair.rev.seq)],
     amp: `WT ~${pair.amp} bp`,
-    primerStrategy: pair.score <= -900 ? "outside-homology-arms-fallback" : "validated-outside-homology-arms",
+    primerStrategy: pair.score <= -900 ? "outside-homology-arms-fallback" : "recommended-outside-homology-arms",
     primerCandidates: [pair],
   });
   assert.equal(readiness.ready, pair.score > -900);
@@ -144,7 +144,7 @@ test("procurement readiness blocks weak guide protection and always retains exte
       buildPrimerRecord("Rev", "CGTACGATCGTACGATCGTAGC"),
     ],
     amp: "~450 bp",
-    primerStrategy: "validated-centered",
+    primerStrategy: "recommended-centered",
     primerCandidates: [{ score: 1 }],
   };
   const readiness = summarizeProcurementReadiness(result);
@@ -290,7 +290,7 @@ test("a clean design reaches procurement status ready", () => {
     os: [{ proteinValidation: { valid: true } }],
     ps: [buildPrimerRecord("Fw", pair.fw.seq), buildPrimerRecord("Rev", pair.rev.seq)],
     amp: `~${pair.amp} bp`,
-    primerStrategy: "validated-centered",
+    primerStrategy: "recommended-centered",
     primerCandidates: [pair],
   };
 

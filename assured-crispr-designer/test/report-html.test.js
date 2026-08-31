@@ -122,6 +122,42 @@ test("the report states guide-donor pairing and never suggests pooling", () => {
   });
 });
 
+test("primers are described as recommended, never as validated", () => {
+  // The tool computes thermodynamics. It has validated nothing experimentally, and the
+  // README states that genome-wide specificity is explicitly unchecked. Calling these
+  // "validation primers" is the same class of overclaim as the QC gates that could not
+  // fire and the ordering badge on blocked designs.
+  const { html, result } = render(BLOCKED.reference, BLOCKED.type, BLOCKED.opts);
+  assert.ok(!/validation primer/i.test(html), 'report still calls them "validation primers"');
+  assert.match(html, /Recommended Primers/i, "report does not label the primer section");
+  // The strategy identifier travels into exports and the CLI payload, so it carries the
+  // same claim and must not say "validated" either.
+  assert.ok(!/^validated-/.test(result.primerStrategy), `primerStrategy claims validation: ${result.primerStrategy}`);
+  assert.match(result.primerStrategy, /^recommended-/);
+});
+
+test("the co-delivery section appears only when co-delivery was requested", () => {
+  const single = render(BLOCKED.reference, BLOCKED.type, BLOCKED.opts);
+  assert.ok(
+    !single.html.includes("Co-delivery of two guides"),
+    "single-pair report should not carry a co-delivery section",
+  );
+
+  const co = render(BLOCKED.reference, BLOCKED.type, {
+    ...BLOCKED.opts,
+    options: { ...BLOCKED.opts.options, coDeliveryBlocking: true },
+  });
+  assert.ok(co.html.includes("Co-delivery of two guides"), "co-delivery report is missing its section");
+  // The reader must be told to screen for the deletion two cut sites can produce.
+  assert.match(co.html, /Screen for the deletion product/i);
+  assert.match(co.html, /delete the intervening/i);
+  // And the named safer alternative must reach the page, not just the API.
+  assert.ok(
+    co.html.includes(co.result.coDeliverySelection.singleGuideAlternative.spacer),
+    "co-delivery report omits the safer single-guide alternative",
+  );
+});
+
 test("the report layer stays free of React", () => {
   // The whole point of the extraction. An accidental react import here would make this
   // suite unloadable and take report coverage back to zero.

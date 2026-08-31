@@ -10,8 +10,8 @@ Hosted browser app for CRISPR design review and ordering-ready exports.
 - Every point-mutation or internal-tag ssODN is assessed against every offered guide. When cross-guide blocking is not strong, the report explicitly requires one matched guide/ssODN pair and forbids pooling the alternatives.
 - Automatically selected alternative guides must have cut sites at least 10 bp apart. Closely overlapping custom guides are retained only with a non-independence warning.
 - Guide delivery is an explicit input. TTTT is a blocking warning for U6/Pol III expression but not synthetic-guide RNP delivery; guide GC and poly-G warnings apply in either mode.
-- Validation primers are searched by Tm, GC, homopolymer, hairpin, self-dimer, hetero-dimer, pair-Tm, and 3'-end stability criteria. The 3'-end check uses the nearest-neighbour ΔG of the terminal 5 nt and flags both an under-stable clamp (> -4.0 kcal/mol) and an over-stable end (< -8.0 kcal/mol); the thresholds are calibrated to the range that metric can actually produce. Fallback placements never receive an ordering-ready result.
-- Knock-in validation primers must sit completely outside the homology arms with at least 50 bp between the nearest primer edge and each arm. Both margins are recorded in the report.
+- Recommended primers are searched by Tm, GC, homopolymer, hairpin, self-dimer, hetero-dimer, pair-Tm, and 3'-end stability criteria. The 3'-end check uses the nearest-neighbour ΔG of the terminal 5 nt and flags both an under-stable clamp (> -4.0 kcal/mol) and an over-stable end (< -8.0 kcal/mol); the thresholds are calibrated to the range that metric can actually produce. Fallback placements never receive an ordering-ready result.
+- Knock-in primers must sit completely outside the homology arms with at least 50 bp between the nearest primer edge and each arm. Both margins are recorded in the report.
 - Primer thermodynamic acceptance does not imply genome-wide specificity. Run the supplied specificity check or another genome-indexed PCR specificity workflow before ordering.
 
 ## Current limitations

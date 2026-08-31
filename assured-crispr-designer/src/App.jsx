@@ -713,7 +713,7 @@ function finalizeKoResultWithGuides(result, row, guides) {
     strat: longDeletion
       ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
       : result.strat,
-    primerStrategy: longDeletion ? "validated-deletion-screen" : "validated-centered",
+    primerStrategy: longDeletion ? "recommended-deletion-screen" : "recommended-centered",
   };
 }
 
@@ -997,6 +997,7 @@ function createBatchRow(index) {
     projectFolderName: "",
     notes: "",
     deliveryMethod: "unknown",
+    coDelivery: false,
     projectType: "pm",
     referenceSource: "genbank",
     requestedReporter: "",
@@ -1216,7 +1217,7 @@ function buildBatchOrderRows(entries) {
       length: primer.s?.length || 0,
       linkedGuide: "",
       recommended: orderRecommendation,
-      notes: "Validation primer",
+      notes: "Recommended primer",
     }));
     return guides.concat(donors, primers);
   });
@@ -1492,7 +1493,7 @@ function getRowSectionIssues(row) {
   }
 
   if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
-    reference.push("Gene-only KO mode will suggest reference guides only. Upload a reference to generate validation primers automatically.");
+    reference.push("Gene-only KO mode will suggest reference guides only. Upload a reference to generate recommended primers automatically.");
   }
   if (row?.projectType === "ko" && parseCustomGuideInput(row?.customGuides).length && !hasSequenceBackedReference(row)) {
     reference.push("Upload a reference before using custom knockout guides.");
@@ -1973,7 +1974,7 @@ function buildReviewItems(meta, result, fileName) {
   if (result.type === "ko") {
     const guideCount = (result.gs || []).length;
     if (guideCount < 2) items.push({ level: "warning", text: "Knockout design has fewer than two guides. Deletion-based screening will be weaker than expected." });
-    if (result.referenceOnly) items.push({ level: "warning", text: "This knockout was generated from gene-name reference guides only. Upload a GenBank file to calculate exact exon geometry, pair spacing, and validation primers on your target sequence." });
+    if (result.referenceOnly) items.push({ level: "warning", text: "This knockout was generated from gene-name reference guides only. Upload a GenBank file to calculate exact exon geometry, pair spacing, and recommended primers on your target sequence." });
     if (result.deletionOutcome?.spliceDonorRemoved) items.push({ level: "warning", text: `The predicted ${result.deletionOutcome.deletionSize} bp deletion removes the splice donor. Direct deletion is mod 3 = ${result.deletionOutcome.deletionMod3}; possible exon skipping is mod 3 = ${result.deletionOutcome.exonSkippingMod3}. Confirm transcript structure experimentally.` });
     items.push({ level: "check", text: "Validate the expected deletion by junction PCR and confirm frameshift or protein loss in established clones." });
   }
@@ -2116,7 +2117,7 @@ function GeneInfoCardGrid({ meta, result, fileName }) {
 function PrimerSummaryCardGrid({ result }) {
   const primers = buildPrimerSummaryItems(result);
   if (!primers.length) {
-    return <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 14, border: "1px solid #D0D5DD", background: "#FCFCFD", color: "#475467", fontSize: 13 }}>No validation primers were generated for this design.</div>;
+    return <div style={{ marginBottom: 12, padding: "12px 14px", borderRadius: 14, border: "1px solid #D0D5DD", background: "#FCFCFD", color: "#475467", fontSize: 13 }}>No recommended primers were generated for this design.</div>;
   }
   return (
     <Grid style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", marginBottom: 12 }}>
@@ -3491,6 +3492,10 @@ export default function App() {
         const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm, {
           customGuides: parseCustomGuideInput(row.customGuides),
           deliveryMethod: row.deliveryMethod || "unknown",
+          // Co-transfecting both guides with both donors changes what a correct design is:
+          // every donor has to block every guide, or the surviving guide re-cuts the allele
+          // the other donor just repaired.
+          coDeliveryBlocking: !!row.coDelivery,
           rawReference: row.referenceSource === "raw" ? {
             gene: row.gene,
             sequence: parseRawSequenceInput(row.rawSequence),
@@ -3955,6 +3960,7 @@ export default function App() {
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide delivery</div><select value={row.deliveryMethod || "unknown"} onChange={(event) => updateBatchRow(index, "deliveryMethod", event.target.value)} style={SELECT_STYLE}><option value="unknown">Not decided</option><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression plasmid</option></select></label>
+                        <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}><input type="checkbox" checked={!!row.coDelivery} onChange={(event) => updateBatchRow(index, "coDelivery", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Co-transfect both guides and both ssODNs</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>Builds every donor to block every offered guide, and prefers guides whose targets can both be silently destroyed. Leave off when you deliver one matched guide/ssODN pair at a time.</div></span></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
@@ -4158,7 +4164,7 @@ export default function App() {
                       </div>
                     </>
                   )}
-                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>Knockout can run from the gene name alone for a quick guide shortlist. Upload a GenBank file if you want sequence-backed guide spacing and automatic validation primers. If you paste your own guides, a GenBank file is required.</div>}
+                  {row.projectType === "ko" && <div style={{ marginTop: 12, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>Knockout can run from the gene name alone for a quick guide shortlist. Upload a GenBank file if you want sequence-backed guide spacing and automatic primer recommendations. If you paste your own guides, a GenBank file is required.</div>}
                   </FormSection>
 
                   <FormSection title="Optional notes" hint="Add anything a reviewer should keep in mind, such as transcript choice or delivery plan.">
@@ -4182,7 +4188,7 @@ export default function App() {
                     <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
                       <div style={{ color: "#111827", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>High-throughput KO pair suggestions</div>
                       <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
-                        For KO rows, the app can suggest nearby pairs from the top 3 Brunello and Cas-Database guides, then center validation primers automatically.
+                        For KO rows, the app can suggest nearby pairs from the top 3 Brunello and Cas-Database guides, then center recommended primers automatically.
                       </div>
                       {koRowReferences?.status === "loading" && (
                         <div style={{ color: "#667085", fontSize: 13 }}>Loading KO reference pairs...</div>
@@ -4401,10 +4407,10 @@ export default function App() {
                   </tbody>
                 </table>
 
-                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>3. Validation Primers</div>
+                <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>3. Recommended Primers</div>
                 {selectedEntry.result.type === "ko" && selectedEntry.result.referenceOnly && (
                   <InlineNotice tone="warning" style={{ marginBottom: 12 }}>
-                    This knockout was generated in gene-only shortlist mode. Upload a GenBank or raw reference sequence for this row if you want automatic validation primer design around the selected local cut sites.
+                    This knockout was generated in gene-only shortlist mode. Upload a GenBank or raw reference sequence for this row if you want automatic primer recommendations around the selected local cut sites.
                   </InlineNotice>
                 )}
                 <PrimerSummaryCardGrid result={selectedEntry.result} />
@@ -4573,7 +4579,7 @@ export default function App() {
                           <div style={{ marginTop: 14 }}>
                             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#9A3412" }}>Cross-exon review pairs from the top 3 Brunello guides</div>
                             <div style={{ color: "#7C2D12", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
-                              These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and validation primers, but are not preferred default KO pairs.
+                              These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and recommended primers, but are not preferred default KO pairs.
                             </div>
                             <table style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead>
@@ -4777,7 +4783,7 @@ export default function App() {
                                 <div style={{ marginTop: 14 }}>
                                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, color: "#111827" }}>Cross-exon review pairs from the top 3 Cas-Database guides</div>
                                   <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 8 }}>
-                                    These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and validation primers, but are not preferred default KO pairs.
+                                    These pairs remap across different local exons. They are kept for manual review, with recalculated spacing and recommended primers, but are not preferred default KO pairs.
                                   </div>
                                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                                     <thead>

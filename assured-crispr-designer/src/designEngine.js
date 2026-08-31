@@ -1156,7 +1156,7 @@ export function summarizePrimerPairQuality(forwardSequence, reverseSequence, pre
 export function summarizePrimerReadiness(result) {
   const primers = result?.ps || [];
   if (primers.length < 2 || !result?.amp) {
-    return { ready: false, status: "warn", detail: "Validation primers or amplicon sizing are incomplete." };
+    return { ready: false, status: "warn", detail: "Recommended primers or amplicon sizing are incomplete." };
   }
   const quality = summarizePrimerPairQuality(primers[0]?.s || "", primers[1]?.s || "");
   const candidate = result?.primerCandidates?.[0] || null;
@@ -1624,18 +1624,18 @@ export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homolog
 
 function buildOutsideHomologyPrimerWarning(seq, homology5Start, homology3End, primerPairs = []) {
   const sequenceLength = String(seq || "").length;
-  if (primerPairs[0]?.score <= -900) return "Only fallback validation primers could be placed outside the homology arms; review primer QC before ordering.";
+  if (primerPairs[0]?.score <= -900) return "Only fallback primers could be placed outside the homology arms; review primer QC before ordering.";
   const selected = primerPairs[0];
   if (selected && Number.isFinite(selected.minimumOutsideMargin)
     && (selected.leftOutsideMargin < selected.minimumOutsideMargin || selected.rightOutsideMargin < selected.minimumOutsideMargin)) {
-    return `Validation primer margin is below the required ${selected.minimumOutsideMargin} bp outside one or both homology arms.`;
+    return `Primer margin is below the required ${selected.minimumOutsideMargin} bp outside one or both homology arms.`;
   }
   if (primerPairs.length) return "";
   const missing = [];
   if (homology5Start < 18) missing.push("upstream of the 5' homology arm");
   if (sequenceLength - homology3End < 18) missing.push("downstream of the 3' homology arm");
   if (missing.length) {
-    return `Outside-homology-arm validation primers need at least 18 bp of reference sequence ${missing.join(" and ")}. Upload a reference with additional flank or shorten the homology arms.`;
+    return `Outside-homology-arm primers need at least 18 bp of reference sequence ${missing.join(" and ")}. Upload a reference with additional flank or shorten the homology arms.`;
   }
   return "No validated primer pair could be placed outside both homology arms; review this locus manually.";
 }
@@ -1643,7 +1643,7 @@ function buildOutsideHomologyPrimerWarning(seq, homology5Start, homology3End, pr
 function getOutsideHomologyPrimerStrategy(primerPairs = []) {
   if (!primerPairs.length) return "outside-homology-arms-unavailable";
   if (primerPairs[0]?.score <= -900) return "outside-homology-arms-fallback";
-  return "validated-outside-homology-arms";
+  return "recommended-outside-homology-arms";
 }
 
 function scorePrimerSequence(primer) {
@@ -1874,7 +1874,7 @@ export function designPrimerTool(sequenceInput, config = {}) {
     }
     const centerZeroBased = centerOneBased - 1;
     primerPairs = designCenteredPrimerPairs(sequence, centerZeroBased, normalizedPrimerConfig);
-    strategy = "validated-centered";
+    strategy = "recommended-centered";
     targetSummary = `Centered around position ${centerOneBased}`;
     ampliconSummary = `~${primerPairs[0]?.amp || normalizedPrimerConfig.desiredAmp} bp`;
     target = { mode, center: centerOneBased };
@@ -1887,7 +1887,7 @@ export function designPrimerTool(sequenceInput, config = {}) {
     const anchorStart = startOneBased - 1;
     const anchorEnd = endOneBased;
     primerPairs = designFlankingPrimerPairs(sequence, anchorStart, anchorEnd, normalizedPrimerConfig);
-    strategy = "validated-flanking";
+    strategy = "recommended-flanking";
     targetSummary = `Flanking interval ${startOneBased}-${endOneBased}`;
     ampliconSummary = `~${primerPairs[0]?.amp || normalizedPrimerConfig.desiredAmp} bp`;
     target = { mode, intervalStart: startOneBased, intervalEnd: endOneBased };
@@ -1899,7 +1899,7 @@ export function designPrimerTool(sequenceInput, config = {}) {
       return { err: `Deletion screen mode needs two valid 1-based cut positions within 1-${sequence.length}.` };
     }
     primerPairs = designDeletionScreenPrimerPairs(sequence, leftCutOneBased - 1, rightCutOneBased - 1, Number.isFinite(flank) ? flank : KO_DELETION_SCREEN_FLANK);
-    strategy = "validated-deletion-screen";
+    strategy = "recommended-deletion-screen";
     ampliconSummary = `WT ~${primerPairs[0]?.wtAmpliconLength || "n/a"} bp | deletion ~${primerPairs[0]?.deletionAmpliconLength || "n/a"} bp`;
     targetSummary = `Deletion screen across cuts ${leftCutOneBased} and ${rightCutOneBased}`;
     target = { mode, leftCut: leftCutOneBased, rightCut: rightCutOneBased, flank: Number.isFinite(flank) ? flank : KO_DELETION_SCREEN_FLANK };
@@ -2599,7 +2599,7 @@ export function designPM(gb, mutationString, options = {}) {
     buildPrimerRecord(makePrimerName(gb.gene, "pm", "Rev", mutationString), primerPair.rev.seq),
   ];
   result.amp = `~${primerPair.amp} bp`;
-  result.primerStrategy = "validated-centered";
+  result.primerStrategy = "recommended-centered";
   result.primerCandidates = serializePrimerCandidates(primerPairs);
   return result;
 }
@@ -2733,7 +2733,7 @@ export function designIT(gb, siteString, tag, options = {}) {
       buildPrimerRecord(makePrimerName(gb.gene, "it", "Rev", `AFTER_${wtAA || ""}${aaNumber}`, tag), primerPair.rev.seq),
     ],
     amp: `WT ~${primerPair.amp} bp | KI ~${primerPair.amp + preset.seq.length} bp`,
-    primerStrategy: "validated-centered",
+    primerStrategy: "recommended-centered",
     primerCandidates: serializePrimerCandidates(primerPairs),
   };
 }
@@ -2951,7 +2951,7 @@ export function designKO(gb, options = {}) {
     strat: longDeletion
       ? "NHEJ-mediated deletion using dual Cas9 guides. Screen with flanking junction PCR, then confirm the deletion by sequencing."
       : "NHEJ-mediated frameshift using Cas9 RNP. Screen by Sanger sequencing plus ICE/TIDE, then confirm protein loss.",
-    primerStrategy: longDeletion ? "validated-deletion-screen" : "validated-centered",
+    primerStrategy: longDeletion ? "recommended-deletion-screen" : "recommended-centered",
     primerCandidates: serializePrimerCandidates(primerPairsWithOutcomes),
   };
 }
