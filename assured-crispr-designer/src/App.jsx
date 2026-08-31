@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
+import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { EDITION_CONFIG, getEditionUnsupportedIssue, isProjectTypeEnabled, IS_COMMUNITY_EDITION } from "./editionConfig";
@@ -1322,6 +1323,12 @@ function buildBatchOrderRows(entries) {
     const designType = getProjectTypeMeta(result.type).label;
     const designLabel = formatBatchDesignLabel({ ...row, slot }, result);
     const procurementReadiness = summarizeProcurementReadiness(result);
+    // The exported "Recommended" column must not tell a reader to order a design whose
+    // release state forbids it. Vendor templates already drop blocked rows, but the
+    // combined order preview/CSV deliberately keeps them so the safety state travels
+    // with the sequences - which means the wording has to carry the status too.
+    const releaseBlocked = procurementReadiness.status === "blocked";
+    const { item: orderRecommendation, donorStrand: donorStrandRecommendation } = getOrderRecommendationLabels(releaseBlocked);
     const common = {
       slot,
       designLabel,
@@ -1341,7 +1348,7 @@ function buildBatchOrderRows(entries) {
       strand: guide.str,
       length: guide.sp.length,
       linkedGuide: "",
-      recommended: "Yes",
+      recommended: orderRecommendation,
       notes: guide.arm || guide.note || "",
     }));
     const donors = result.type === "pm"
@@ -1355,7 +1362,7 @@ function buildBatchOrderRows(entries) {
         strand: donor.sl || "",
         length: donor.od?.length || 0,
         linkedGuide: donor.guideName || "",
-        recommended: "Order this strand",
+        recommended: donorStrandRecommendation,
         notes: donor.guideName ? `Reverse complement to ${donor.guideName}` : "Recommended donor strand",
       }))
       : result.type === "it"
@@ -1369,7 +1376,7 @@ function buildBatchOrderRows(entries) {
           strand: donor.sl || "",
           length: donor.od?.length || 0,
           linkedGuide: donor.guideName || "",
-          recommended: "Order this strand",
+          recommended: donorStrandRecommendation,
           notes: donor.guideName ? `Guide-linked internal ssODN, reverse complement to ${donor.guideName}` : "Guide-linked internal ssODN donor",
         }))
       : (result.type === "ct" || result.type === "nt")
@@ -1383,7 +1390,7 @@ function buildBatchOrderRows(entries) {
           strand: "",
           length: result.donor?.length || 0,
           linkedGuide: "",
-          recommended: "Yes",
+          recommended: orderRecommendation,
           notes: `${result.type === "ct" ? "C-terminal" : "N-terminal"} HDR donor`,
         }]
         : [];
@@ -1397,7 +1404,7 @@ function buildBatchOrderRows(entries) {
       strand: "",
       length: primer.s?.length || 0,
       linkedGuide: "",
-      recommended: "Yes",
+      recommended: orderRecommendation,
       notes: "Validation primer",
     }));
     return guides.concat(donors, primers);
@@ -2369,12 +2376,13 @@ function buildPmAnnotatedSequenceHtml(label, sequence, diffIndexes, mode, region
   `;
 }
 
-function buildPmStrandCardHtml(strand) {
+function buildPmStrandCardHtml(strand, releaseBlocked = false) {
+  const badge = getDonorStrandBadge(strand, releaseBlocked);
   return `
-    <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
+    <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${badge.border};border-radius:12px;background:${badge.panel};">
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
         <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
-        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? "#047857" : "#475467"};background:${strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? "Order this strand" : "Reference strand"}</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.fg};background:${badge.bg};">${badge.label}</span>
       </div>
       <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${strand.note}</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
@@ -2390,7 +2398,7 @@ function buildPmStrandCardHtml(strand) {
   `;
 }
 
-function buildPmDonorHtml(donor) {
+function buildPmDonorHtml(donor, releaseBlocked = false) {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
@@ -2404,7 +2412,7 @@ function buildPmDonorHtml(donor) {
     <p style="font-size:12px;color:${donor.proteinValidation?.valid ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>Final donor protein assertion:</strong> ${proteinValidation}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
-    ${strands.map((strand) => buildPmStrandCardHtml(strand)).join("")}
+    ${strands.map((strand) => buildPmStrandCardHtml(strand, releaseBlocked)).join("")}
     <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
       <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
       ${buildAlignedRowHtml("WT codons", { prefix: comparison.wt.prefix, tokens: comparison.wt.codons, suffix: comparison.wt.suffix }, comparison.diffCodonIndexes, "wt")}
@@ -3063,7 +3071,7 @@ function buildInternalSequenceHtml(label, sequence, guideSiteIndexes = [], guide
   `;
 }
 
-function buildInternalDonorHtml(donor) {
+function buildInternalDonorHtml(donor, releaseBlocked = false) {
   const blockingSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const crossGuideSummary = (donor.guideProtection || []).map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join("<br/>");
   const strands = buildInternalStrandModels(donor);
@@ -3072,11 +3080,13 @@ function buildInternalDonorHtml(donor) {
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${blockingSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Guide-blocking mutation:</strong><br/>${blockingSummary}</p>` : ""}
-    ${strands.map((strand) => `
-      <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
+    ${strands.map((strand) => {
+      const badge = getDonorStrandBadge(strand, releaseBlocked);
+      return `
+      <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${badge.border};border-radius:12px;background:${badge.panel};">
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
           <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
-          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? "#047857" : "#475467"};background:${strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? "Order this strand" : "Reference strand"}</span>
+          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.fg};background:${badge.bg};">${badge.label}</span>
         </div>
         <p style="font-size:12px;color:#555;margin:0 0 10px 0;">${strand.note}</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
@@ -3088,7 +3098,8 @@ function buildInternalDonorHtml(donor) {
         ${buildInternalSequenceHtml("WT context", strand.wt, strand.wtGuideSiteIndexes, strand.wtGuidePamIndexes, [], [], "wt")}
         ${buildInternalSequenceHtml("Donor ssODN", strand.donor, strand.guideSiteIndexes, strand.guidePamIndexes, strand.silentIndexes, strand.annotations, "donor")}
       </div>
-    `).join("")}
+    `;
+    }).join("")}
   `;
 }
 
@@ -3144,14 +3155,15 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const readinessBlock = buildDesignReadinessHtml(result);
   const locusMapBlock = buildLocusMapHtml(result);
   const snapshotBlock = buildReportSnapshotHtml(result);
+  const releaseBlocked = summarizeProcurementReadiness(result).status === "blocked";
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
-      ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
+      ? (result.os || []).map((donor) => buildPmDonorHtml(donor, releaseBlocked)).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
       : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
-        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, releaseBlocked)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
       : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>
@@ -3573,7 +3585,7 @@ function AlignedTokenRow({ label, prefix = "", tokens = [], suffix = "", diffInd
   );
 }
 
-function PmDonorPreview({ donor }) {
+function PmDonorPreview({ donor, releaseBlocked = false }) {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
   return (
@@ -3596,11 +3608,13 @@ function PmDonorPreview({ donor }) {
           <strong>Silent mutation:</strong> {(donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join(" ; ")}
         </div>
       )}
-      {strands.map((strand) => (
-        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
+      {strands.map((strand) => {
+        const badge = getDonorStrandBadge(strand, releaseBlocked);
+        return (
+        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${badge.border}`, borderRadius: 12, background: badge.panel }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontWeight: 700, color: "#1f2937" }}>{strand.title}</div>
-            <Badge color={strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? "Order This Strand" : "Reference Strand"}</Badge>
+            <Badge color={getDonorStrandBadgeColor(badge, COLORS)}>{badge.labelTitle}</Badge>
           </div>
           <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -3613,7 +3627,8 @@ function PmDonorPreview({ donor }) {
           <PmAnnotatedSequenceRow label="WT" sequence={strand.wt} diffIndexes={strand.diffIndexes} mode="wt" regions={strand.regions} guide={strand.guide} desiredIndexes={strand.desiredIndexes} silentIndexes={strand.silentIndexes} />
           <PmAnnotatedSequenceRow label="Donor" sequence={strand.donor} diffIndexes={strand.diffIndexes} mode="donor" regions={strand.regions} guide={strand.guide} desiredIndexes={strand.desiredIndexes} silentIndexes={strand.silentIndexes} />
         </div>
-      ))}
+      );
+      })}
       <div style={{ marginTop: 10, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#f8fafc" }}>
         <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>Coding frame view</div>
         <AlignedTokenRow label="WT codons" prefix={comparison.wt.prefix} tokens={comparison.wt.codons} suffix={comparison.wt.suffix} diffIndexes={comparison.diffCodonIndexes} mode="wt" />
@@ -3850,7 +3865,7 @@ function LocusMapCard({ result }) {
   );
 }
 
-function InternalDonorPreview({ donor }) {
+function InternalDonorPreview({ donor, releaseBlocked = false }) {
   const strands = buildInternalStrandModels(donor);
   return (
     <div style={{ marginBottom: 14 }}>
@@ -3867,11 +3882,13 @@ function InternalDonorPreview({ donor }) {
           <strong>Guide-blocking mutation:</strong> {(donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join(" ; ")}
         </div>
       )}
-      {strands.map((strand) => (
-        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
+      {strands.map((strand) => {
+        const badge = getDonorStrandBadge(strand, releaseBlocked);
+        return (
+        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${badge.border}`, borderRadius: 12, background: badge.panel }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontWeight: 700, color: "#1f2937" }}>{strand.title}</div>
-            <Badge color={strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? "Order This Strand" : "Reference Strand"}</Badge>
+            <Badge color={getDonorStrandBadgeColor(badge, COLORS)}>{badge.labelTitle}</Badge>
           </div>
           <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -3883,7 +3900,8 @@ function InternalDonorPreview({ donor }) {
           <InternalSequenceRow label="WT context" sequence={strand.wt} guideSiteIndexes={strand.wtGuideSiteIndexes} guidePamIndexes={strand.wtGuidePamIndexes} mode="wt" />
           <InternalSequenceRow label="Donor ssODN" sequence={strand.donor} guideSiteIndexes={strand.guideSiteIndexes} guidePamIndexes={strand.guidePamIndexes} silentIndexes={strand.silentIndexes} annotations={strand.annotations} mode="donor" />
         </div>
-      ))}
+      );
+      })}
     </div>
   );
 }
@@ -5627,7 +5645,7 @@ export default function App() {
                 <LocusMapCard result={selectedEntry.result} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
-                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} />)}
+                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseBlocked={selectedProcurementReadiness?.status === "blocked"} />)}
                 {selectedEntry.result.type === "ko" && (
                   <>
                     <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
@@ -6033,7 +6051,7 @@ export default function App() {
                   <>
                     <InternalProteinPreviewCard result={selectedEntry.result} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
-                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} />)}
+                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} releaseBlocked={selectedProcurementReadiness?.status === "blocked"} />)}
                   </>
                 )}
                 {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (
