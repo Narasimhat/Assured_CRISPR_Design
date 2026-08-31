@@ -5,9 +5,13 @@ import {
   buildPrimerRecord,
   assessGuideSequence,
   classifySpCas9PamDisruption,
+  collectProcurementReviewNotes,
+  designCenteredPrimerPairs,
+  designDeletionScreenPrimerPairs,
   designIT,
   designPM,
   designOutsideHomologyArmPrimerPairs,
+  PRIMER_THREE_PRIME_DG,
   summarizeGuideBlocking,
   summarizePrimerPairQuality,
   summarizePrimerReadiness,
@@ -146,7 +150,12 @@ test("procurement readiness blocks weak guide protection and always retains exte
   const readiness = summarizeProcurementReadiness(result);
   assert.equal(readiness.status, "blocked");
   assert.match(readiness.blockers.join(" "), /not strong/i);
-  assert.match(readiness.warnings.join(" "), /Genome-wide/i);
+  // The external-specificity requirement is a standing requirement, not a
+  // design-specific warning - it must never influence `status`, but it must always
+  // reach an exported order record.
+  assert.doesNotMatch(readiness.warnings.join(" "), /Genome-wide/i);
+  assert.match(readiness.standingRequirements.join(" "), /Genome-wide/i);
+  assert.match(collectProcurementReviewNotes(readiness).join(" "), /Genome-wide/i);
 });
 
 test("archived APOE and Landthaler primer pairs no longer pass thermodynamic review", () => {
@@ -206,4 +215,142 @@ test("internal-tag donors are checked against every offered guide and report bot
   assert.equal(result.coDeliverySafe, false);
   assert.match(result.guideDonorInstruction, /Do not co-deliver/i);
   assert.match(result.amp, /^WT ~\d+ bp \| KI ~\d+ bp$/);
+});
+
+function everyFiveMer() {
+  const bases = ["A", "C", "G", "T"];
+  const out = [];
+  bases.forEach((a) => bases.forEach((b) => bases.forEach((c) => bases.forEach((d) => bases.forEach((e) => {
+    out.push(a + b + c + d + e);
+  })))));
+  return out;
+}
+
+test("3' delta-G thresholds sit inside the range the metric can actually produce", () => {
+  // Regression guard for a silent failure: the original -1.0 / -10.0 cut-offs were
+  // outside the achievable interval, so neither 3'-end check could ever fire.
+  const window = PRIMER_THREE_PRIME_DG.window;
+  assert.equal(window, 5, "everyFiveMer() only covers a 5 nt window");
+
+  const observed = everyFiveMer().map((fiveMer) => buildPrimerRecord("probe", fiveMer).dg3);
+  const min = Math.min(...observed);
+  const max = Math.max(...observed);
+
+  assert.equal(min, PRIMER_THREE_PRIME_DG.reachableMin, "recorded reachableMin is stale");
+  assert.equal(max, PRIMER_THREE_PRIME_DG.reachableMax, "recorded reachableMax is stale");
+
+  assert.ok(
+    min < PRIMER_THREE_PRIME_DG.weakAbove && PRIMER_THREE_PRIME_DG.weakAbove < max,
+    `weakAbove ${PRIMER_THREE_PRIME_DG.weakAbove} is unreachable within [${min}, ${max}]`,
+  );
+  assert.ok(
+    min < PRIMER_THREE_PRIME_DG.overStableBelow && PRIMER_THREE_PRIME_DG.overStableBelow < max,
+    `overStableBelow ${PRIMER_THREE_PRIME_DG.overStableBelow} is unreachable within [${min}, ${max}]`,
+  );
+  assert.ok(PRIMER_THREE_PRIME_DG.overStableBelow < PRIMER_THREE_PRIME_DG.weakAbove);
+});
+
+test("both 3' end-stability warnings actually fire on real primer sequences", () => {
+  const weakClamp = buildPrimerRecord("Fw", "CGCAGGCTAGCTGACGTATATA");
+  assert.ok(weakClamp.dg3 > PRIMER_THREE_PRIME_DG.weakAbove);
+  assert.match(weakClamp.qc.warnings.join(" "), /weak 3' clamp/);
+
+  const overStable = buildPrimerRecord("Rev", "ATGCATAGCATGACTGGCGCGC");
+  assert.ok(overStable.dg3 < PRIMER_THREE_PRIME_DG.overStableBelow);
+  assert.match(overStable.qc.warnings.join(" "), /over-stable 3' end/);
+
+  // A well-behaved 3' end must stay silent, otherwise the check is just noise.
+  const clean = buildPrimerRecord("Fw", "GCTACGATCGTACGATCGTACG");
+  assert.doesNotMatch(clean.qc.warnings.join(" "), /3' clamp|over-stable/);
+});
+
+test("the archived APOE_R154S forward primer is flagged for an over-stable 3' end", () => {
+  // audit/2026_GE_design_audit.md lists this pair as wrongly labelled primer-ready.
+  const forward = buildPrimerRecord("APOE_R154S_Fw", "GACACCCTCCCGCCCTCTCGGCCG");
+  assert.ok(forward.dg3 < PRIMER_THREE_PRIME_DG.overStableBelow);
+  assert.match(forward.qc.warnings.join(" "), /over-stable 3' end/);
+});
+
+test("a clean design reaches procurement status ready", () => {
+  // Regression guard: the standing external-specificity requirement used to be pushed
+  // into `warnings`, so `status` resolved to "review" for every possible design and
+  // the "ready" state - plus the green badge in App.jsx - was unreachable. That erased
+  // the difference between a design with real findings and one without.
+  const sequence = seededDna(2400);
+  // A narrow amplicon window is enough to obtain one validated pair, and keeps this
+  // test from paying for a full default sweep.
+  const pair = designCenteredPrimerPairs(sequence, 1200, { minAmp: 450, maxAmp: 480, maxOffset: 10 })[0];
+  assert.ok(pair, "expected a validated centered primer pair");
+
+  const result = {
+    type: "pm",
+    deliveryMethod: "rnp",
+    gs: [{ n: "TEST_gRNA1", sp: "GCTACGATCGTACGATCGTA" }],
+    ss: [{ gi: 1, pur: "PAM AGG->ACG" }],
+    os: [{ proteinValidation: { valid: true } }],
+    ps: [buildPrimerRecord("Fw", pair.fw.seq), buildPrimerRecord("Rev", pair.rev.seq)],
+    amp: `~${pair.amp} bp`,
+    primerStrategy: "validated-centered",
+    primerCandidates: [pair],
+  };
+
+  assert.equal(summarizePrimerReadiness(result).ready, true);
+  const readiness = summarizeProcurementReadiness(result);
+  assert.equal(readiness.status, "ready");
+  assert.deepEqual(readiness.blockers, []);
+  assert.deepEqual(readiness.warnings, []);
+  // Still surfaced, still exported - just not as a status-changing warning.
+  assert.match(readiness.standingRequirements.join(" "), /Genome-wide/i);
+});
+
+test("standing requirements travel with every procurement verdict", () => {
+  const verdicts = [
+    summarizeProcurementReadiness(null),
+    summarizeProcurementReadiness({ err: "boom" }),
+    summarizeProcurementReadiness({ type: "ko", gs: [] }),
+  ];
+  verdicts.forEach((readiness, index) => {
+    assert.match(
+      collectProcurementReviewNotes(readiness).join(" "),
+      /Genome-wide/i,
+      `verdict ${index} dropped the standing external-specificity requirement`,
+    );
+  });
+});
+
+test("primer search stays memoized instead of re-assessing every candidate", () => {
+  // Guard for a performance defect, not a correctness one. designCenteredPrimerPairs and
+  // designDeletionScreenPrimerPairs sweep amplicon lengths x offsets x primer lengths and
+  // used to call assessPrimerSequence - several O(len^2) alignments - once per visit
+  // rather than once per distinct candidate. A 2400 nt locus took 45-60 s, synchronously,
+  // on the browser main thread.
+  //
+  // The budget is deliberately loose: it only has to separate "memoized" from "not
+  // memoized" (a ~25x gap), so it should not flake on a slow or contended CI runner.
+  const BUDGET_MS = 15000;
+  const sequence = seededDna(2400);
+
+  const centeredStart = Date.now();
+  const centered = designCenteredPrimerPairs(sequence, 1200);
+  const centeredMs = Date.now() - centeredStart;
+  assert.ok(centered.length > 0);
+  assert.ok(centeredMs < BUDGET_MS, `designCenteredPrimerPairs took ${centeredMs} ms (budget ${BUDGET_MS} ms)`);
+
+  const deletionStart = Date.now();
+  const deletion = designDeletionScreenPrimerPairs(sequence, 1140, 1260);
+  const deletionMs = Date.now() - deletionStart;
+  assert.ok(deletion.length > 0);
+  assert.ok(deletionMs < BUDGET_MS, `designDeletionScreenPrimerPairs took ${deletionMs} ms (budget ${BUDGET_MS} ms)`);
+});
+
+test("reverse-strand candidates containing ambiguity codes are rejected", () => {
+  // reverseComplement maps any non-ACGT base to N. The candidate filter therefore has to
+  // test the oriented primer, not the raw genomic window, or an IUPAC code on the reverse
+  // strand would reach an ordering-ready primer as a literal N.
+  const sequence = `${seededDna(400)}${"R".repeat(3)}${seededDna(400)}`;
+  const pairs = designCenteredPrimerPairs(sequence, 400, { minAmp: 200, maxAmp: 260, maxOffset: 8 });
+  pairs.forEach((pair) => {
+    assert.doesNotMatch(pair.fw.seq, /N/, "forward primer must not contain N");
+    assert.doesNotMatch(pair.rev.seq, /N/, "reverse primer must not contain N");
+  });
 });

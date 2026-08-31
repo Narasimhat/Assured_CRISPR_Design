@@ -943,27 +943,24 @@ function longestSelfComplementRun(seq, minLoop = 3) {
   let best = 0;
   for (let offset = -(rc.length - 1); offset < clean.length; offset += 1) {
     let current = 0;
-    let hasLoop = false;
     for (let index = 0; index < clean.length; index += 1) {
       const rcIndex = index - offset;
       if (rcIndex < 0 || rcIndex >= rc.length) {
         current = 0;
-        hasLoop = false;
         continue;
       }
+      // Pairings closer together than minLoop cannot form a hairpin loop, so they
+      // break the stem rather than extending it.
       const originalIndex = clean.length - 1 - rcIndex;
       if (Math.abs(originalIndex - index) <= minLoop) {
         current = 0;
-        hasLoop = false;
         continue;
       }
       if (clean[index] === rc[rcIndex]) {
         current += 1;
-        hasLoop = true;
-        if (hasLoop) best = Math.max(best, current);
+        best = Math.max(best, current);
       } else {
         current = 0;
-        hasLoop = false;
       }
     }
   }
@@ -1035,7 +1032,28 @@ function calculateThreePrimeGcCount(seq, windowSize = 5) {
 // Ideal range for specific priming: −2.0 to −9.0 kcal/mol.
 // > −1.0  → weak 3′ clamp (non-productive priming risk)
 // < −10.0 → over-stable 3′ end (non-specific priming risk)
-function calculateThreePrimeDeltaG(seq, windowSize = 5) {
+
+// ΔG of the 3′ terminal window (SantaLucia 1998 nearest-neighbour parameters, 37 °C).
+// PRIMER_NN_PARAMS holds ΔH in cal/mol and ΔS in cal/mol/K.
+//
+// The thresholds below are calibrated against the range this metric can actually
+// produce. With a 5 nt window there are only four nearest-neighbour steps, so every
+// one of the 1024 possible 5-mers lands in [-8.79, -2.93] kcal/mol. The previous
+// -1.0 / -10.0 cut-offs sat outside that interval, so both 3′-end checks were
+// unreachable and silently contributed nothing to primer QC. These values instead
+// flag the tails of the achievable distribution: the AT-rich ~7% and the GC-rich ~2.5%.
+// `reachableMin`/`reachableMax` are asserted against the real code path in
+// test/review-fixes.test.js, so changing `window` will fail the suite until they are
+// recomputed.
+export const PRIMER_THREE_PRIME_DG = Object.freeze({
+  window: 5,
+  weakAbove: -4.0,
+  overStableBelow: -8.0,
+  reachableMin: -8.79,
+  reachableMax: -2.93,
+});
+
+function calculateThreePrimeDeltaG(seq, windowSize = PRIMER_THREE_PRIME_DG.window) {
   const clean = String(seq || "").toUpperCase().slice(-windowSize);
   let dH = 0;
   let dS = 0;
@@ -1050,22 +1068,25 @@ function calculateThreePrimeDeltaG(seq, windowSize = 5) {
   return Math.round(((dH - 310.15 * dS) / 1000) * 100) / 100;
 }
 
-function calculatePrimerPenalty(seq) {
+// `metrics` lets assessPrimerSequence hand over the values it has already computed.
+// Without it this function repeated all three O(len^2) alignments its only caller had
+// just finished, roughly doubling the cost of every primer assessment.
+function calculatePrimerPenalty(seq, metrics = null) {
   const clean = String(seq || "").toUpperCase();
   if (!clean) return 100;
   let penalty = 0;
-  const gcPercent = calculatePrimerGcPercent(clean);
+  const gcPercent = metrics?.gc ?? calculatePrimerGcPercent(clean);
   penalty += Math.abs(gcPercent - 50) / 4;
-  const tm = calculateNearestNeighborTm(clean);
+  const tm = metrics?.tm ?? calculateNearestNeighborTm(clean);
   penalty += Math.abs(tm - 60) / 3;
   if (hasPrimerHomopolymerRun(clean, 4)) penalty += 8;
   if (hasLowComplexityPrimer(clean)) penalty += 10;
-  const dg3 = calculateThreePrimeDeltaG(clean);
-  if (dg3 > -1.0) penalty += 6;     // weak 3′ clamp — unproductive priming risk
-  else if (dg3 < -10.0) penalty += 4; // over-stable 3′ end — non-specific priming risk
-  const selfRun = longestComplementRun(clean, clean);
-  const selfThreePrimeRun = countThreePrimeComplementRun(clean, clean);
-  const hairpinRun = longestSelfComplementRun(clean);
+  const dg3 = metrics?.threePrimeDeltaG ?? calculateThreePrimeDeltaG(clean);
+  if (dg3 > PRIMER_THREE_PRIME_DG.weakAbove) penalty += 6;            // weak 3′ clamp — unproductive priming risk
+  else if (dg3 < PRIMER_THREE_PRIME_DG.overStableBelow) penalty += 4; // over-stable 3′ end — non-specific priming risk
+  const selfRun = metrics?.selfDimerRun ?? longestComplementRun(clean, clean);
+  const selfThreePrimeRun = metrics?.selfThreePrimeRun ?? countThreePrimeComplementRun(clean, clean);
+  const hairpinRun = metrics?.hairpinRun ?? longestSelfComplementRun(clean);
   penalty += Math.max(0, selfRun - 3) * 2.5;
   penalty += Math.max(0, selfThreePrimeRun - 2) * 5;
   penalty += Math.max(0, hairpinRun - 3) * 3;
@@ -1086,9 +1107,11 @@ function assessPrimerSequence(seq) {
   if (selfThreePrimeRun >= 4) warnings.push("3' self-dimer risk");
   if (selfDimerRun >= 6) warnings.push("self-dimer risk");
   if (hairpinRun >= 5) warnings.push("hairpin risk");
-  if (dg3 > -1.0) warnings.push("weak 3' clamp");
-  if (dg3 < -10.0) warnings.push("over-stable 3' end");
-  const penalty = calculatePrimerPenalty(clean);
+  if (dg3 > PRIMER_THREE_PRIME_DG.weakAbove) warnings.push("weak 3' clamp");
+  if (dg3 < PRIMER_THREE_PRIME_DG.overStableBelow) warnings.push("over-stable 3' end");
+  const penalty = calculatePrimerPenalty(clean, {
+    gc, tm, threePrimeDeltaG: dg3, selfDimerRun, selfThreePrimeRun, hairpinRun,
+  });
   const status = penalty <= 6 ? "high" : penalty <= 14 ? "medium" : "review";
   return {
     penalty,
@@ -1103,9 +1126,13 @@ function assessPrimerSequence(seq) {
   };
 }
 
-export function summarizePrimerPairQuality(forwardSequence, reverseSequence) {
-  const forward = assessPrimerSequence(forwardSequence);
-  const reverse = assessPrimerSequence(reverseSequence);
+// `precomputed.forward` / `precomputed.reverse` let a primer search reuse the
+// per-primer assessments it has already cached. The primer searches evaluate each
+// candidate once and then test it against many partners, so re-assessing both primers
+// on every pair was the dominant cost of the whole design run.
+export function summarizePrimerPairQuality(forwardSequence, reverseSequence, precomputed = {}) {
+  const forward = precomputed.forward || assessPrimerSequence(forwardSequence);
+  const reverse = precomputed.reverse || assessPrimerSequence(reverseSequence);
   const heteroDimerRun = longestComplementRun(forwardSequence, reverseSequence);
   const heteroThreePrimeRun = countThreePrimeComplementRun(forwardSequence, reverseSequence);
   const warnings = [...forward.warnings.map((item) => `Fw ${item}`), ...reverse.warnings.map((item) => `Rev ${item}`)];
@@ -1199,9 +1226,32 @@ export function summarizeGuideBlocking(result) {
   return { tier: overallTier, status: allStrong ? "pass" : "warn", detail, guides: assessments };
 }
 
+// Requirements that apply to every design no matter how clean it is. These are
+// reported separately from `warnings` on purpose: folding them into `warnings` made
+// `status` resolve to "review" for every possible design, which erased the whole
+// distinction between a design with real findings and one without. They must still
+// travel with any exported order record - use collectProcurementReviewNotes().
+const PROCUREMENT_STANDING_REQUIREMENTS = Object.freeze([
+  "Genome-wide guide and primer specificity require an external, assembly-matched check before ordering.",
+]);
+
+/** Blockers + design-specific warnings + standing requirements, in reporting order. */
+export function collectProcurementReviewNotes(readiness) {
+  return [
+    ...(readiness?.blockers || []),
+    ...(readiness?.warnings || []),
+    ...(readiness?.standingRequirements || []),
+  ];
+}
+
 export function summarizeProcurementReadiness(result) {
   if (!result || result.err) {
-    return { status: "blocked", blockers: [result?.err || "No completed design is available."], warnings: [] };
+    return {
+      status: "blocked",
+      blockers: [result?.err || "No completed design is available."],
+      warnings: [],
+      standingRequirements: [...PROCUREMENT_STANDING_REQUIREMENTS],
+    };
   }
 
   const blockers = [];
@@ -1237,12 +1287,12 @@ export function summarizeProcurementReadiness(result) {
 
   const primerReadiness = summarizePrimerReadiness(result);
   if (!primerReadiness.ready && !(result.type === "ko" && result.referenceOnly)) warnings.push(primerReadiness.detail);
-  warnings.push("Genome-wide guide and primer specificity require an external, assembly-matched check before ordering.");
 
   return {
     status: blockers.length ? "blocked" : warnings.length ? "review" : "ready",
     blockers,
     warnings,
+    standingRequirements: [...PROCUREMENT_STANDING_REQUIREMENTS],
   };
 }
 
@@ -1262,8 +1312,12 @@ export function buildPrimerRecord(name, sequence, extra = {}) {
   };
 }
 
-function scoreValidatedPrimerPair(forwardPrimer, reversePrimer, ampliconLength, desiredAmpliconLength = 520, extraPenalty = 0) {
-  const quality = summarizePrimerPairQuality(forwardPrimer.seq, reversePrimer.seq);
+// `precomputedQuality` lets the primer search reuse the quality summary it already
+// computed for filtering. summarizePrimerPairQuality runs several O(len^2) alignments,
+// and every accepted pair used to pay for it three times: once to filter, once here,
+// and once in buildPrimerCandidatePair.
+function scoreValidatedPrimerPair(forwardPrimer, reversePrimer, ampliconLength, desiredAmpliconLength = 520, extraPenalty = 0, precomputedQuality = null) {
+  const quality = precomputedQuality || summarizePrimerPairQuality(forwardPrimer.seq, reversePrimer.seq);
   return Math.round((-(Math.abs(forwardPrimer.tm - 60) + Math.abs(reversePrimer.tm - 60))
     - (Math.abs(forwardPrimer.gc - 50) + Math.abs(reversePrimer.gc - 50)) / 10
     + (forwardPrimer.clamp + reversePrimer.clamp) * 2
@@ -1272,11 +1326,17 @@ function scoreValidatedPrimerPair(forwardPrimer, reversePrimer, ampliconLength, 
     - extraPenalty) * 100) / 100;
 }
 
+const HIGH_GC_AMPLICON_WARNING = "high-GC amplicon (>65%)";
+
 function buildPrimerCandidatePair(forwardPrimer, reversePrimer, extra = {}) {
-  const quality = summarizePrimerPairQuality(forwardPrimer.seq, reversePrimer.seq);
+  const quality = extra.quality || summarizePrimerPairQuality(forwardPrimer.seq, reversePrimer.seq);
   const ampliconGc = typeof extra.ampliconGc === "number" ? extra.ampliconGc : null;
-  if (ampliconGc !== null && ampliconGc > 65 && !quality.warnings.includes("high-GC amplicon")) {
-    quality.warnings.push("high-GC amplicon (>65%)");
+  // The guard used to test for "high-GC amplicon" while pushing "high-GC amplicon
+  // (>65%)", so it never matched. That was harmless only because every call built a
+  // fresh quality object; now that a precomputed one can be passed in, the strings
+  // have to agree or the warning would be appended twice.
+  if (ampliconGc !== null && ampliconGc > 65 && !quality.warnings.includes(HIGH_GC_AMPLICON_WARNING)) {
+    quality.warnings.push(HIGH_GC_AMPLICON_WARNING);
   }
   return {
     fw: forwardPrimer,
@@ -1402,8 +1462,8 @@ export function designFlankingPrimerPairs(seq, anchorStart, anchorEnd, opts = {}
       const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
       if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
       const ampliconGc = calculatePrimerGcPercent(seq.slice(fw.start, rev.end));
-      const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp);
-      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, ampliconGc, score }));
+      const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp, 0, quality);
+      pairs.push(buildPrimerCandidatePair(fw, rev, { amp, ampliconGc, score, quality }));
     }
   }
   if (pairs.length) return pairs.sort((left, right) => right.score - left.score).slice(0, 5);
@@ -1501,11 +1561,12 @@ export function designOutsideHomologyArmPrimerPairs(seq, homology5Start, homolog
       const rightFlank = rev.end - rightBoundary;
       const placementPenalty = (Math.abs(leftFlank - desiredOutsideFlank) + Math.abs(rightFlank - desiredOutsideFlank)) / 25;
       const ampliconGc = calculatePrimerGcPercent(sequence.slice(fw.start, rev.end));
-      const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp, placementPenalty);
+      const score = scoreValidatedPrimerPair(fw, rev, amp, desiredAmp, placementPenalty, quality);
       pairs.push(buildPrimerCandidatePair(fw, rev, {
         amp,
         ampliconGc,
         score,
+        quality,
         leftOutsideMargin: leftBoundary - fw.end,
         rightOutsideMargin: rev.start - rightBoundary,
         minimumOutsideMargin: enforcedMargin,
@@ -1589,6 +1650,49 @@ function scorePrimerSequence(primer) {
   return score;
 }
 
+// A candidate primer is fully determined by its (start, length, orientation); nothing
+// about the enclosing amplicon changes it. The amplicon/offset sweeps in the primer
+// searches revisit the same combinations tens of thousands of times, and each visit ran
+// assessPrimerSequence, which performs several O(length^2) alignments. Evaluating each
+// distinct candidate once is what keeps a single design under a second instead of the
+// 45-60 s it used to spend blocking the browser main thread.
+//
+// Returns { primer, qc } so callers can hand the cached assessment to
+// summarizePrimerPairQuality instead of making it re-assess both primers per pair. The
+// qc is deliberately kept off the primer object so emitted results keep their shape.
+function createPrimerCandidateEvaluator(seq, bounds) {
+  const { minLen, tmMin, tmMax, gcMin, gcMax } = bounds;
+  const cache = new Map();
+  return function evaluateCandidate(start, len, orientation) {
+    const key = `${orientation}:${start}:${len}`;
+    if (cache.has(key)) return cache.get(key);
+    let entry = null;
+    const window = seq.slice(start, start + len);
+    // The N check must run on the oriented primer, not the raw window:
+    // reverseComplement maps any non-ACGT base to N, so checking after orientation is
+    // what rejects IUPAC ambiguity codes on the reverse strand. Checking the raw
+    // window instead would silently let a primer containing N through.
+    const primer = window.length === len && orientation === "rev" ? reverseComplement(window) : window;
+    if (window.length === len && len >= minLen && !primer.includes("N")) {
+      const gc = calculatePrimerGcPercent(primer);
+      if (gc >= gcMin && gc <= gcMax && !hasPrimerHomopolymerRun(primer)) {
+        const tm = calculateNearestNeighborTm(primer);
+        if (tm >= tmMin && tm <= tmMax) {
+          const qc = assessPrimerSequence(primer);
+          if (qc.selfThreePrimeRun < 4 && qc.hairpinRun < 6 && qc.penalty <= 22) {
+            entry = {
+              primer: { seq: primer, start, end: start + len, tm, gc, len, clamp: countThreePrimeClamp(primer) },
+              qc,
+            };
+          }
+        }
+      }
+    }
+    cache.set(key, entry);
+    return entry;
+  };
+}
+
 export function designCenteredPrimerPairs(seq, center, opts = {}) {
   const {
     minAmp = 430,
@@ -1609,6 +1713,9 @@ export function designCenteredPrimerPairs(seq, center, opts = {}) {
   } = opts;
   const minLength = Math.max(minLen * 2, minAmp);
   const maxLength = Math.max(minLength, maxAmp);
+
+  const evaluateCandidate = createPrimerCandidateEvaluator(seq, { minLen, tmMin, tmMax, gcMin, gcMax });
+
   const pairs = [];
   for (let ampliconLength = minLength; ampliconLength <= maxLength; ampliconLength += 1) {
     const maxStart = Math.max(0, seq.length - ampliconLength);
@@ -1617,42 +1724,39 @@ export function designCenteredPrimerPairs(seq, center, opts = {}) {
     const idealStart = iceTideOffset > 0
       ? Math.round(center - iceTideOffset)
       : Math.round(center - ampliconLength / 2);
+
+    // Clamping collapses many offsets onto the same amplicon start. Without this the
+    // identical placement is re-scored and pushed repeatedly, so a single placement
+    // could occupy several of the five "alternative" slots returned below.
+    const ampliconStarts = new Set();
     for (let offset = -maxOffset; offset <= maxOffset; offset += 1) {
-      const ampliconStart = Math.max(0, Math.min(maxStart, idealStart + offset));
+      ampliconStarts.add(Math.max(0, Math.min(maxStart, idealStart + offset)));
+    }
+
+    for (const ampliconStart of ampliconStarts) {
       const ampliconEnd = ampliconStart + ampliconLength;
       // Placement penalty: penalise deviation from desired cut position within amplicon.
       const placementPenalty = iceTideOffset > 0
         ? Math.abs((center - ampliconStart) - iceTideOffset) / 5
         : Math.abs(center - (ampliconStart + ampliconLength / 2)) / 5;
       // Amplicon GC — flag anything > 65 %.
-      const ampliconSeq = seq.slice(ampliconStart, ampliconEnd);
-      const ampliconGc = calculatePrimerGcPercent(ampliconSeq);
+      const ampliconGc = calculatePrimerGcPercent(seq.slice(ampliconStart, ampliconEnd));
       for (let fwLen = minLen; fwLen <= maxLen; fwLen += 1) {
-        const fwSeq = seq.slice(ampliconStart, ampliconStart + fwLen);
-        if (fwSeq.length !== fwLen || fwSeq.includes("N")) continue;
-        const fwGc = calculatePrimerGcPercent(fwSeq);
-        if (fwGc < gcMin || fwGc > gcMax || hasPrimerHomopolymerRun(fwSeq)) continue;
-        const fw = { seq: fwSeq, start: ampliconStart, end: ampliconStart + fwLen, tm: calculateNearestNeighborTm(fwSeq), gc: fwGc, len: fwLen, clamp: countThreePrimeClamp(fwSeq) };
-        if (fw.tm < tmMin || fw.tm > tmMax) continue;
-        const fwQc = assessPrimerSequence(fwSeq);
-        if (fwQc.selfThreePrimeRun >= 4 || fwQc.hairpinRun >= 6 || fwQc.penalty > 22) continue;
+        const fwEntry = evaluateCandidate(ampliconStart, fwLen, "fw");
+        if (!fwEntry) continue;
+        const fw = fwEntry.primer;
         for (let revLen = minLen; revLen <= maxLen; revLen += 1) {
           const revStart = ampliconEnd - revLen;
           if (revStart <= fw.end) continue;
-          const revSeq = reverseComplement(seq.slice(revStart, ampliconEnd));
-          if (revSeq.length !== revLen || revSeq.includes("N")) continue;
-          const revGc = calculatePrimerGcPercent(revSeq);
-          if (revGc < gcMin || revGc > gcMax || hasPrimerHomopolymerRun(revSeq)) continue;
-          const rev = { seq: revSeq, start: revStart, end: ampliconEnd, tm: calculateNearestNeighborTm(revSeq), gc: revGc, len: revLen, clamp: countThreePrimeClamp(revSeq) };
-          if (rev.tm < tmMin || rev.tm > tmMax) continue;
-          const revQc = assessPrimerSequence(revSeq);
-          if (revQc.selfThreePrimeRun >= 4 || revQc.hairpinRun >= 6 || revQc.penalty > 22) continue;
+          const revEntry = evaluateCandidate(revStart, revLen, "rev");
+          if (!revEntry) continue;
+          const rev = revEntry.primer;
           if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
           if (reverseComplement(fw.seq.slice(-4)) === rev.seq.slice(-4)) continue;
-          const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
+          const quality = summarizePrimerPairQuality(fw.seq, rev.seq, { forward: fwEntry.qc, reverse: revEntry.qc });
           if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
-          const score = scoreValidatedPrimerPair(fw, rev, ampliconLength, desiredAmp, placementPenalty);
-          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: ampliconLength, ampliconGc, score }));
+          const score = scoreValidatedPrimerPair(fw, rev, ampliconLength, desiredAmp, placementPenalty, quality);
+          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: ampliconLength, ampliconGc, score, quality }));
         }
       }
     }
@@ -1693,38 +1797,30 @@ export function designDeletionScreenPrimerPairs(seq, leftCut, rightCut, flank = 
   const maxStart = Math.max(0, seq.length - minLen);
   const desiredForwardStart = Math.max(0, Math.min(maxStart, leftCut - flank));
   const desiredReverseStart = Math.max(0, Math.min(maxStart, rightCut + flank - minLen));
+  const evaluateCandidate = createPrimerCandidateEvaluator(seq, { minLen, tmMin, tmMax, gcMin, gcMax });
+
   const pairs = [];
   for (let forwardOffset = -offsetWindow; forwardOffset <= offsetWindow; forwardOffset += 1) {
     const forwardStart = Math.max(0, Math.min(maxStart, desiredForwardStart + forwardOffset));
     for (let fwLen = minLen; fwLen <= maxLen; fwLen += 1) {
-      const forward = seq.slice(forwardStart, forwardStart + fwLen);
-      if (forward.length !== fwLen || forward.includes("N")) continue;
-      const fwGc = calculatePrimerGcPercent(forward);
-      if (fwGc < gcMin || fwGc > gcMax || hasPrimerHomopolymerRun(forward)) continue;
-      const fw = { seq: forward, start: forwardStart, end: forwardStart + fwLen, tm: calculateNearestNeighborTm(forward), gc: fwGc, len: fwLen, clamp: countThreePrimeClamp(forward) };
-      if (fw.tm < tmMin || fw.tm > tmMax) continue;
-      const fwQc = assessPrimerSequence(forward);
-      if (fwQc.selfThreePrimeRun >= 4 || fwQc.hairpinRun >= 6 || fwQc.penalty > 22) continue;
+      const fwEntry = evaluateCandidate(forwardStart, fwLen, "fw");
+      if (!fwEntry) continue;
+      const fw = fwEntry.primer;
       for (let reverseOffset = -offsetWindow; reverseOffset <= offsetWindow; reverseOffset += 1) {
         for (let revLen = minLen; revLen <= maxLen; revLen += 1) {
           const reverseStart = Math.max(fw.end + 50, Math.min(Math.max(0, seq.length - revLen), desiredReverseStart + reverseOffset));
-          const reverse = reverseComplement(seq.slice(reverseStart, reverseStart + revLen));
-          if (reverse.length !== revLen || reverse.includes("N")) continue;
-          const revGc = calculatePrimerGcPercent(reverse);
-          if (revGc < gcMin || revGc > gcMax || hasPrimerHomopolymerRun(reverse)) continue;
-          const rev = { seq: reverse, start: reverseStart, end: reverseStart + revLen, tm: calculateNearestNeighborTm(reverse), gc: revGc, len: revLen, clamp: countThreePrimeClamp(reverse) };
-          if (rev.tm < tmMin || rev.tm > tmMax) continue;
-          const revQc = assessPrimerSequence(reverse);
-          if (revQc.selfThreePrimeRun >= 4 || revQc.hairpinRun >= 6 || revQc.penalty > 22) continue;
+          const revEntry = evaluateCandidate(reverseStart, revLen, "rev");
+          if (!revEntry) continue;
+          const rev = revEntry.primer;
           if (Math.abs(fw.tm - rev.tm) > tmDelta) continue;
-          const quality = summarizePrimerPairQuality(fw.seq, rev.seq);
+          const quality = summarizePrimerPairQuality(fw.seq, rev.seq, { forward: fwEntry.qc, reverse: revEntry.qc });
           if (quality.heteroThreePrimeRun >= 4 || quality.penalty > 30) continue;
           const wtAmpliconLength = reverseStart + revLen - forwardStart;
           const deletionAmpliconLength = Math.max(minLen * 2, (leftCut - forwardStart) + ((reverseStart + revLen) - rightCut));
           const leftFlankPenalty = Math.abs((leftCut - forwardStart) - flank);
           const rightFlankPenalty = Math.abs(((reverseStart + revLen) - rightCut) - flank);
-          const score = scoreValidatedPrimerPair(fw, rev, deletionAmpliconLength, 500, (leftFlankPenalty + rightFlankPenalty) / 20);
-          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: deletionAmpliconLength, wtAmpliconLength, deletionAmpliconLength, score }));
+          const score = scoreValidatedPrimerPair(fw, rev, deletionAmpliconLength, 500, (leftFlankPenalty + rightFlankPenalty) / 20, quality);
+          pairs.push(buildPrimerCandidatePair(fw, rev, { amp: deletionAmpliconLength, wtAmpliconLength, deletionAmpliconLength, score, quality }));
         }
       }
     }

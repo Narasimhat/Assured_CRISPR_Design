@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
+import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { EDITION_CONFIG, getEditionUnsupportedIssue, isProjectTypeEnabled, IS_COMMUNITY_EDITION } from "./editionConfig";
@@ -1329,7 +1329,7 @@ function buildBatchOrderRows(entries) {
       designType,
       referenceFile: row.referenceSource === "raw" ? "Raw DNA + CDS coordinates" : (row.fileName || "Uploaded GenBank"),
       reviewStatus: procurementReadiness.status,
-      reviewNotes: procurementReadiness.blockers.concat(procurementReadiness.warnings).join(" "),
+      reviewNotes: collectProcurementReviewNotes(procurementReadiness).join(" "),
     };
     const guides = (result.gs || []).map((guide) => ({
       ...common,
@@ -5476,7 +5476,7 @@ export default function App() {
                 Export the currently selected project into spreadsheet templates for CRISPR reagents, primers, and HDR donors. Blocked designs cannot produce vendor templates; review-required designs remain procurement drafts until the listed checks are resolved.
               </div>
               {selectedProcurementReadiness && (
-                <div title={selectedProcurementReadiness.blockers.concat(selectedProcurementReadiness.warnings).join(" ")} style={{ marginBottom: 10 }}>
+                <div title={collectProcurementReviewNotes(selectedProcurementReadiness).join(" ")} style={{ marginBottom: 10 }}>
                   <Badge color={selectedProcurementReadiness.status === "blocked" ? COLORS.danger : selectedProcurementReadiness.status === "review" ? "#B45309" : COLORS.success}>
                     Procurement: {selectedProcurementReadiness.status}
                   </Badge>
