@@ -428,6 +428,75 @@ test("a donor that fails its protein assertion blocks procurement", () => {
   assert.doesNotMatch(passing.blockers.join(" "), /protein assertion/i);
 });
 
+// ---------------------------------------------------------------------------
+// Co-delivery of two guides with two donors.
+//
+// The default design pairs each ssODN with one guide, which is only sound if that pair is
+// delivered alone. When both guides and both donors go into the same well, a donor that
+// disrupts only its own guide leaves the other guide free to re-cut the allele it just
+// repaired.
+// ---------------------------------------------------------------------------
+
+const APOE = "apoe-r154s.gb";
+const apoeDesign = (options) => runDesign("pm", readFixture(APOE), "R154S", "", 400,
+  { deliveryMethod: "rnp", expectedGene: "APOE", ...options });
+
+test("by default each donor blocks only its own guide", () => {
+  // Regression guard: co-delivery mode must not change the single-pair output.
+  const result = apoeDesign({});
+  const matrix = result.os.map((donor) => donor.guideProtection.map((entry) => entry.tier));
+  assert.deepEqual(matrix, [["strong", "none"], ["none", "weak"]]);
+  assert.equal(result.coDeliverySafe, false);
+  assert.match(result.guideDonorInstruction, /Do not co-deliver/i);
+});
+
+test("co-delivery mode makes every donor carry every guide's blocking change", () => {
+  const result = apoeDesign({ coDeliveryBlocking: true });
+
+  // No donor may leave any offered guide target completely intact.
+  result.os.forEach((donor) => {
+    donor.guideProtection.forEach((entry) => {
+      assert.notEqual(
+        entry.tier,
+        "none",
+        `${donor.n} leaves ${entry.guideName} fully intact, so that guide could re-cut a repaired allele`,
+      );
+    });
+  });
+
+  // Stacking blocking changes must not break the requested edit.
+  result.os.forEach((donor) => {
+    assert.equal(donor.proteinValidation.valid, true, `${donor.n} failed its protein assertion`);
+    assert.equal(donor.proteinValidation.observedAa, "S");
+  });
+});
+
+test("co-delivery is only declared safe when every guide is strongly disrupted", () => {
+  const result = apoeDesign({ coDeliveryBlocking: true });
+  const tiers = result.os.flatMap((donor) => donor.guideProtection.map((entry) => entry.tier));
+  const allStrong = tiers.every((tier) => tier === "strong");
+  assert.equal(result.coDeliverySafe, allStrong);
+
+  // At this locus gRNA2's PAM cannot be disrupted silently, so only a seed mismatch is
+  // available and the honest answer is still "not safe to co-deliver".
+  assert.ok(tiers.includes("weak"), "fixture expected to retain a weak block");
+  assert.equal(result.coDeliverySafe, false);
+  assert.match(result.guideDonorInstruction, /could not be achieved/i);
+  assert.match(result.guideDonorInstruction, /re-cutting a correctly repaired allele/i);
+});
+
+test("co-delivery reports the deletion product two cut sites can create", () => {
+  const result = apoeDesign({ coDeliveryBlocking: true });
+  assert.ok(result.dualCutDeletionRisk, "co-delivery must flag the dual-cut deletion risk");
+  assert.equal(result.dualCutDeletionRisk.cutSites.length, 2);
+  assert.equal(result.dualCutDeletionRisk.spans.length, 1);
+  assert.ok(result.dualCutDeletionRisk.spans[0] > 0);
+  assert.match(result.dualCutDeletionRisk.note, /delete the intervening/i);
+
+  // Not reported when co-delivery was not requested - it is a property of the protocol.
+  assert.equal(apoeDesign({}).dualCutDeletionRisk, undefined);
+});
+
 test("an insert that does not match its preset blocks procurement", () => {
   // Now that internal-tag inserts are validated in the right orientation, no fixture
   // produces a mismatched insert - so this gate needs asserting directly, or removing it

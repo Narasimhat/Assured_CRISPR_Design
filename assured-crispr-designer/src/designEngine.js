@@ -2434,9 +2434,27 @@ export function designPM(gb, mutationString, options = {}) {
       customGuidesRequireReview: !!customGuideSelection && rawSelectedGuides.some((guide, index) => rawSelectedGuides.slice(0, index).some((existing) => Math.abs(existing.cut - guide.cut) < minimumAlternativeCutOffset)),
     },
   };
-  selectedGuides.forEach((guide, index) => {
+  // Co-delivery: when both guides and both ssODNs go into the same well, a donor that only
+  // disrupts its own guide leaves the OTHER guide free to re-cut the allele it just
+  // repaired. In this mode every donor carries the blocking change for every offered guide,
+  // so whichever donor performs the repair, neither guide can cut the product.
+  const coDeliveryBlocking = !!options.coDeliveryBlocking;
+  const silentByGuide = selectedGuides.map((guide) => {
     const silent = findSilent(gb, guide, blockedPositions);
-    const donor = mkODN(gb, guide, mutationPositions, mutationBases, silent ? [silent] : [], { aaNumber, intendedAa: mutAA.toUpperCase() });
+    // Only reserve positions in co-delivery mode: there, several blocking changes end up in
+    // the same donor, and two individually-silent changes landing in one codon can combine
+    // into a coding change. In single-pair mode each donor carries one change, so reserving
+    // would alter donor sequences for no benefit.
+    if (silent && coDeliveryBlocking) blockedPositions.add(silent.gp);
+    return silent;
+  });
+
+  selectedGuides.forEach((guide, index) => {
+    const silent = silentByGuide[index];
+    const donorSilents = coDeliveryBlocking
+      ? silentByGuide.filter(Boolean)
+      : (silent ? [silent] : []);
+    const donor = mkODN(gb, guide, mutationPositions, mutationBases, donorSilents, { aaNumber, intendedAa: mutAA.toUpperCase() });
     const guideName = makeGuideName(gb.gene, "pm", index, mutationString);
     result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: appendGuideContext(buildPointMutationGuideNote(guide, guideTier, guideWindow), gb, guide) });
     if (donor?.proteinValidation?.valid) result.os.push({ ...donor, n: `ssODN${index + 1} (matched to ${guideName})`, gi: index, guideName, guideStrand: guide.str });
@@ -2452,9 +2470,25 @@ export function designPM(gb, mutationString, options = {}) {
     })),
   }));
   result.coDeliverySafe = result.os.every((donor) => donor.guideProtection.every((entry) => entry.tier === "strong"));
+  result.coDeliveryBlockingRequested = coDeliveryBlocking;
   result.guideDonorInstruction = result.coDeliverySafe
-    ? "Each ssODN strongly disrupts every offered guide target."
-    : "Use one guide with its explicitly matched ssODN only. Do not co-deliver or pool the alternative guides unless every guide is independently shown as strongly blocked in that donor.";
+    ? "Each ssODN strongly disrupts every offered guide target, so the guides and donors may be co-delivered together."
+    : coDeliveryBlocking
+      ? "Co-delivery blocking was requested but could not be achieved: at least one guide is still not strongly disrupted in every donor. Co-delivering these reagents risks the surviving guide re-cutting a correctly repaired allele. Use one matched guide/ssODN pair, or supply guides whose targets can both be silently disrupted."
+      : "Use one guide with its explicitly matched ssODN only. Do not co-deliver or pool the alternative guides unless every guide is independently shown as strongly blocked in that donor.";
+
+  // Two guides cutting the same allele can delete the fragment between them by NHEJ. This
+  // is a property of co-delivery itself, not of the donors, so it is reported whenever more
+  // than one guide is offered for simultaneous use.
+  if (coDeliveryBlocking && selectedGuides.length > 1) {
+    const cuts = selectedGuides.map((guide) => guide.cut).sort((left, right) => left - right);
+    const spans = cuts.slice(1).map((cut, index) => cut - cuts[index]);
+    result.dualCutDeletionRisk = {
+      cutSites: cuts,
+      spans,
+      note: `Co-delivering ${selectedGuides.length} guides allows both sites to be cut in the same allele; non-homologous repair can then delete the intervening ${spans.join(" and ")} bp. Screen for the deletion product as well as the intended edit.`,
+    };
+  }
 
   const primerPairs = designCenteredPrimerPairs(seq, codonInfo.g, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
   const primerPair = primerPairs[0];

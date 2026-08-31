@@ -90,6 +90,9 @@ async function main() {
   // than letting feature order in the reference decide. References that annotate a
   // neighbouring gene are common in NCBI RefSeqGene downloads.
   if (manifest.gene_symbol) options.expectedGene = manifest.gene_symbol;
+  // Set when both guides and both ssODNs are transfected together, so every donor is built
+  // to block every offered guide rather than only its matched one.
+  if (manifest.extra?.co_delivery === true) options.coDeliveryBlocking = true;
 
   const result = runDesign(
     projectType,
