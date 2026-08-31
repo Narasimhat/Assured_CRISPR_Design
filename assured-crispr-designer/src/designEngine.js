@@ -2196,8 +2196,14 @@ function mkInternalOdn(model, guide, insertionPos, insertSequence, silentMutatio
     sl: guide.str === "+" ? "- strand target" : "+ strand target",
     donorSenseLength: donorSense.length,
     insertSequence,
+    // insertStart/insertEnd index the ORDER strand (od), which is the reverse complement
+    // of donorSense whenever the guide is on the + strand. Anything that needs to read
+    // the insert in coding orientation - translation, preset comparison - must use the
+    // sense indices below instead.
     insertStart: orderedInsertStart,
     insertEnd: orderedInsertEnd,
+    senseInsertStart: insertIndex,
+    senseInsertEnd: insertIndex + insertSequence.length,
     silentIndexes,
     guideSiteIndexes: sitePositions.map((position) => toOrderedIndex(position)).filter((index) => index >= 0),
     guidePamIndexes: pamPositions.map((position) => toOrderedIndex(position)).filter((index) => index >= 0),
@@ -2530,8 +2536,17 @@ export function designIT(gb, siteString, tag, options = {}) {
   const seq = getGenomicSequence(gb);
   const primerPairs = designCenteredPrimerPairs(seq, insertionPos, { minAmp: VALIDATION_PRIMER_MIN_AMP, maxAmp: VALIDATION_PRIMER_MAX_AMP, desiredAmp: VALIDATION_PRIMER_TARGET_AMP });
   const primerPair = primerPairs[0];
+  // The insert must be compared in coding orientation. Slicing it out of `od` compared
+  // the antisense strand against a sense-orientation preset whenever the guide was on the
+  // + strand, so matchesPreset was always false for those designs - and for a preset whose
+  // reverse complement happens to contain an in-frame stop (alphaBtx does) it also
+  // reported a fabricated premature stop and a broken frame. Roughly half of all
+  // internal-tag designs were being blocked by that.
   const insertValidation = donors[0]
-    ? buildInsertValidation(preset.seq, donors[0].od.slice(donors[0].insertStart, donors[0].insertEnd))
+    ? buildInsertValidation(
+      preset.seq,
+      donors[0].donorSense.slice(donors[0].senseInsertStart, donors[0].senseInsertEnd),
+    )
     : buildInsertValidation(preset.seq, "");
   return {
     type: "it",

@@ -35,6 +35,20 @@ everything identifying the project is dropped.
   by annotation completeness does not, and the choice must still be reported because it was
   inferred rather than requested. Stating the intended gene removes the ambiguity.
 
+### `synthetic-tagging.gb`
+
+- **Source:** fully synthetic (deterministic generator); no reference, project or subject data.
+- **Shape:** single gene `TAGME`, two-exon CDS (1200 nt / 399 aa), with 1500 bp of flank
+  before the ATG and 1800 bp after the stop codon.
+- **Why those flanks:** N- and C-terminal designs need to place 400 bp homology arms *and*
+  position validation primers wholly outside those arms with ≥50 bp clearance. A tighter
+  reference falls back to unvalidated primer placement and stops testing the real path.
+- **What it pins:** terminal-tag donor construction, internal-tag frame validation,
+  outside-homology-arm primer margins, and the refusal paths for unsupported cassettes and
+  malformed or off-target custom guides.
+- **Useful residues:** 50 is Phe, 100 is Arg. Internal-tag sites on either side of the
+  locus produce donors on opposite strands, which is what exercises orientation handling.
+
 ## Adding a fixture
 
 Add the reference here, then add a case to `CASES` in `../regression-fixtures.test.js`.

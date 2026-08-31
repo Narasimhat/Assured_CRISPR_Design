@@ -82,6 +82,106 @@ const CASES = [
       blockersNotMatching: [/annotates 2 genes/i],
     },
   },
+  {
+    name: "N-terminal tag: insert intact and validation primers outside the homology arms",
+    audit: "terminal-tag donor construction; primers outside homology arms",
+    reference: "synthetic-tagging.gb",
+    design: { type: "nt", tag: "N:SD40-Linker", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "TAGME" } },
+    expect: {
+      gene: "TAGME",
+      procurement: "ready",
+      insertValid: true,
+      primerStrategy: "validated-outside-homology-arms",
+      minOutsideMargin: 50,
+      amp: /^WT ~\d+ bp \| KI ~\d+ bp$/,
+    },
+  },
+  {
+    name: "C-terminal tag: insert intact and validation primers outside the homology arms",
+    audit: "terminal-tag donor construction; primers outside homology arms",
+    reference: "synthetic-tagging.gb",
+    design: { type: "ct", tag: "SD40-2xHA", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "TAGME" } },
+    expect: {
+      gene: "TAGME",
+      procurement: "ready",
+      insertValid: true,
+      primerStrategy: "validated-outside-homology-arms",
+      minOutsideMargin: 50,
+      amp: /^WT ~\d+ bp \| KI ~\d+ bp$/,
+    },
+  },
+  {
+    name: "internal tag: in-frame insert, both WT and KI bands, guides not poolable",
+    audit: "internal tag frame validation",
+    reference: "synthetic-tagging.gb",
+    design: { type: "it", mutation: "F50", tag: "SPOT", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "TAGME" } },
+    expect: {
+      gene: "TAGME",
+      insertValid: true,
+      guideBlocking: ["strong", "strong"],
+      coDeliverySafe: false,
+      amp: /^WT ~\d+ bp \| KI ~\d+ bp$/,
+      warnings: [/Do not co-deliver or pool/i],
+    },
+  },
+  {
+    name: "internal tag on a minus-strand donor is validated in coding orientation",
+    audit: "internal tag frame validation - orientation defect",
+    reference: "synthetic-tagging.gb",
+    // The insert used to be sliced out of the ORDER strand, which is the reverse
+    // complement of the sense donor when the guide is on the + strand. Comparing that to
+    // a sense-orientation preset always failed, and because alphaBtx's reverse complement
+    // contains an in-frame TAG it also reported a fabricated premature stop. Both were
+    // false blockers on a valid design.
+    design: { type: "it", mutation: "R100", tag: "alphaBtx", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "TAGME" } },
+    expect: {
+      gene: "TAGME",
+      insertValid: true,
+      insertUnexpectedStop: false,
+      // The one legitimate blocker here is weak guide protection - not the insert.
+      blockers: [/not strong/i],
+      blockersNotMatching: [/does not match the selected preset/i, /does not preserve the intended coding frame/i],
+    },
+  },
+  // ----- refusal paths -----
+  {
+    name: "refusal: an unsupported C-terminal cassette",
+    audit: "unsupported cassette handling",
+    reference: "synthetic-tagging.gb",
+    design: { type: "ct", tag: "NOT_A_REAL_CASSETTE", arm: 400, options: { expectedGene: "TAGME" } },
+    expect: { designError: /Tag "NOT_A_REAL_CASSETTE" is not available/ },
+  },
+  {
+    name: "refusal: an unsupported internal tag",
+    audit: "unsupported cassette handling",
+    reference: "synthetic-tagging.gb",
+    design: { type: "it", mutation: "F50", tag: "NOT_A_TAG", arm: 400, options: { expectedGene: "TAGME" } },
+    expect: { designError: /Internal tag "NOT_A_TAG" is not available/ },
+  },
+  {
+    name: "refusal: a custom guide that is not an explicit 20 nt spacer",
+    audit: "incomplete guide/PAM input",
+    reference: "synthetic-tagging.gb",
+    design: {
+      type: "pm",
+      mutation: "R100E",
+      arm: 400,
+      options: { expectedGene: "TAGME", customGuides: ["GGCGTTCAGTGATTGTCGC"] },
+    },
+    expect: { designError: /must be a 20 nt spacer/ },
+  },
+  {
+    name: "refusal: a custom guide that does not map near the target site",
+    audit: "mixed-project input rejection - reagents from the wrong locus",
+    reference: "synthetic-tagging.gb",
+    design: {
+      type: "pm",
+      mutation: "R100E",
+      arm: 400,
+      options: { expectedGene: "TAGME", customGuides: ["AAAAAAAAAAAAAAAAAAAA"] },
+    },
+    expect: { designError: /does not map within \d+ bp of the target site/ },
+  },
 ];
 
 function runCase(entry) {
@@ -107,15 +207,30 @@ function assertUniversalInvariants(result, label) {
     );
     (result.os || []).forEach((donor, index) => {
       assert.match(donor.od || "", /^[ACGT]+$/, `${label}: donor ${index} order sequence is empty or not DNA`);
-      assert.ok(donor.proteinValidation, `${label}: donor ${index} has no protein assertion`);
-      assert.equal(donor.proteinValidation.valid, true, `${label}: donor ${index} failed its protein assertion`);
-      // Each donor must be assessed against EVERY offered guide, not just its own.
+      // Each donor must be assessed against EVERY offered guide, not just its own -
+      // that matrix is what the "do not pool" instruction rests on.
       assert.equal(
         (donor.guideProtection || []).length,
         (result.gs || []).length,
         `${label}: donor ${index} was not assessed against every offered guide`,
       );
+      // Point-mutation donors carry the final assembled-protein assertion; internal-tag
+      // donors are validated at the result level via insertValidation instead.
+      if (result.type === "pm") {
+        assert.ok(donor.proteinValidation, `${label}: donor ${index} has no protein assertion`);
+        assert.equal(donor.proteinValidation.valid, true, `${label}: donor ${index} failed its protein assertion`);
+      }
     });
+  }
+
+  // Any design that inserts a preset must prove the insert survived assembly intact.
+  if (["it", "ct", "nt"].includes(result.type)) {
+    assert.ok(result.insertValidation, `${label}: ${result.type} design has no insertValidation`);
+    assert.equal(
+      result.insertValidation.actualLengthBp,
+      result.insertValidation.expectedLengthBp,
+      `${label}: assembled insert length differs from the preset`,
+    );
   }
 
   // Guide records must be complete enough to order.
@@ -157,6 +272,14 @@ for (const entry of CASES) {
     const label = entry.reference;
     const e = entry.expect;
 
+    // Refusal cases assert on the error instead: a design that never completed has no
+    // guides, donors or verdict for the invariants to inspect.
+    if (e.designError) {
+      assert.ok(result.err, `${label}: expected the design to be refused, but it completed`);
+      assert.match(result.err, e.designError, `${label}: refusal message`);
+      return;
+    }
+
     assertUniversalInvariants(result, label);
 
     if (e.gene) assert.equal(result.gene, e.gene, `${label}: wrong gene selected from the reference`);
@@ -192,6 +315,37 @@ for (const entry of CASES) {
     }
 
     if (e.coDeliverySafe !== undefined) assert.equal(result.coDeliverySafe, e.coDeliverySafe);
+
+    if (e.insertValid) {
+      const v = result.insertValidation || {};
+      assert.equal(v.matchesPreset, true, `${label}: assembled insert does not match the preset`);
+      assert.equal(v.framePreserved, true, `${label}: assembled insert does not preserve frame`);
+    }
+    if (e.insertUnexpectedStop !== undefined) {
+      assert.equal(
+        result.insertValidation.unexpectedStop,
+        e.insertUnexpectedStop,
+        `${label}: unexpectedStop`,
+      );
+    }
+    if (e.primerStrategy) assert.equal(result.primerStrategy, e.primerStrategy, `${label}: primer strategy`);
+    if (e.amp) assert.match(result.amp, e.amp, `${label}: amplicon reporting`);
+
+    if (e.minOutsideMargin !== undefined) {
+      // The README promises validation primers sit wholly outside the homology arms with
+      // at least this much clearance, and that both margins are recorded.
+      const candidate = (result.primerCandidates || [])[0];
+      assert.ok(candidate, `${label}: no primer candidate recorded`);
+      assert.equal(candidate.minimumOutsideMargin, e.minOutsideMargin, `${label}: recorded margin floor`);
+      assert.ok(
+        candidate.leftOutsideMargin >= e.minOutsideMargin,
+        `${label}: left margin ${candidate.leftOutsideMargin} < ${e.minOutsideMargin}`,
+      );
+      assert.ok(
+        candidate.rightOutsideMargin >= e.minOutsideMargin,
+        `${label}: right margin ${candidate.rightOutsideMargin} < ${e.minOutsideMargin}`,
+      );
+    }
 
     (e.blockers || []).forEach((pattern) => {
       assert.match(readiness.blockers.join(" "), pattern, `${label}: expected blocker ${pattern}`);
@@ -272,6 +426,41 @@ test("a donor that fails its protein assertion blocks procurement", () => {
     os: [{ proteinValidation: { valid: true, intendedAa: "S", observedAa: "S" } }],
   });
   assert.doesNotMatch(passing.blockers.join(" "), /protein assertion/i);
+});
+
+test("an insert that does not match its preset blocks procurement", () => {
+  // Now that internal-tag inserts are validated in the right orientation, no fixture
+  // produces a mismatched insert - so this gate needs asserting directly, or removing it
+  // would go unnoticed.
+  const base = {
+    type: "it",
+    deliveryMethod: "rnp",
+    gs: [{ n: "TEST_gRNA1", sp: "GCTACGATCGTACGATCGTA", pm: "AGG" }],
+    ss: [{ gi: 1, pur: "PAM AGG->ACG" }],
+    os: [{ od: "ACGT", guideProtection: [{ guideIndex: 1, tier: "strong" }] }],
+    ps: [],
+    amp: "",
+  };
+
+  const mismatched = summarizeProcurementReadiness({
+    ...base,
+    insertValidation: { matchesPreset: false, framePreserved: true },
+  });
+  assert.equal(mismatched.status, "blocked");
+  assert.match(mismatched.blockers.join(" "), /does not match the selected preset/i);
+
+  const outOfFrame = summarizeProcurementReadiness({
+    ...base,
+    insertValidation: { matchesPreset: true, framePreserved: false },
+  });
+  assert.equal(outOfFrame.status, "blocked");
+  assert.match(outOfFrame.blockers.join(" "), /does not preserve the intended coding frame/i);
+
+  const clean = summarizeProcurementReadiness({
+    ...base,
+    insertValidation: { matchesPreset: true, framePreserved: true },
+  });
+  assert.doesNotMatch(clean.blockers.join(" "), /selected preset|coding frame/i);
 });
 
 test("a point-mutation design with no donor at all blocks procurement", () => {
