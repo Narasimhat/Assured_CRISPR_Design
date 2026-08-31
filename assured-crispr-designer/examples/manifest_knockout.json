@@ -1,11 +1,11 @@
 {
-  "gene_symbol": "SCN5A",
-  "ensembl_id": "ENSG00000183873",
+  "gene_symbol": "DEMO1",
+  "ensembl_id": "",
   "mutation": "",
   "edit_type": "knockout",
   "species": "human",
   "cell_line": "",
   "extra": {
-    "reference_file": "../../scn5a-ensg00000183873.gb"
+    "reference_file": "./reference_demo.gb"
   }
 }

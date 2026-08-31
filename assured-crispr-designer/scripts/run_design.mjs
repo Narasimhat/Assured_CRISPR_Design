@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import fs from "fs";
 import path from "path";
-import { runDesign } from "../src/designEngine.js";
+import { collectProcurementReviewNotes, runDesign, summarizeProcurementReadiness } from "../src/designEngine.js";
 
 function parseArgs(argv) {
   const args = {};
@@ -96,8 +96,15 @@ async function main() {
     options,
   );
 
+  const ok = !result?.err;
+  // A successful computation is not an order-ready design. The app draws that
+  // distinction everywhere; without it here an automated caller would read a
+  // populated `result` as a green light - the exact failure mode
+  // audit/2026_GE_design_audit.md records for the archived vendor workbooks.
+  const procurement = ok ? summarizeProcurementReadiness(result) : null;
+
   const payload = {
-    ok: !result?.err,
+    ok,
     input: {
       manifest_path: manifestPath,
       reference_file: referencePath,
@@ -105,6 +112,15 @@ async function main() {
       gene_symbol: manifest.gene_symbol || "",
       ensembl_id: manifest.ensembl_id || "",
     },
+    procurement: procurement
+      ? {
+        status: procurement.status,
+        blockers: procurement.blockers,
+        warnings: procurement.warnings,
+        standing_requirements: procurement.standingRequirements,
+        review_notes: collectProcurementReviewNotes(procurement),
+      }
+      : null,
     result,
   };
 
@@ -113,9 +129,26 @@ async function main() {
     mkdirp(path.dirname(outputPath));
     fs.writeFileSync(outputPath, serialized, "utf8");
     process.stdout.write(`${outputPath}\n`);
+  } else {
+    process.stdout.write(serialized + "\n");
+  }
+
+  // Exit codes so a pipeline can branch without parsing the payload:
+  //   0 = design succeeded and procurement status is "ready"
+  //   2 = design succeeded but procurement is blocked or needs review
+  //   1 = the design itself failed, or the runner threw
+  if (!ok) {
+    process.stderr.write(`[ERROR] ${result.err}\n`);
+    process.exitCode = 1;
     return;
   }
-  process.stdout.write(serialized + "\n");
+  if (procurement.status !== "ready") {
+    process.stderr.write(`[REVIEW] procurement status: ${procurement.status}\n`);
+    for (const note of collectProcurementReviewNotes(procurement)) {
+      process.stderr.write(`  - ${note}\n`);
+    }
+    process.exitCode = 2;
+  }
 }
 
 main().catch((error) => {

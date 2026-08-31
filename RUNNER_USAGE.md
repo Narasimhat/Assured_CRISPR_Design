@@ -49,6 +49,20 @@ npm run design -- --manifest examples/manifest_knockout.json
 }
 ```
 
+## Exit codes
+
+The runner distinguishes a successful computation from an order-ready design:
+
+| Code | Meaning |
+|---|---|
+| `0` | Design succeeded and procurement status is `ready` |
+| `2` | Design succeeded but procurement is `blocked` or needs `review` - read `procurement.review_notes` |
+| `1` | The design itself failed, or the runner threw |
+
+The JSON payload carries a `procurement` object with `status`, `blockers`, `warnings`,
+`standing_requirements`, and a flattened `review_notes` list. A populated `result` on its
+own is never an ordering green light.
+
 ## Notes
 
 - `edit_type` values currently supported by the runner map to the app engine as:
