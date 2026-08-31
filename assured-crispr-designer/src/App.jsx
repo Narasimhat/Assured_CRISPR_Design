@@ -6402,3 +6402,10 @@ export default function App() {
     </div>
   );
 }
+
+export {
+  buildHistoricalContext,
+  buildReportHtml,
+  buildReviewItems,
+  buildRowMeta,
+};

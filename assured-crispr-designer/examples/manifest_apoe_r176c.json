@@ -1,0 +1,14 @@
+{
+  "gene_symbol": "APOE",
+  "ensembl_id": "ENSG00000130203",
+  "mutation": "R176C",
+  "edit_type": "snp knock-in",
+  "species": "human",
+  "cell_line": "",
+  "extra": {
+    "reference_file": "../test/fixtures/apoe-r154s.gb",
+    "design_options": {
+      "deliveryMethod": "rnp"
+    }
+  }
+}
