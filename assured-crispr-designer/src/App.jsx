@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
+import { getPreferredStrandPresentation, normalizeDesignResult } from "./designResult";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { EDITION_CONFIG, getEditionUnsupportedIssue, isProjectTypeEnabled, IS_COMMUNITY_EDITION } from "./editionConfig";
@@ -1322,6 +1323,8 @@ function buildBatchOrderRows(entries) {
     const designType = getProjectTypeMeta(result.type).label;
     const designLabel = formatBatchDesignLabel({ ...row, slot }, result);
     const procurementReadiness = summarizeProcurementReadiness(result);
+    const normalized = normalizeDesignResult(result);
+    const donorPresentation = getPreferredStrandPresentation(procurementReadiness.status);
     const common = {
       slot,
       designLabel,
@@ -1331,71 +1334,45 @@ function buildBatchOrderRows(entries) {
       reviewStatus: procurementReadiness.status,
       reviewNotes: collectProcurementReviewNotes(procurementReadiness).join(" "),
     };
-    const guides = (result.gs || []).map((guide) => ({
+    const guides = normalized.guides.map((guide) => ({
       ...common,
       itemType: "gRNA",
-      name: guide.n,
-      sequence: guide.sp,
-      spacer: guide.sp,
-      pam: guide.pm,
-      strand: guide.str,
-      length: guide.sp.length,
+      name: guide.name,
+      sequence: guide.sequence,
+      spacer: guide.sequence,
+      pam: guide.pam,
+      strand: guide.strand,
+      length: guide.sequence.length,
       linkedGuide: "",
       recommended: "Yes",
-      notes: guide.arm || guide.note || "",
+      notes: guide.notes,
     }));
-    const donors = result.type === "pm"
-      ? (result.os || []).map((donor, donorIndex) => ({
+    const donors = normalized.donors.map((donor, donorIndex) => ({
         ...common,
         itemType: "Donor",
-        name: buildPmDonorOrderName(result, donor, donorIndex),
-        sequence: donor.od,
+        name: result.type === "pm"
+          ? buildPmDonorOrderName(result, donor.raw, donorIndex)
+          : result.type === "it"
+            ? buildInternalDonorOrderName(result, donor.raw, donorIndex)
+            : buildInsertDonorOrderName(result),
+        sequence: donor.sequence,
         spacer: "",
         pam: "",
-        strand: donor.sl || "",
-        length: donor.od?.length || 0,
-        linkedGuide: donor.guideName || "",
-        recommended: "Order this strand",
-        notes: donor.guideName ? `Reverse complement to ${donor.guideName}` : "Recommended donor strand",
-      }))
-      : result.type === "it"
-        ? (result.os || []).map((donor, donorIndex) => ({
-          ...common,
-          itemType: "Donor",
-          name: buildInternalDonorOrderName(result, donor, donorIndex),
-          sequence: donor.od,
-          spacer: "",
-          pam: "",
-          strand: donor.sl || "",
-          length: donor.od?.length || 0,
-          linkedGuide: donor.guideName || "",
-          recommended: "Order this strand",
-          notes: donor.guideName ? `Guide-linked internal ssODN, reverse complement to ${donor.guideName}` : "Guide-linked internal ssODN donor",
-        }))
-      : (result.type === "ct" || result.type === "nt")
-        ? [{
-          ...common,
-          itemType: "Donor",
-          name: buildInsertDonorOrderName(result),
-          sequence: result.donor || "",
-          spacer: "",
-          pam: "",
-          strand: "",
-          length: result.donor?.length || 0,
-          linkedGuide: "",
-          recommended: "Yes",
-          notes: `${result.type === "ct" ? "C-terminal" : "N-terminal"} HDR donor`,
-        }]
-        : [];
-    const primers = (result.ps || []).map((primer) => ({
+        strand: donor.strand,
+        length: donor.sequence.length,
+        linkedGuide: donor.linkedGuide,
+        recommended: donorPresentation.label,
+        notes: `${donorPresentation.note}${donor.linkedGuide ? ` Linked guide: ${donor.linkedGuide}.` : ""}`,
+      }));
+    const primers = normalized.primers.map((primer) => ({
       ...common,
       itemType: "Primer",
-      name: primer.n,
-      sequence: primer.s,
+      name: primer.name,
+      sequence: primer.sequence,
       spacer: "",
       pam: "",
       strand: "",
-      length: primer.s?.length || 0,
+      length: primer.sequence.length,
       linkedGuide: "",
       recommended: "Yes",
       notes: "Validation primer",
@@ -2232,7 +2209,7 @@ function findPmRegion(index, regions) {
   return regions.find((region) => index >= region.start && index < region.end) || null;
 }
 
-function buildPmStrandModels(donor) {
+function buildPmStrandModels(donor, releaseStatus = "review") {
   const length = donor.od?.length || 0;
   const orderedDiff = [...(donor.df || [])].sort((left, right) => left - right);
   const oppositeDiff = orderedDiff.map((index) => length - 1 - index).sort((left, right) => left - right);
@@ -2242,6 +2219,7 @@ function buildPmStrandModels(donor) {
   const oppositeSilent = orderedSilent.map((index) => length - 1 - index).sort((left, right) => left - right);
   const orderedLabel = donor.guideStrand === "+" ? "- strand donor" : "+ strand donor";
   const oppositeLabel = donor.guideStrand === "+" ? "+ strand donor" : "- strand donor";
+  const preferredPresentation = getPreferredStrandPresentation(releaseStatus);
   const genomicGuide = {
     siteStart: donor.guideSiteStart,
     siteEnd: donor.guideSiteEnd,
@@ -2262,7 +2240,8 @@ function buildPmStrandModels(donor) {
       key: "ordered",
       title: orderedLabel,
       recommended: true,
-      note: `Recommended to order. This strand is reverse complement to ${donor.guideName}. Cut site lies between the 91 bp and 36 bp arms.`,
+      release: preferredPresentation,
+      note: `${preferredPresentation.note} This strand is reverse complement to ${donor.guideName}. Cut site lies between the 91 bp and 36 bp arms.`,
       wt: donor.wo,
       donor: donor.od,
       diffIndexes: orderedDiff,
@@ -2370,11 +2349,13 @@ function buildPmAnnotatedSequenceHtml(label, sequence, diffIndexes, mode, region
 }
 
 function buildPmStrandCardHtml(strand) {
+  const preferredColor = strand.release?.tone === "blocked" ? "#B42318" : strand.release?.tone === "review" ? "#B54708" : "#047857";
+  const preferredBackground = strand.release?.tone === "blocked" ? "#FEE4E2" : strand.release?.tone === "review" ? "#FEF0C7" : "#D1FAE5";
   return `
-    <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
+    <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? preferredColor : "#d7dee7"};border-radius:12px;background:${strand.recommended ? preferredBackground : "#f8fafc"};">
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
         <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
-        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? "#047857" : "#475467"};background:${strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? "Order this strand" : "Reference strand"}</span>
+        <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? preferredColor : "#475467"};background:${strand.recommended ? preferredBackground : "#EAECF0"};">${strand.recommended ? strand.release?.label || "Preferred strand" : "Reference strand"}</span>
       </div>
       <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${strand.note}</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
@@ -2390,9 +2371,9 @@ function buildPmStrandCardHtml(strand) {
   `;
 }
 
-function buildPmDonorHtml(donor) {
+function buildPmDonorHtml(donor, releaseStatus = "review") {
   const comparison = buildPmDonorComparison(donor);
-  const strands = buildPmStrandModels(donor);
+  const strands = buildPmStrandModels(donor, releaseStatus);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const proteinValidation = donor.proteinValidation?.valid
     ? `Pass: final donor encodes ${donor.proteinValidation.observedAa} at residue ${donor.proteinValidation.targetAaNumber} with no unintended coding changes.`
@@ -2733,7 +2714,8 @@ function buildDesignReadinessChecks(result) {
 
 function buildReportSnapshotItems(result) {
   if (!result) return [];
-  const guideCount = (result.gs || []).length;
+  const normalized = normalizeDesignResult(result);
+  const guideCount = normalized.guides.length;
   const pairSpacing = result.type === "ko" && result.gs?.length >= 2 && Number.isFinite(result.gs[0]?.d) && Number.isFinite(result.gs[1]?.d)
     ? `${Math.abs(result.gs[1].d - result.gs[0].d)} bp`
     : null;
@@ -2757,7 +2739,7 @@ function buildReportSnapshotItems(result) {
     return [
       { label: "Edit class", value: "Internal tag", tone: "accent" },
       { label: "Insert", value: result.tag || "Tag", tone: "default" },
-      { label: "Donors", value: `${(result.os || []).length}`, tone: (result.os || []).length ? "success" : "warm" },
+      { label: "Donors", value: `${normalized.donors.length}`, tone: normalized.donors.length ? "success" : "warm" },
       { label: "Primers", value: result.amp || "Pending", tone: result.amp ? "success" : "warm" },
     ];
   }
@@ -2765,7 +2747,7 @@ function buildReportSnapshotItems(result) {
     return [
       { label: "Edit class", value: result.type === "ct" ? "C-terminal KI" : "N-terminal KI", tone: "accent" },
       { label: "Insert", value: result.tag || "Tag", tone: "default" },
-      { label: "Donor", value: result.dl ? `${result.dl} bp` : "Ready", tone: "success" },
+      { label: "Donor", value: normalized.donors.length ? `${normalized.donors[0].sequence.length} bp` : "Missing", tone: normalized.donors.length ? "success" : "warm" },
       { label: "Primers", value: result.amp || "Pending", tone: result.amp ? "success" : "warm" },
     ];
   }
@@ -2990,7 +2972,7 @@ function mirrorAnnotations(annotations = [], sequenceLength = 0) {
   }));
 }
 
-function buildInternalStrandModels(donor) {
+function buildInternalStrandModels(donor, releaseStatus = "review") {
   const ordered = donor.od || "";
   const opposite = reverseComplement(ordered);
   const insertLength = Math.max(0, (donor.insertEnd || 0) - (donor.insertStart || 0));
@@ -3009,12 +2991,14 @@ function buildInternalStrandModels(donor) {
   const reverseIndexes = (indexes, length) => (indexes || []).map((index) => length - 1 - index).sort((left, right) => left - right);
   const orderedLabel = donor.guideStrand === "+" ? "- strand donor" : "+ strand donor";
   const oppositeLabel = donor.guideStrand === "+" ? "+ strand donor" : "- strand donor";
+  const preferredPresentation = getPreferredStrandPresentation(releaseStatus);
   return [
     {
       key: "ordered",
       title: orderedLabel,
       recommended: true,
-      note: `Recommended to order. This strand is reverse complement to ${donor.guideName}. Cut site lies between the 91 bp and 36 bp arms.`,
+      release: preferredPresentation,
+      note: `${preferredPresentation.note} This strand is reverse complement to ${donor.guideName}. Cut site lies between the 91 bp and 36 bp arms.`,
       wt: orderedWt,
       donor: ordered,
       annotations: donor.donorAnnotations || [],
@@ -3063,20 +3047,20 @@ function buildInternalSequenceHtml(label, sequence, guideSiteIndexes = [], guide
   `;
 }
 
-function buildInternalDonorHtml(donor) {
+function buildInternalDonorHtml(donor, releaseStatus = "review") {
   const blockingSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const crossGuideSummary = (donor.guideProtection || []).map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join("<br/>");
-  const strands = buildInternalStrandModels(donor);
+  const strands = buildInternalStrandModels(donor, releaseStatus);
   return `
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${blockingSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Guide-blocking mutation:</strong><br/>${blockingSummary}</p>` : ""}
     ${strands.map((strand) => `
-      <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"};border-radius:12px;background:${strand.recommended ? "#ECFDF5" : "#f8fafc"};">
+      <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${strand.recommended && strand.release?.tone === "blocked" ? "#B42318" : strand.recommended && strand.release?.tone === "review" ? "#B54708" : strand.recommended ? "#047857" : "#d7dee7"};border-radius:12px;background:${strand.recommended && strand.release?.tone === "blocked" ? "#FEE4E2" : strand.recommended && strand.release?.tone === "review" ? "#FEF0C7" : strand.recommended ? "#D1FAE5" : "#f8fafc"};">
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
           <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
-          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended ? "#047857" : "#475467"};background:${strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? "Order this strand" : "Reference strand"}</span>
+          <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${strand.recommended && strand.release?.tone === "blocked" ? "#B42318" : strand.recommended && strand.release?.tone === "review" ? "#B54708" : strand.recommended ? "#047857" : "#475467"};background:${strand.recommended && strand.release?.tone === "blocked" ? "#FEE4E2" : strand.recommended && strand.release?.tone === "review" ? "#FEF0C7" : strand.recommended ? "#D1FAE5" : "#EAECF0"};">${strand.recommended ? strand.release?.label || "Preferred strand" : "Reference strand"}</span>
         </div>
         <p style="font-size:12px;color:#555;margin:0 0 10px 0;">${strand.note}</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
@@ -3128,6 +3112,7 @@ function buildHistoricalRowsHtml(matches) {
 
 function buildReportHtml(meta, result, fileName, historicalContext, reviewItems, brunelloLibrary = null) {
   if (!result) return "";
+  const releaseStatus = summarizeProcurementReadiness(result).status;
   const headerRows = [
     ["Group", meta.clientName || "n/a"],
     ["IRIS ID", meta.irisId || "[to be assigned]"],
@@ -3146,12 +3131,12 @@ function buildReportHtml(meta, result, fileName, historicalContext, reviewItems,
   const snapshotBlock = buildReportSnapshotHtml(result);
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
-      ? (result.os || []).map((donor) => buildPmDonorHtml(donor)).join("")
+      ? (result.os || []).map((donor) => buildPmDonorHtml(donor, releaseStatus)).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
       : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
-        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, releaseStatus)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
       : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>
@@ -3573,9 +3558,9 @@ function AlignedTokenRow({ label, prefix = "", tokens = [], suffix = "", diffInd
   );
 }
 
-function PmDonorPreview({ donor }) {
+function PmDonorPreview({ donor, releaseStatus = "review" }) {
   const comparison = buildPmDonorComparison(donor);
-  const strands = buildPmStrandModels(donor);
+  const strands = buildPmStrandModels(donor, releaseStatus);
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
@@ -3597,10 +3582,10 @@ function PmDonorPreview({ donor }) {
         </div>
       )}
       {strands.map((strand) => (
-        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
+        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended && strand.release?.tone === "blocked" ? "#B42318" : strand.recommended && strand.release?.tone === "review" ? "#B54708" : strand.recommended ? "#047857" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended && strand.release?.tone === "blocked" ? "#FEE4E2" : strand.recommended && strand.release?.tone === "review" ? "#FEF0C7" : strand.recommended ? "#D1FAE5" : "#f8fafc" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontWeight: 700, color: "#1f2937" }}>{strand.title}</div>
-            <Badge color={strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? "Order This Strand" : "Reference Strand"}</Badge>
+            <Badge color={strand.recommended && strand.release?.tone === "blocked" ? COLORS.danger : strand.recommended && strand.release?.tone === "review" ? "#B54708" : strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? strand.release?.label || "Preferred Strand" : "Reference Strand"}</Badge>
           </div>
           <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -3850,8 +3835,8 @@ function LocusMapCard({ result }) {
   );
 }
 
-function InternalDonorPreview({ donor }) {
-  const strands = buildInternalStrandModels(donor);
+function InternalDonorPreview({ donor, releaseStatus = "review" }) {
+  const strands = buildInternalStrandModels(donor, releaseStatus);
   return (
     <div style={{ marginBottom: 14 }}>
       <div style={{ fontWeight: 700, color: "#2E75B6", marginBottom: 6 }}>{donor.n} ({donor.sl})</div>
@@ -3868,10 +3853,10 @@ function InternalDonorPreview({ donor }) {
         </div>
       )}
       {strands.map((strand) => (
-        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended ? "#10B98155" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended ? "#ECFDF5" : "#f8fafc" }}>
+        <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${strand.recommended && strand.release?.tone === "blocked" ? "#B42318" : strand.recommended && strand.release?.tone === "review" ? "#B54708" : strand.recommended ? "#047857" : "#d7dee7"}`, borderRadius: 12, background: strand.recommended && strand.release?.tone === "blocked" ? "#FEE4E2" : strand.recommended && strand.release?.tone === "review" ? "#FEF0C7" : strand.recommended ? "#D1FAE5" : "#f8fafc" }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
             <div style={{ fontWeight: 700, color: "#1f2937" }}>{strand.title}</div>
-            <Badge color={strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? "Order This Strand" : "Reference Strand"}</Badge>
+            <Badge color={strand.recommended && strand.release?.tone === "blocked" ? COLORS.danger : strand.recommended && strand.release?.tone === "review" ? "#B54708" : strand.recommended ? COLORS.success : COLORS.muted}>{strand.recommended ? strand.release?.label || "Preferred Strand" : "Reference Strand"}</Badge>
           </div>
           <div style={{ color: "#555", fontSize: 12, marginBottom: 8 }}>{strand.note}</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
@@ -5627,7 +5612,7 @@ export default function App() {
                 <LocusMapCard result={selectedEntry.result} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
-                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} />)}
+                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseStatus={selectedProcurementReadiness?.status} />)}
                 {selectedEntry.result.type === "ko" && (
                   <>
                     <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
@@ -6033,7 +6018,7 @@ export default function App() {
                   <>
                     <InternalProteinPreviewCard result={selectedEntry.result} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
-                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} />)}
+                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} releaseStatus={selectedProcurementReadiness?.status} />)}
                   </>
                 )}
                 {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (
