@@ -9,11 +9,8 @@ import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessCh
   normalizeGeneToken, normalizeLocusWindow } from "./reportHtml";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
-import { EDITION_CONFIG, getEditionUnsupportedIssue, isProjectTypeEnabled, IS_COMMUNITY_EDITION } from "./editionConfig";
-
-// Edition-aware: this drives which design types the UI offers. The report layer uses its
-// own complete list, because a report must describe any design it is given.
-const PROJECT_TYPES = EDITION_CONFIG.projectTypes;
+import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
+import { formatBuildLabel } from "./buildInfo";
 
 const COLORS = {
   bg: "#F5F7FB",
@@ -74,9 +71,8 @@ const CARD_STYLE = {
   backdropFilter: "blur(8px)",
 };
 
-const APP_FOOTER_LABEL = EDITION_CONFIG.footerLabel;
+const APP_FOOTER_LABEL = formatBuildLabel();
 const REPO_URL = "https://github.com/Narasimhat/Assured_CRISPR_Design";
-const SAMPLE_REQUEST_TEXT = EDITION_CONFIG.sampleRequestText;
 
 const CASSETTE_ALIASES = {
   mscarlett2a: "T2A-mScarlet_I3",
@@ -1002,7 +998,7 @@ function createBatchRow(index) {
     referenceSource: "genbank",
     requestedReporter: "",
     mutation: "",
-    tag: EDITION_CONFIG.defaultTag,
+    tag: APP_CONFIG.defaultTag,
     homologyArm: "250",
     customGuides: "",
     gbRaw: "",
@@ -1072,9 +1068,7 @@ function resolvePrimerToolReference(primerTool, selectedEntry) {
 function applyBatchRowChange(row, key, value, folderLibrary) {
   const nextRow = { ...row, [key]: value };
   if (key === "projectType") {
-    if (!isProjectTypeEnabled(value)) {
-      nextRow.projectType = PROJECT_TYPES[0]?.id || "pm";
-    } else if (value === "it") {
+    if (value === "it") {
       nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
       nextRow.mutation = row.mutation && /^[A-Z]?\d+$/i.test(row.mutation) ? row.mutation : "";
     } else if (value === "ct") {
@@ -1082,7 +1076,7 @@ function applyBatchRowChange(row, key, value, folderLibrary) {
     } else if (value === "nt") {
       nextRow.tag = CASSETTES[row.tag] ? row.tag : "N:EGFP-Linker";
     } else {
-      nextRow.tag = EDITION_CONFIG.defaultTag;
+      nextRow.tag = APP_CONFIG.defaultTag;
       if (value === "ko") nextRow.mutation = "";
     }
   }
@@ -1260,9 +1254,9 @@ function normalizeBatchProjectType(value) {
   const compact = String(value || "").toLowerCase().replace(/[^a-z]/g, "");
   if (compact === "pm" || compact === "snp" || compact === "pointmutation" || compact === "pointmutations") return "pm";
   if (compact === "ko" || compact === "knockout" || compact === "knockouts") return "ko";
-  if (!IS_COMMUNITY_EDITION && (compact === "it" || compact === "internal" || compact === "internaltag" || compact === "internalinframetag" || compact === "inframe" || compact === "inframetag" || compact === "internalknockin")) return "it";
-  if (!IS_COMMUNITY_EDITION && (compact === "ct" || compact === "cterminal" || compact === "ctag" || compact === "cterminaltag")) return "ct";
-  if (!IS_COMMUNITY_EDITION && (compact === "nt" || compact === "nterminal" || compact === "ntag" || compact === "nterminaltag")) return "nt";
+  if ((compact === "it" || compact === "internal" || compact === "internaltag" || compact === "internalinframetag" || compact === "inframe" || compact === "inframetag" || compact === "internalknockin")) return "it";
+  if ((compact === "ct" || compact === "cterminal" || compact === "ctag" || compact === "cterminaltag")) return "ct";
+  if ((compact === "nt" || compact === "nterminal" || compact === "ntag" || compact === "nterminaltag")) return "nt";
   return "";
 }
 
@@ -1400,9 +1394,7 @@ function parseRequestLine(line, index, folderLibrary) {
   const initialCassette = detectCassetteKey(trimmed);
   const mutation = detectMutationToken(trimmed);
   const internalSite = detectInternalSiteToken(trimmed);
-  const parsedProjectType = detectProjectTypeFromText(trimmed, mutation, internalSite, initialCassette);
-  const unsupportedIssue = getEditionUnsupportedIssue(trimmed, initialCassette);
-  const projectType = unsupportedIssue ? (parsedProjectType === "ko" ? "ko" : "pm") : parsedProjectType;
+  const projectType = detectProjectTypeFromText(trimmed, mutation, internalSite, initialCassette);
   const requestedReporter = (projectType === "ct" || projectType === "nt") ? detectReporterMentionKey(trimmed) : "";
   const cassetteKey = detectCassetteKey(trimmed, projectType) || ((projectType === "ct" || projectType === "nt" || projectType === "it") ? initialCassette : "");
   const cellLine = detectCellLineToken(trimmed);
@@ -1422,14 +1414,14 @@ function parseRequestLine(line, index, folderLibrary) {
       ? (cassetteKey || "")
       : projectType === "it"
         ? (cassetteKey || "SPOT")
-        : EDITION_CONFIG.defaultTag,
+        : APP_CONFIG.defaultTag,
     homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
     customGuides: "",
     gbRaw: fileEntry?.gbRaw || "",
     fileName: fileEntry?.fileName || "",
-    parseIssue: unsupportedIssue,
+    parseIssue: "",
   };
-  row.parseIssue = row.parseIssue || summarizeRowParseIssue(row, fileEntry);
+  row.parseIssue = summarizeRowParseIssue(row, fileEntry);
   return row;
 }
 
@@ -2876,17 +2868,17 @@ export default function App() {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.title = EDITION_CONFIG.browserTitle;
+    document.title = APP_CONFIG.browserTitle;
     const updateMeta = (selector, content) => {
       const node = document.querySelector(selector);
       if (node) node.setAttribute("content", content);
     };
-    updateMeta('meta[name="description"]', EDITION_CONFIG.metaDescription);
-    updateMeta('meta[name="apple-mobile-web-app-title"]', EDITION_CONFIG.appName);
-    updateMeta('meta[name="twitter:title"]', EDITION_CONFIG.browserTitle);
-    updateMeta('meta[name="twitter:description"]', EDITION_CONFIG.socialDescription);
-    updateMeta('meta[property="og:title"]', EDITION_CONFIG.browserTitle);
-    updateMeta('meta[property="og:description"]', EDITION_CONFIG.socialDescription);
+    updateMeta('meta[name="description"]', APP_CONFIG.metaDescription);
+    updateMeta('meta[name="apple-mobile-web-app-title"]', APP_CONFIG.appName);
+    updateMeta('meta[name="twitter:title"]', APP_CONFIG.browserTitle);
+    updateMeta('meta[name="twitter:description"]', APP_CONFIG.socialDescription);
+    updateMeta('meta[property="og:title"]', APP_CONFIG.browserTitle);
+    updateMeta('meta[property="og:description"]', APP_CONFIG.socialDescription);
     updateMeta('meta[property="og:url"]', window.location.href);
     const canonicalNode = document.querySelector('link[rel="canonical"]');
     if (canonicalNode) canonicalNode.setAttribute("href", window.location.href);
@@ -3535,7 +3527,7 @@ export default function App() {
 
       const mappedRows = definitions.map((definition, index) => {
         if (!definition.fileToken) throw new Error(`Line ${definition.lineNumber}: missing file name.`);
-        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be ${EDITION_CONFIG.batchTypeHelp}.`);
+        if (!definition.projectType) throw new Error(`Line ${definition.lineNumber}: design type must be ${APP_CONFIG.batchTypeHelp}.`);
         if (definition.projectType === "pm" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: point mutation designs need a mutation such as N32R.`);
         if (definition.projectType === "it" && !definition.modification) throw new Error(`Line ${definition.lineNumber}: internal in-frame tag designs need a site and tag such as "after P155 SPOT".`);
         if ((definition.projectType === "ct" || definition.projectType === "nt") && !definition.modification) throw new Error(`Line ${definition.lineNumber}: insert designs need a cassette name such as SD40-2xHA.`);
@@ -3550,7 +3542,7 @@ export default function App() {
           label: definition.label || fileEntry.fileName.replace(/\.[^.]+$/, ""),
           projectType: definition.projectType,
           mutation: definition.projectType === "pm" ? definition.modification : definition.projectType === "it" ? internalSpec.site : "",
-          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : EDITION_CONFIG.defaultTag,
+          tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : APP_CONFIG.defaultTag,
           homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "250") : "250",
           gbRaw: fileEntry.gbRaw,
           fileName: fileEntry.fileName,
@@ -3649,7 +3641,7 @@ export default function App() {
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900, boxShadow: "0 10px 22px rgba(0,0,0,0.18)" }}>AC</div>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.05, color: "#0F172A" }}>{EDITION_CONFIG.appName}</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1.05, color: "#0F172A" }}>{APP_CONFIG.appName}</div>
                   <div style={{ display: "inline-flex", alignItems: "center", gap: 8, marginTop: 6, padding: "6px 10px", borderRadius: 999, border: "1px solid rgba(15, 23, 42, 0.08)", background: "#ffffff" }}>
                     <span style={{ color: "#0F766E", fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase" }}>Created by</span>
                     <span style={{ width: 1, alignSelf: "stretch", background: "rgba(148,163,184,0.28)" }} />
@@ -3658,10 +3650,10 @@ export default function App() {
                 </div>
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.08, maxWidth: 880, marginBottom: 10, color: "#0F172A" }}>
-                {EDITION_CONFIG.heroHeadline}
+                {APP_CONFIG.heroHeadline}
               </div>
               <div style={{ color: "#475467", fontSize: 14, lineHeight: 1.6, maxWidth: 920, marginBottom: 14 }}>
-                {EDITION_CONFIG.heroDescription}
+                {APP_CONFIG.heroDescription}
               </div>
               <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
                 {[
@@ -3676,14 +3668,14 @@ export default function App() {
                 ))}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-                {EDITION_CONFIG.heroBadges.map((item) => (
+                {APP_CONFIG.heroBadges.map((item) => (
                   <div key={item} style={{ padding: "7px 11px", borderRadius: 999, border: "1px solid #D7DEE7", background: "#ffffff", color: "#334155", fontSize: 12, fontWeight: 700 }}>
                     {item}
                   </div>
                 ))}
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                <ActionButton variant="primary" onClick={() => resetWorkspace(IS_COMMUNITY_EDITION ? "ko" : "pm")}>
+                <ActionButton variant="primary" onClick={() => resetWorkspace("pm")}>
                   Start blank workspace
                 </ActionButton>
                 <ActionButton variant="secondary" onClick={loadSampleRequests}>
@@ -3700,7 +3692,7 @@ export default function App() {
                   What this tool is best at
                 </div>
                 <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
-                  {EDITION_CONFIG.valueBlurb}
+                  {APP_CONFIG.valueBlurb}
                 </div>
                 <div style={{ display: "grid", gap: 8 }}>
                   {[
@@ -3875,7 +3867,7 @@ export default function App() {
                 <ActionButton variant="secondary" onClick={parseRequests}>Parse requests</ActionButton>
                 <ActionButton variant="secondary" onClick={addProjectRow}>Add design</ActionButton>
                 <ActionButton variant="subtle" onClick={loadSampleRequests}>Load demo requests</ActionButton>
-                <ActionButton variant="danger" onClick={() => resetWorkspace(IS_COMMUNITY_EDITION ? "ko" : "pm")}>Clear workspace</ActionButton>
+                <ActionButton variant="danger" onClick={() => resetWorkspace("pm")}>Clear workspace</ActionButton>
               </div>
               {batchError && <InlineNotice tone="danger" style={{ marginBottom: 12 }}>{batchError}</InlineNotice>}
               <div style={{ display: "grid", gap: 8 }}>
@@ -3889,7 +3881,7 @@ export default function App() {
                   </div>
                 ) : (
                   <div style={{ padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
-                    {EDITION_CONFIG.emptyFolderNotice}
+                    {APP_CONFIG.emptyFolderNotice}
                   </div>
                 )}
               </div>
@@ -4016,7 +4008,7 @@ export default function App() {
                     </label>
                   </FormSection>
 
-                  <FormSection title="What should be designed?" hint={EDITION_CONFIG.designDetailsHint} tone="warm">
+                  <FormSection title="What should be designed?" hint={APP_CONFIG.designDetailsHint} tone="warm">
                     {!!rowIssues.design.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.design.join(" ")}</InlineNotice>}
                     <label style={{ display: "block", marginBottom: 12 }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Short edit summary</div><input value={row.editSummary} onChange={(event) => updateBatchRow(index, "editSummary", event.target.value)} style={FIELD_STYLE} placeholder="APOE p.Arg176Cys SNP knock-in" /></label>
 
@@ -4314,9 +4306,7 @@ export default function App() {
                   Use the Design Requests section to upload GenBank files, paste request lines, and generate designs. Once at least one design succeeds, the full report preview will appear here.
                 </div>
                 <div style={{ fontSize: 13, lineHeight: 1.6 }}>
-                  {EDITION_CONFIG.quickStartCopy.split("Load sample requests").length > 1
-                    ? <>Quick start: upload a GenBank folder, click <strong>Load sample requests</strong>, then click <strong>Generate designs</strong>{IS_COMMUNITY_EDITION ? " for KO or SNP projects." : "."}</>
-                    : EDITION_CONFIG.quickStartCopy}
+                  Quick start: upload a GenBank folder, click <strong>Load sample requests</strong>, then click <strong>Generate designs</strong>.
                 </div>
               </div>
             )}

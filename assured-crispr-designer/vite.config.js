@@ -1,3 +1,6 @@
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { createRequire } from "module";
@@ -7,6 +10,55 @@ const { lookupCasDatabase } = require("../cas-database-lookup.cjs");
 const { lookupBrunelloGuides } = require("../brunello-lookup.cjs");
 const { lookupFpbaseReporters } = require("../fpbase-lookup.cjs");
 const { lookupPrimerSpecificity } = require("../primer-specificity-lookup.cjs");
+
+/**
+ * Commit the bundle was built from, so the footer can name the code that produced a report.
+ *
+ * Read out of .git rather than shelled out to `git`: under `npm run build` the spawned git
+ * exits non-zero with no stderr on this machine, which silently produced an empty SHA and
+ * a footer that looked fine while carrying no provenance at all. Reading the files has no
+ * PATH dependency and cannot fail quietly in that way.
+ */
+function readGitSha(startDir) {
+  let dir = startDir;
+  for (let depth = 0; depth < 8; depth += 1) {
+    const dotGit = path.join(dir, ".git");
+    if (fs.existsSync(dotGit)) {
+      // A worktree or submodule checkout has .git as a file pointing at the real gitdir.
+      const gitDir = fs.statSync(dotGit).isDirectory()
+        ? dotGit
+        : path.resolve(dir, fs.readFileSync(dotGit, "utf8").replace(/^gitdir:\s*/, "").trim());
+      const head = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
+      if (!head.startsWith("ref:")) return head;              // detached HEAD
+      const ref = head.slice(4).trim();
+      const looseRef = path.join(gitDir, ref);
+      if (fs.existsSync(looseRef)) return fs.readFileSync(looseRef, "utf8").trim();
+      const packedRefs = path.join(gitDir, "packed-refs");     // ref may only be packed
+      if (fs.existsSync(packedRefs)) {
+        const line = fs.readFileSync(packedRefs, "utf8")
+          .split(/\r?\n/)
+          .find((entry) => entry.endsWith(` ${ref}`));
+        if (line) return line.split(" ")[0];
+      }
+      return "";
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return "";
+}
+
+/** CI hosts hand us the commit; a local build reads it from the checkout. Never throws. */
+function resolveBuildSha() {
+  const fromEnv = process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || process.env.BUILD_SHA;
+  if (fromEnv) return String(fromEnv).trim();
+  try {
+    return readGitSha(path.dirname(fileURLToPath(import.meta.url)));
+  } catch {
+    return "";
+  }
+}
 
 /** GitHub Pages project site: https://<user>.github.io/<repo>/ */
 const GITHUB_PAGES_BASE = "/Assured_CRISPR_Design/";
@@ -146,6 +198,10 @@ function primerSpecificityDevApi() {
 
 export default defineConfig(({ command }) => ({
   plugins: [react(), casDatabaseDevApi(), brunelloDevApi(), fpbaseDevApi(), primerSpecificityDevApi()],
+  define: {
+    __BUILD_SHA__: JSON.stringify(resolveBuildSha()),
+    __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
+  },
   base: command === "build" && process.env.GITHUB_PAGES === "1" ? GITHUB_PAGES_BASE : "/",
   build: {
     rollupOptions: {

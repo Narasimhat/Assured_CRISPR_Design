@@ -11,20 +11,7 @@
 
 import { summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine.js";
 import { getDonorStrandBadge } from "./reportModel.js";
-
-
-// A report describes what was designed; it must not depend on which edition rendered it.
-// Binding this to the edition's list meant a community build would fall back to
-// PROJECT_TYPES[0] and label a tagging design "SNP knock-in". editionConfig.js also reads
-// import.meta.env, which is a Vite-only global - importing it here would make this module
-// unloadable under `node --test`, defeating the purpose of extracting it.
-const DESIGN_TYPE_META = [
-  { id: "pm", label: "Point mutation", short: "SNP / amino-acid change" },
-  { id: "ko", label: "Knockout", short: "Frameshift knockout" },
-  { id: "it", label: "Internal in-frame tag", short: "ssODN insert within CDS" },
-  { id: "ct", label: "C-terminal tag / reporter", short: "HDR insert at stop" },
-  { id: "nt", label: "N-terminal tag / reporter", short: "HDR insert at ATG" },
-];
+import { DESIGN_TYPES } from "./designTypes.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -60,7 +47,7 @@ function renderGuideSequenceHtml(spacer, pam) {
 }
 
 export function getProjectTypeMeta(projectType) {
-  return DESIGN_TYPE_META.find((item) => item.id === projectType) || DESIGN_TYPE_META[0];
+  return DESIGN_TYPES.find((item) => item.id === projectType) || DESIGN_TYPES[0];
 }
 
 export function formatDesignLabel(meta, result) {

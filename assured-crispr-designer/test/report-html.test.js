@@ -12,12 +12,12 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { runDesign, summarizeProcurementReadiness } from "../src/designEngine.js";
-import { buildReportHtml } from "../src/reportHtml.js";
+import { buildReportHtml, getProjectTypeMeta } from "../src/reportHtml.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => readFileSync(path.join(here, "fixtures", name), "utf8");
@@ -156,6 +156,39 @@ test("the co-delivery section appears only when co-delivery was requested", () =
     co.html.includes(co.result.coDeliverySelection.singleGuideAlternative.spacer),
     "co-delivery report omits the safer single-guide alternative",
   );
+});
+
+test("the app shell and the report describe designs from one list", async () => {
+  // These were two lists. editionConfig.js filtered its copy by build edition, so a
+  // narrowed build made getProjectTypeMeta fall back to entry [0] and label a tagging
+  // design "SNP knock-in" in a downloadable record - which is why reportHtml.js kept a
+  // private duplicate. With the edition gone there is one list, and this pins it: a type
+  // added to the UI cannot silently be unrenderable by the report.
+  const { PROJECT_TYPES } = await import("../src/appConfig.js");
+  const { DESIGN_TYPES } = await import("../src/designTypes.js");
+  assert.equal(PROJECT_TYPES, DESIGN_TYPES, "the UI list is no longer the canonical list");
+  DESIGN_TYPES.forEach((entry) => {
+    assert.equal(getProjectTypeMeta(entry.id).id, entry.id, `report cannot label design type ${entry.id}`);
+  });
+  // Fallback is still needed for unknown ids, but it must not silently mislabel a real one.
+  assert.equal(getProjectTypeMeta("nonsense").id, DESIGN_TYPES[0].id);
+});
+
+test("no build-time edition switch has crept back in", () => {
+  // The community edition was an untested build-time flag that no deployment set. Its
+  // reintroduction would take reportHtml.js back to a private list, and importing
+  // import.meta.env into a shared module makes it unloadable under `node --test`.
+  const shared = ["appConfig.js", "designTypes.js", "reportHtml.js", "reportModel.js", "designEngine.js"];
+  // Comments are stripped first: these modules deliberately document the removal, and a
+  // guard that forbids naming the thing it guards against is a guard nobody can explain.
+  const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  shared.forEach((name) => {
+    const source = stripComments(readFileSync(path.join(here, "..", "src", name), "utf8"));
+    assert.ok(!/import\.meta\.env/.test(source), `${name} reads import.meta.env and cannot load in node`);
+    assert.ok(!/EDITION_CONFIG|IS_COMMUNITY_EDITION/.test(source), `${name} reintroduces an edition switch`);
+  });
+  // And the module itself must be gone, not merely unreferenced.
+  assert.equal(existsSync(path.join(here, "..", "src", "editionConfig.js")), false, "editionConfig.js is back");
 });
 
 test("the report layer stays free of React", () => {

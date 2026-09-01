@@ -36,6 +36,21 @@ cd assured-crispr-designer
 npm run build
 ```
 
+### Build provenance
+
+The footer names the commit the bundle was built from, for example
+`Hosted build 418aabc • 1 Sep 2026`. When a report looks wrong, that short SHA identifies the
+code that produced it; a date cannot.
+
+`vite.config.js` resolves it from `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA` or `BUILD_SHA`, and
+otherwise reads `.git` directly. A build outside a checkout still succeeds — the footer just
+drops the SHA rather than failing.
+
+There is one edition. A build-time `VITE_APP_EDITION` switch used to narrow the app to
+knockout and SNP designs; no deployment ever set it, and it is gone. If a narrower public
+surface is wanted later, make it a runtime setting on one deployment rather than a second
+build.
+
 ## GitHub Pages deployment
 
 This repo already includes a GitHub Actions workflow at [`.github/workflows/deploy-github-pages.yml`](./.github/workflows/deploy-github-pages.yml).
