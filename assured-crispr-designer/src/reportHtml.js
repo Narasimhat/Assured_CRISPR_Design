@@ -405,8 +405,8 @@ function buildPmAnnotatedSequenceHtml(label, sequence, diffIndexes, mode, region
   `;
 }
 
-function buildPmStrandCardHtml(strand, releaseBlocked = false) {
-  const badge = getDonorStrandBadge(strand, releaseBlocked);
+function buildPmStrandCardHtml(strand, releaseStatus = "ready") {
+  const badge = getDonorStrandBadge(strand, releaseStatus);
   return `
     <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${badge.border};border-radius:12px;background:${badge.panel};">
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
@@ -427,7 +427,7 @@ function buildPmStrandCardHtml(strand, releaseBlocked = false) {
   `;
 }
 
-function buildPmDonorHtml(donor, releaseBlocked = false) {
+function buildPmDonorHtml(donor, releaseStatus = "ready") {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
@@ -441,7 +441,7 @@ function buildPmDonorHtml(donor, releaseBlocked = false) {
     <p style="font-size:12px;color:${donor.proteinValidation?.valid ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>Final donor protein assertion:</strong> ${proteinValidation}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
-    ${strands.map((strand) => buildPmStrandCardHtml(strand, releaseBlocked)).join("")}
+    ${strands.map((strand) => buildPmStrandCardHtml(strand, releaseStatus)).join("")}
     <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
       <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
       ${buildAlignedRowHtml("WT codons", { prefix: comparison.wt.prefix, tokens: comparison.wt.codons, suffix: comparison.wt.suffix }, comparison.diffCodonIndexes, "wt")}
@@ -1100,7 +1100,7 @@ function buildInternalSequenceHtml(label, sequence, guideSiteIndexes = [], guide
   `;
 }
 
-function buildInternalDonorHtml(donor, releaseBlocked = false) {
+function buildInternalDonorHtml(donor, releaseStatus = "ready") {
   const blockingSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const crossGuideSummary = (donor.guideProtection || []).map((entry) => `${entry.guideName}: ${entry.tier} — ${entry.reason}`).join("<br/>");
   const strands = buildInternalStrandModels(donor);
@@ -1110,7 +1110,7 @@ function buildInternalDonorHtml(donor, releaseBlocked = false) {
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${blockingSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Guide-blocking mutation:</strong><br/>${blockingSummary}</p>` : ""}
     ${strands.map((strand) => {
-      const badge = getDonorStrandBadge(strand, releaseBlocked);
+      const badge = getDonorStrandBadge(strand, releaseStatus);
       return `
       <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${badge.border};border-radius:12px;background:${badge.panel};">
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">
@@ -1242,15 +1242,15 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const readinessBlock = buildDesignReadinessHtml(result);
   const locusMapBlock = buildLocusMapHtml(result);
   const snapshotBlock = buildReportSnapshotHtml(result);
-  const releaseBlocked = summarizeProcurementReadiness(result).status === "blocked";
+  const releaseStatus = summarizeProcurementReadiness(result).status;
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
-      ? (result.os || []).map((donor) => buildPmDonorHtml(donor, releaseBlocked)).join("")
+      ? (result.os || []).map((donor) => buildPmDonorHtml(donor, releaseStatus)).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
       : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
-        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, releaseBlocked)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, releaseStatus)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
       : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>

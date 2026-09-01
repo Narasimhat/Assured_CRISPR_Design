@@ -15,7 +15,7 @@ import {
   getOrderRecommendationLabels,
 } from "../src/reportModel.js";
 
-const COLORS = { success: "#059669", danger: "#DC2626", muted: "#667085" };
+const COLORS = { success: "#059669", danger: "#DC2626", warning: "#B54708", muted: "#667085" };
 
 test("a blocked design never says 'order' on its donor strand", () => {
   const badge = getDonorStrandBadge({ recommended: true }, true);
@@ -35,6 +35,15 @@ test("an unblocked recommended strand is the orderable one", () => {
   assert.equal(badge.tone, "order");
   assert.equal(badge.label, "Order this strand");
   assert.equal(getDonorStrandBadgeColor(badge, COLORS), COLORS.success);
+});
+
+test("a review-required design presents a draft candidate, not an order instruction", () => {
+  const badge = getDonorStrandBadge({ recommended: true }, "review");
+  assert.equal(badge.orderable, false);
+  assert.equal(badge.tone, "review");
+  assert.match(badge.label, /review required/i);
+  assert.doesNotMatch(badge.label, /order this strand/i);
+  assert.equal(getDonorStrandBadgeColor(badge, COLORS), COLORS.warning);
 });
 
 test("the non-recommended strand is never orderable, blocked or not", () => {
@@ -75,4 +84,9 @@ test("the exported Recommended column carries the release state", () => {
   const open = getOrderRecommendationLabels(false);
   assert.equal(open.item, "Yes");
   assert.equal(open.donorStrand, "Order this strand");
+
+  const review = getOrderRecommendationLabels("review");
+  assert.match(review.item, /draft/i);
+  assert.match(review.donorStrand, /review required/i);
+  assert.doesNotMatch(review.donorStrand, /order this strand/i);
 });

@@ -1133,8 +1133,8 @@ function buildBatchOrderRows(entries) {
     // release state forbids it. Vendor templates already drop blocked rows, but the
     // combined order preview/CSV deliberately keeps them so the safety state travels
     // with the sequences - which means the wording has to carry the status too.
-    const releaseBlocked = procurementReadiness.status === "blocked";
-    const { item: orderRecommendation, donorStrand: donorStrandRecommendation } = getOrderRecommendationLabels(releaseBlocked);
+    const releaseStatus = procurementReadiness.status;
+    const { item: orderRecommendation, donorStrand: donorStrandRecommendation } = getOrderRecommendationLabels(releaseStatus);
     const common = {
       slot,
       designLabel,
@@ -2364,7 +2364,7 @@ function AlignedTokenRow({ label, prefix = "", tokens = [], suffix = "", diffInd
   );
 }
 
-function PmDonorPreview({ donor, releaseBlocked = false }) {
+function PmDonorPreview({ donor, releaseStatus = "ready" }) {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
   return (
@@ -2388,7 +2388,7 @@ function PmDonorPreview({ donor, releaseBlocked = false }) {
         </div>
       )}
       {strands.map((strand) => {
-        const badge = getDonorStrandBadge(strand, releaseBlocked);
+        const badge = getDonorStrandBadge(strand, releaseStatus);
         return (
         <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${badge.border}`, borderRadius: 12, background: badge.panel }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
@@ -2644,7 +2644,7 @@ function LocusMapCard({ result }) {
   );
 }
 
-function InternalDonorPreview({ donor, releaseBlocked = false }) {
+function InternalDonorPreview({ donor, releaseStatus = "ready" }) {
   const strands = buildInternalStrandModels(donor);
   return (
     <div style={{ marginBottom: 14 }}>
@@ -2662,7 +2662,7 @@ function InternalDonorPreview({ donor, releaseBlocked = false }) {
         </div>
       )}
       {strands.map((strand) => {
-        const badge = getDonorStrandBadge(strand, releaseBlocked);
+        const badge = getDonorStrandBadge(strand, releaseStatus);
         return (
         <div key={strand.key} style={{ marginBottom: 12, padding: 12, border: `1px solid ${badge.border}`, borderRadius: 12, background: badge.panel }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 8 }}>
@@ -4427,7 +4427,7 @@ export default function App() {
                 <LocusMapCard result={selectedEntry.result} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
-                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseBlocked={selectedProcurementReadiness?.status === "blocked"} />)}
+                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseStatus={selectedProcurementReadiness?.status} />)}
                 {selectedEntry.result.type === "ko" && (
                   <>
                     <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
@@ -4833,7 +4833,7 @@ export default function App() {
                   <>
                     <InternalProteinPreviewCard result={selectedEntry.result} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
-                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} releaseBlocked={selectedProcurementReadiness?.status === "blocked"} />)}
+                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} releaseStatus={selectedProcurementReadiness?.status} />)}
                   </>
                 )}
                 {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (
