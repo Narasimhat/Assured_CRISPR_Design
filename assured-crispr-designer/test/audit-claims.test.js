@@ -424,7 +424,8 @@ test("the report shows the orderable donor differently from the unorderable one"
   const strong = readiness.guidePairs.find((pair) => pair.orderable);
   const weak = readiness.guidePairs.find((pair) => !pair.orderable);
   assert.equal(getDonorReleaseStatus(result, strong.guideName), readiness.status);
-  assert.equal(getDonorReleaseStatus(result, weak.guideName), "blocked");
+  // "pair-blocked", not "blocked": the design is in review, only this pair is refused.
+  assert.equal(getDonorReleaseStatus(result, weak.guideName), "pair-blocked");
 
   const meta = buildRowMeta({ gene: "APOE", projectType: "pm" }, result);
   const html = buildReportHtml(meta, result, "apoe-r154s.gb",
@@ -457,4 +458,137 @@ test("a donor failing its protein assertion is not an orderable pair", () => {
   assert.equal(affected.orderable, false, "a pair whose donor mistranslates reports itself orderable");
   assert.ok(affected.blockers.some((item) => /protein assertion/i.test(item)),
     `the pair does not say why: ${affected.blockers.join(" | ")}`);
+});
+
+
+// --- accepting weak protection, on the record ------------------------------------------
+//
+// Weak protection is a risk a competent designer can weigh and accept. The tool's job is
+// then to record that a person decided it - not to hide the advice, and not to pretend the
+// design passed.
+
+test("weak protection can be accepted, and the design still does not read as ready", () => {
+  const plain = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const weakName = summarizeProcurementReadiness(plain).guidePairs.find((p) => !p.orderable).guideName;
+
+  const accepted = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE",
+    acceptWeakProtection: true,
+    weakProtectionReason: "RNP, short exposure; screening 48 clones with full-amplicon sequencing.",
+    acceptedBy: "N. Telugu",
+  });
+  const readiness = summarizeProcurementReadiness(accepted);
+  const pair = readiness.guidePairs.find((entry) => entry.guideName === weakName);
+
+  assert.equal(pair.acknowledged, true, "the acceptance was not applied");
+  assert.equal(pair.orderable, true, "an accepted pair is still refused");
+  assert.notEqual(readiness.status, "ready", "an acceptance must not make a design read as ready");
+
+  // The advice stays visible and the reason is on the record.
+  const notes = readiness.warnings.join(" | ");
+  assert.match(notes, /weak protection accepted for ordering/i, "the acceptance is not stated");
+  assert.match(notes, /RNP, short exposure/, "the recorded reason is missing");
+  assert.match(notes, /weak protection/i, "the original risk is no longer described");
+});
+
+test("an acceptance without a reason does nothing", () => {
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE", acceptWeakProtection: true, weakProtectionReason: "   ",
+  });
+  const pair = summarizeProcurementReadiness(result).guidePairs.find((entry) => entry.tier !== "strong");
+  assert.equal(pair.acknowledged, false, "an unexplained override was honoured");
+  assert.equal(pair.orderable, false);
+});
+
+test("an acceptance never overrides a donor that encodes the wrong protein", () => {
+  // Weak protection is a risk. A mistranslating donor is an error, and no amount of
+  // sign-off makes it orderable.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE", acceptWeakProtection: true, weakProtectionReason: "accepted after review",
+  });
+  const target = result.os[0];
+  const broken = {
+    ...result,
+    os: result.os.map((donor) => (donor === target
+      ? { ...donor, proteinValidation: { ...donor.proteinValidation, valid: false, observedAa: "R" } }
+      : donor)),
+  };
+  const pair = summarizeGuidePairReadiness(broken).pairs.find((entry) => entry.guideName === target.guideName);
+  assert.equal(pair.orderable, false, "an acceptance overrode a failed protein assertion");
+  assert.ok(pair.hardBlockers.length > 0);
+});
+
+test("an acceptance is not honoured under co-delivery", () => {
+  // There the weak guide re-cuts the allele the *other* donor just repaired - a different
+  // and larger risk than the one being accepted. Order the pairs separately instead.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE",
+    coDeliveryBlocking: true,
+    acceptWeakProtection: true,
+    weakProtectionReason: "accepted after review",
+  });
+  const readiness = summarizeProcurementReadiness(result);
+  assert.equal(readiness.status, "blocked", "an acceptance unblocked a co-delivered design");
+  assert.ok(readiness.guidePairs.every((pair) => !pair.acknowledged));
+});
+
+test("an accepted pair exports as orderable, with the acceptance in the wording", async () => {
+  const { getDonorReleaseStatus } = await import("../src/releaseVerdict.js");
+  const accepted = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE",
+    acceptWeakProtection: true,
+    weakProtectionReason: "screening 48 clones with full-amplicon sequencing",
+  });
+  const weakName = summarizeProcurementReadiness(accepted).guidePairs
+    .find((entry) => entry.acknowledged).guideName;
+  assert.equal(getDonorReleaseStatus(accepted, weakName), "accepted");
+
+  const row = buildBatchOrderRows([entry(accepted)])
+    .find((item) => item.itemType === "Donor" && item.linkedGuide === weakName);
+  assert.ok(row, "the accepted donor is missing from the export");
+  assert.match(row.recommended, /accepted/i, `the export hides the acceptance: ${row.recommended}`);
+  assert.ok(!/do not order/i.test(row.recommended), "the export still refuses an accepted pair");
+  // And the export still carries the full review reasons, including the recorded decision.
+  assert.match(row.reviewNotes, /weak protection accepted/i, "the export drops the recorded decision");
+});
+
+test("a refused pair no longer claims the design is blocked", async () => {
+  // The wording was wrong once per-pair state existed: the design is in review, so
+  // "Do not order - design blocked" was a false statement in an ordering artefact.
+  const { getOrderRecommendationLabels } = await import("../src/reportModel.js");
+  const labels = getOrderRecommendationLabels("pair-blocked");
+  assert.ok(!/design blocked/i.test(labels.donorStrand), `still claims the design is blocked: ${labels.donorStrand}`);
+  assert.match(labels.donorStrand, /not strongly blocked/i);
+
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const weakName = summarizeProcurementReadiness(result).guidePairs.find((p) => !p.orderable).guideName;
+  const row = buildBatchOrderRows([entry(result)])
+    .find((item) => item.itemType === "Donor" && item.linkedGuide === weakName);
+  assert.ok(!/design blocked/i.test(row.recommended), `export claims the design is blocked: ${row.recommended}`);
+});
+
+
+test("every field the acceptance collects reaches the record", () => {
+  // "Accepted by" was captured by the form and shown nowhere - a field that exists only in
+  // the input is not a record. Asserted rather than assumed, because the first version of
+  // this feature had exactly that gap.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE",
+    acceptWeakProtection: true,
+    weakProtectionReason: "screening 48 clones with full-amplicon sequencing",
+    acceptedBy: "N. Telugu",
+  });
+  const readiness = summarizeProcurementReadiness(result);
+  const pair = readiness.guidePairs.find((entry) => entry.acknowledged);
+  assert.ok(pair, "no pair was acknowledged");
+  assert.equal(pair.acknowledgedBy, "N. Telugu");
+
+  const notes = readiness.warnings.join(" | ");
+  assert.match(notes, /screening 48 clones/, "the reason is missing from the record");
+  assert.match(notes, /Accepted by: N\. Telugu/, "the attribution is missing from the record");
+
+  // And it must travel into the export, not stop at the screen.
+  const row = buildBatchOrderRows([entry(result)])
+    .find((item) => item.itemType === "Donor" && item.linkedGuide === pair.guideName);
+  assert.match(row.reviewNotes, /Accepted by: N\. Telugu/, "the export drops the attribution");
 });

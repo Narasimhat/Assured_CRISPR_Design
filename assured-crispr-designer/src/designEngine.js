@@ -1246,6 +1246,21 @@ export function collectProcurementReviewNotes(readiness) {
 }
 
 /**
+ * A reviewed, recorded decision to order a pair whose guide is only weakly blocked.
+ *
+ * Requires a reason. An unexplained override in a design record is indistinguishable from a
+ * mis-click a year later, and the point of recording it is that a future reader can tell a
+ * judgement from an oversight.
+ */
+export function getWeakProtectionAcceptance(result) {
+  const acceptance = result?.weakProtectionAcceptance;
+  if (!acceptance || !acceptance.accepted) return null;
+  const reason = String(acceptance.reason || "").trim();
+  if (!reason) return null;
+  return { reason, acceptedBy: String(acceptance.acceptedBy || "").trim() };
+}
+
+/**
  * Release state per guide+donor pair.
  *
  * The orderable unit is one guide with its matched ssODN, not "the design". Grading blocking
@@ -1261,24 +1276,41 @@ export function summarizeGuidePairReadiness(result) {
   const blocking = summarizeGuideBlocking(result);
   const donors = result?.os || [];
   const coDelivery = Boolean(result?.coDeliveryBlockingRequested);
+  const acceptance = getWeakProtectionAcceptance(result);
 
   const pairs = (blocking.guides || []).map((assessment) => {
     const donor = donors.find((entry) => entry.guideName === assessment.guideName) || null;
-    const pairBlockers = [];
+
+    // Weak protection is a risk a competent designer can weigh and accept. A donor that
+    // encodes the wrong protein is not a risk, it is an error - so the two are separated
+    // and only the first can be acknowledged away.
+    const riskBlockers = [];
+    const hardBlockers = [];
     if (assessment.tier !== "strong") {
-      pairBlockers.push(`${assessment.guideName} is not strongly blocked: ${assessment.tier} (${assessment.reason})`);
+      riskBlockers.push(`${assessment.guideName} is not strongly blocked: ${assessment.tier} (${assessment.reason})`);
     }
     if (donor && donor.proteinValidation && !donor.proteinValidation.valid) {
-      pairBlockers.push(`${donor.n} fails the final assembled-protein assertion.`);
+      hardBlockers.push(`${donor.n} fails the final assembled-protein assertion.`);
     }
+
+    // Not honoured under co-delivery: there a weak guide re-cuts the allele the *other*
+    // donor just repaired, which is a different and larger risk than the one being
+    // accepted here. Turn co-delivery off and order the pairs separately to proceed.
+    const acknowledged = Boolean(acceptance && !coDelivery && riskBlockers.length > 0 && hardBlockers.length === 0);
+
     return {
       guideName: assessment.guideName,
       guideIndex: assessment.guideIndex,
       donorName: donor?.n || "",
       tier: assessment.tier,
       reason: assessment.reason,
-      blockers: pairBlockers,
-      orderable: pairBlockers.length === 0,
+      blockers: [...hardBlockers, ...riskBlockers],
+      hardBlockers,
+      riskBlockers,
+      acknowledged,
+      acknowledgementReason: acknowledged ? acceptance.reason : "",
+      acknowledgedBy: acknowledged ? acceptance.acceptedBy : "",
+      orderable: hardBlockers.length === 0 && (riskBlockers.length === 0 || acknowledged),
     };
   });
 
@@ -1344,6 +1376,13 @@ export function summarizeProcurementReadiness(result) {
         .map((pair) => `${pair.guideName} (${pair.tier})`).join(", ");
       warnings.push(`Order ${usable} with its matched ssODN only. Do not order ${unusable}: not strongly blocked, so the donor can be re-cut after repair.`);
     }
+
+    // An accepted risk stays visible. It moves from "do not order" to a stated decision -
+    // it never disappears, and it never lets the design reach "ready".
+    pairReadiness.pairs.filter((pair) => pair.acknowledged).forEach((pair) => {
+      const attribution = pair.acknowledgedBy ? ` Accepted by: ${pair.acknowledgedBy}.` : "";
+      warnings.push(`${pair.guideName}: weak protection accepted for ordering. ${pair.reason} Recorded reason: ${pair.acknowledgementReason}${attribution}`);
+    });
   }
 
   if (result.type === "pm") {
@@ -2632,6 +2671,13 @@ export function designPM(gb, mutationString, options = {}) {
   }));
   result.coDeliverySafe = result.os.every((donor) => donor.guideProtection.every((entry) => entry.tier === "strong"));
   result.coDeliveryBlockingRequested = coDeliveryBlocking;
+  if (options.acceptWeakProtection) {
+    result.weakProtectionAcceptance = {
+      accepted: true,
+      reason: options.weakProtectionReason || "",
+      acceptedBy: options.acceptedBy || "",
+    };
+  }
   if (guideSelection.coDeliverySelection) result.coDeliverySelection = guideSelection.coDeliverySelection;
   // (guideDonorInstruction below reads result.coDeliverySelection, so it must be set first.)
   // "unknown" means the other guide's target lies outside this donor's window entirely, so
@@ -2792,6 +2838,15 @@ export function designIT(gb, siteString, tag, options = {}) {
     // gate all read this flag, and designIT set none of them while still building the
     // donors for co-delivery.
     coDeliveryBlockingRequested: coDeliveryBlocking,
+    ...(options.acceptWeakProtection
+      ? {
+        weakProtectionAcceptance: {
+          accepted: true,
+          reason: options.weakProtectionReason || "",
+          acceptedBy: options.acceptedBy || "",
+        },
+      }
+      : {}),
     ...(dualCutDeletionRisk ? { dualCutDeletionRisk } : {}),
     gene: gb.gene,
     prot: gb.proteinLength,

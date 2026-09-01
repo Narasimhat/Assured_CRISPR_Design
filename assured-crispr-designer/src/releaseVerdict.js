@@ -73,7 +73,10 @@ export function getDonorReleaseStatus(result, donorGuideName) {
   // A design-wide blocker (wrong reference, failed protein assertion) sinks every pair.
   if (verdict.status === "blocked") return "blocked";
   const pair = verdict.guidePairs.find((entry) => entry.guideName === donorGuideName);
-  if (pair && !pair.orderable) return "blocked";
+  if (!pair) return verdict.status;
+  // Distinguished from "blocked": the design is not blocked, this one pair is refused.
+  if (!pair.orderable) return "pair-blocked";
+  if (pair.acknowledged) return "accepted";
   return verdict.status;
 }
 

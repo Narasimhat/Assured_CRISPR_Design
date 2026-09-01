@@ -27,11 +27,20 @@ export function getDonorStrandBadge(strand, releaseStatus = "ready") {
       fg: "#475467", bg: "#EAECF0", border: "#d7dee7", panel: "#f8fafc",
     };
   }
-  if (status === "blocked") {
+  if (status === "accepted") {
+    return {
+      tone: "accepted",
+      label: "Order this strand — weak protection accepted",
+      labelTitle: "Order This Strand — Weak Protection Accepted",
+      orderable: true,
+      fg: "#B54708", bg: "#FEF0C7", border: "#F7900955", panel: "#FFFAEB",
+    };
+  }
+  if (status === "blocked" || status === "pair-blocked") {
     return {
       tone: "candidate",
-      label: "Candidate donor — do not order",
-      labelTitle: "Candidate Donor — Do Not Order",
+      label: status === "pair-blocked" ? "Candidate donor — guide not strongly blocked" : "Candidate donor — do not order",
+      labelTitle: status === "pair-blocked" ? "Candidate Donor — Guide Not Strongly Blocked" : "Candidate Donor — Do Not Order",
       orderable: false,
       fg: "#B42318", bg: "#FEE4E2", border: "#F0443855", panel: "#FEF3F2",
     };
@@ -57,6 +66,7 @@ export function getDonorStrandBadge(strand, releaseStatus = "ready") {
 /** Maps a badge tone onto the app's Badge palette. */
 export function getDonorStrandBadgeColor(badge, colors) {
   if (badge?.tone === "order") return colors.success;
+  if (badge?.tone === "accepted") return colors.warning || "#B54708";
   if (badge?.tone === "candidate") return colors.danger;
   if (badge?.tone === "review") return colors.warning || "#B54708";
   return colors.muted;
@@ -65,6 +75,16 @@ export function getDonorStrandBadgeColor(badge, colors) {
 /** Wording for the "Recommended" column in the combined order preview / CSV. */
 export function getOrderRecommendationLabels(releaseStatus = "ready") {
   const status = releaseStatus === true ? "blocked" : releaseStatus === false ? "ready" : releaseStatus;
+  // A pair the designer reviewed and accepted. Stated as a decision, not as a clean pass:
+  // the wording has to survive being read a year later by someone who was not in the room.
+  if (status === "accepted") {
+    return { item: "Yes - weak protection accepted", donorStrand: "Order this strand - weak guide protection accepted" };
+  }
+  // "not recommended" rather than "design blocked": with per-pair release state the design
+  // can be in review while this one pair is refused, and saying "blocked" of it is false.
+  if (status === "pair-blocked") {
+    return { item: "No - guide weakly blocked", donorStrand: "Do not order - guide not strongly blocked" };
+  }
   if (status === "blocked") return { item: "No - design blocked", donorStrand: "Do not order - design blocked" };
   if (status === "review") return { item: "Draft - review required", donorStrand: "Candidate strand - review required" };
   return { item: "Yes", donorStrand: "Order this strand" };

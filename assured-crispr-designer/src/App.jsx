@@ -981,6 +981,9 @@ function createBatchRow(index) {
     notes: "",
     deliveryMethod: "unknown",
     coDelivery: false,
+    acceptWeakProtection: false,
+    weakProtectionReason: "",
+    acceptedBy: "",
     projectType: "pm",
     referenceSource: "genbank",
     requestedReporter: "",
@@ -3082,6 +3085,12 @@ export default function App() {
           // every donor has to block every guide, or the surviving guide re-cuts the allele
           // the other donor just repaired.
           coDeliveryBlocking: !!row.coDelivery,
+          // A reviewed decision to order a pair whose guide is only weakly blocked. It
+          // requires a reason, never overrides a mistranslating donor, and is not
+          // honoured under co-delivery.
+          acceptWeakProtection: !!row.acceptWeakProtection,
+          weakProtectionReason: row.weakProtectionReason || "",
+          acceptedBy: row.acceptedBy || "",
           rawReference: row.referenceSource === "raw" ? {
             gene: row.gene,
             sequence: parseRawSequenceInput(row.rawSequence),
@@ -3547,6 +3556,16 @@ export default function App() {
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide delivery</div><select value={row.deliveryMethod || "unknown"} onChange={(event) => updateBatchRow(index, "deliveryMethod", event.target.value)} style={SELECT_STYLE}><option value="unknown">Not decided</option><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression plasmid</option></select></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}><input type="checkbox" checked={!!row.coDelivery} onChange={(event) => updateBatchRow(index, "coDelivery", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Co-transfect both guides and both ssODNs</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>Builds every donor to block every offered guide, and prefers guides whose targets can both be silently destroyed. Leave off when you deliver one matched guide/ssODN pair at a time.</div></span></label>
+                        <label style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: row.coDelivery ? 0.5 : 1 }}><input type="checkbox" disabled={!!row.coDelivery} checked={!!row.acceptWeakProtection} onChange={(event) => updateBatchRow(index, "acceptWeakProtection", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Accept weak guide protection and order anyway</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>{row.coDelivery ? "Not available with co-delivery: there a weakly blocked guide re-cuts the allele the other donor just repaired. Order the pairs separately instead." : "Records a reviewed decision to order a pair whose guide is only weakly blocked. The advice stays in the report and the design never reads as ready. It never overrides a donor that fails its protein assertion."}</div></span></label>
+                        {!!row.acceptWeakProtection && !row.coDelivery && (
+                          <div style={{ display: "grid", gap: 8, padding: "10px 12px", borderRadius: 10, background: "#FFFAEB", border: "1px solid #F7900955" }}>
+                            <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 4 }}>Why is this acceptable? (required)</div><input value={row.weakProtectionReason || ""} onChange={(event) => updateBatchRow(index, "weakProtectionReason", event.target.value)} style={FIELD_STYLE} placeholder="RNP, short exposure; screening 48 clones with full-amplicon sequencing" /></label>
+                            <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 4 }}>Accepted by (optional)</div><input value={row.acceptedBy || ""} onChange={(event) => updateBatchRow(index, "acceptedBy", event.target.value)} style={FIELD_STYLE} placeholder="Name" /></label>
+                            {!String(row.weakProtectionReason || "").trim() && (
+                              <div style={{ color: "#B54708", fontSize: 12, lineHeight: 1.45 }}>Without a reason the acceptance is ignored. An unexplained override cannot be told apart from a mis-click later.</div>
+                            )}
+                          </div>
+                        )}
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
