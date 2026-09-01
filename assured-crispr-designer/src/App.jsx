@@ -10,6 +10,7 @@ import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessCh
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { buildHistoricalContext, buildReviewItems, buildRowMeta } from "./reportInputs";
+import { getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict";
 import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
 import { formatBuildLabel } from "./buildInfo";
 
@@ -2048,6 +2049,36 @@ function AlignedTokenRow({ label, prefix = "", tokens = [], suffix = "", diffInd
   );
 }
 
+/**
+ * The release verdict, at the top of the on-screen report.
+ *
+ * The report used to state no release status at all - only the downloaded HTML did - so the
+ * screen a reviewer actually reads was the one place that never said "BLOCKED". Both
+ * surfaces now render the same getReleaseVerdict object.
+ */
+function ReleaseVerdictPanel({ result }) {
+  const verdict = useMemo(() => (result ? getReleaseVerdict(result) : null), [result]);
+  if (!verdict) return null;
+  const sections = getReleaseVerdictSections(verdict);
+  return (
+    <div style={{ margin: "0 0 18px 0", padding: "14px 16px", border: `2px solid ${verdict.border}`, borderLeftWidth: 8, borderRadius: 10, background: verdict.bg }}>
+      <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 1, color: "#667085", textTransform: "uppercase" }}>Release status</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: verdict.fg, margin: "2px 0 6px 0" }}>{verdict.label}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.5, color: "#344054" }}>{verdict.lead}</div>
+      {sections.map((section) => (
+        <div key={section.title} style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: section.color, marginBottom: 4 }}>{section.title}</div>
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {section.items.map((item) => (
+              <li key={item} style={{ fontSize: 13, lineHeight: 1.5, color: "#344054" }}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PmDonorPreview({ donor, releaseStatus = "ready" }) {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
@@ -4042,6 +4073,8 @@ export default function App() {
                     </select>
                   </div>
                 )}
+                <ReleaseVerdictPanel result={selectedEntry.result} />
+
                 <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 16 }}>
                   <tbody>
                     {[

@@ -9,9 +9,10 @@
 // import react here, and do not add JSX.
 
 
-import { summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine.js";
+import { summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness } from "./designEngine.js";
 import { getDonorStrandBadge } from "./reportModel.js";
 import { DESIGN_TYPES } from "./designTypes.js";
+import { getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -1166,21 +1167,7 @@ function buildHistoricalRowsHtml(matches) {
   return `<table>${tableHtml([["Gene", "Parental line", "Established line", "Used gRNAs", "Used donor", "Guide overlap"]], true)}${tableHtml(rows)}</table>`;
 }
 
-const RELEASE_VERDICT_STYLES = {
-  blocked: { label: "BLOCKED", fg: "#B42318", bg: "#FEF3F2", border: "#F04438", lead: "Do not order. Resolve every blocker below and regenerate the design." },
-  review: { label: "REVIEW REQUIRED", fg: "#B45309", bg: "#FFFAEB", border: "#F79009", lead: "Computation succeeded, but external checks remain. Resolve the items below before ordering." },
-  ready: { label: "READY", fg: "#027A48", bg: "#F6FEF9", border: "#12B76A", lead: "All configured release gates passed. The standing requirements below still apply." },
-};
 
-/**
- * The authoritative release verdict, rendered at the top of the report.
- *
- * The report previously carried only its own nine-row readiness checklist, which graded a
- * hard blocker as "warn" and never stated the release status at all - so a design the
- * engine had BLOCKED read as a mostly-green checklist with no instruction not to order it.
- * That is two sources of truth for release state; this panel makes
- * summarizeProcurementReadiness the one that leads the document.
- */
 /** Co-delivery findings: only rendered when the design was built for co-transfection. */
 function buildCoDeliveryHtml(result) {
   if (!result.coDeliveryBlockingRequested) return "";
@@ -1204,20 +1191,26 @@ function buildCoDeliveryHtml(result) {
   `;
 }
 
+/**
+ * The authoritative release verdict, rendered at the top of the report.
+ *
+ * The report previously carried only its own nine-row readiness checklist, which graded a
+ * hard blocker as "warn" and never stated the release status at all - so a design the
+ * engine had BLOCKED read as a mostly-green checklist with no instruction not to order it.
+ * The verdict now comes from releaseVerdict.js, which the on-screen panel renders too.
+ */
 function buildReleaseVerdictHtml(result) {
-  const readiness = summarizeProcurementReadiness(result);
-  const tone = RELEASE_VERDICT_STYLES[readiness.status] || RELEASE_VERDICT_STYLES.review;
-  const list = (title, items, color) => (items || []).length
-    ? `<div style="margin-top:10px;"><div style="font-size:12px;font-weight:800;letter-spacing:0.4px;text-transform:uppercase;color:${color};margin-bottom:4px;">${title}</div><ul style="margin:0;padding-left:18px;">${items.map((item) => `<li style="font-size:13px;line-height:1.5;color:#344054;">${item}</li>`).join("")}</ul></div>`
-    : "";
+  // Same verdict object the on-screen panel renders, so the two cannot word it differently.
+  const verdict = getReleaseVerdict(result);
+  const sections = getReleaseVerdictSections(verdict).map((section) => (
+    `<div style="margin-top:10px;"><div style="font-size:12px;font-weight:800;letter-spacing:0.4px;text-transform:uppercase;color:${section.color};margin-bottom:4px;">${section.title}</div><ul style="margin:0;padding-left:18px;">${section.items.map((item) => `<li style="font-size:13px;line-height:1.5;color:#344054;">${item}</li>`).join("")}</ul></div>`
+  )).join("");
   return `
-    <div style="margin:14px 0 18px 0;padding:14px 16px;border:2px solid ${tone.border};border-left-width:8px;border-radius:10px;background:${tone.bg};">
+    <div style="margin:14px 0 18px 0;padding:14px 16px;border:2px solid ${verdict.border};border-left-width:8px;border-radius:10px;background:${verdict.bg};">
       <div style="font-size:12px;font-weight:800;letter-spacing:1px;color:#667085;text-transform:uppercase;">Release status</div>
-      <div style="font-size:22px;font-weight:800;color:${tone.fg};margin:2px 0 6px 0;">${tone.label}</div>
-      <div style="font-size:13px;line-height:1.5;color:#344054;">${tone.lead}</div>
-      ${list("Blockers", readiness.blockers, "#B42318")}
-      ${list("Review items", readiness.warnings, "#B45309")}
-      ${list("Standing requirements", readiness.standingRequirements, "#475467")}
+      <div style="font-size:22px;font-weight:800;color:${verdict.fg};margin:2px 0 6px 0;">${verdict.label}</div>
+      <div style="font-size:13px;line-height:1.5;color:#344054;">${verdict.lead}</div>
+      ${sections}
     </div>
   `;
 }
@@ -1242,7 +1235,7 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const readinessBlock = buildDesignReadinessHtml(result);
   const locusMapBlock = buildLocusMapHtml(result);
   const snapshotBlock = buildReportSnapshotHtml(result);
-  const releaseStatus = summarizeProcurementReadiness(result).status;
+  const releaseStatus = getReleaseVerdict(result).status;
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor, releaseStatus)).join("")

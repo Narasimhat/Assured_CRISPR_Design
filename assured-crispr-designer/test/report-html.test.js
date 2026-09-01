@@ -35,6 +35,9 @@ function render(reference, type, { mutation = "", tag = "", arm = 400, options =
 
 const BLOCKED = { reference: "apoe-r154s.gb", type: "pm", opts: { mutation: "R154S", options: { expectedGene: "APOE" } } };
 const READY = { reference: "synthetic-tagging.gb", type: "ct", opts: { tag: "SD40-2xHA", options: { expectedGene: "TAGME" } } };
+// A design that computes cleanly but still awaits an external check. Without this case
+// the suite cannot tell "only ready is orderable" from "anything not blocked is orderable".
+const REVIEW = { reference: "apoe-r154s.gb", type: "pm", opts: { mutation: "R176C", options: { expectedGene: "APOE" } } };
 
 test("every design type renders a well-formed report", () => {
   const cases = [
@@ -199,6 +202,92 @@ test("the report layer stays free of React", () => {
   assert.ok(!/\buse(State|Effect|Memo|Callback|Ref)\s*\(/.test(source), "reportHtml.js uses React hooks");
   assert.ok(!/from "\.\/App/.test(source), "reportHtml.js imports App - that would be circular");
   // Relative imports must carry explicit extensions or Node cannot load the module.
+  const bare = source.match(/from "\.\/[A-Za-z0-9_/-]+"/g) || [];
+  assert.deepEqual(bare, [], `extension-less imports break node --test: ${bare.join(", ")}`);
+});
+
+
+// --- the shared release verdict --------------------------------------------------------
+//
+// The on-screen report and the downloadable HTML used to describe release state
+// differently: the HTML led with BLOCKED / REVIEW REQUIRED / READY, while the screen a
+// reviewer actually reads showed only a nine-row checklist that graded a hard blocker as
+// "warn" and never stated a status at all. Both now render one getReleaseVerdict object.
+
+test("every design resolves to exactly one of the three release states", async () => {
+  const { getReleaseVerdict } = await import("../src/releaseVerdict.js");
+  [BLOCKED, REVIEW, READY].forEach((entry) => {
+    const { result, readiness } = render(entry.reference, entry.type, entry.opts);
+    const verdict = getReleaseVerdict(result);
+    assert.ok(["blocked", "review", "ready"].includes(verdict.status));
+    assert.equal(verdict.status, readiness.status, "verdict disagrees with procurement readiness");
+    assert.equal(verdict.label, STATUS_LABEL[readiness.status]);
+    assert.ok(verdict.lead.length > 20, "verdict has no lead sentence");
+  });
+});
+
+test("only a ready design is orderable - review is not a green light", async () => {
+  // The distinction the donor badge originally missed by treating "not blocked" as
+  // orderable. A design awaiting an external specificity check must not read as go.
+  const { getReleaseVerdict, RELEASE_VERDICT_STYLES } = await import("../src/releaseVerdict.js");
+  assert.deepEqual(Object.keys(RELEASE_VERDICT_STYLES).sort(), ["blocked", "ready", "review"]);
+
+  const blocked = getReleaseVerdict(render(BLOCKED.reference, BLOCKED.type, BLOCKED.opts).result);
+  assert.equal(blocked.status, "blocked");
+  assert.equal(blocked.orderable, false);
+  assert.ok(blocked.blockers.length > 0, "a blocked design must state why");
+
+  // The middle state is the one that matters here: `status !== "blocked"` and
+  // `status === "ready"` agree on both extremes and differ only on review.
+  const review = getReleaseVerdict(render(REVIEW.reference, REVIEW.type, REVIEW.opts).result);
+  assert.equal(review.status, "review", "fixture must be review for this test to mean anything");
+  assert.equal(review.orderable, false, "a design awaiting review must not read as orderable");
+  assert.equal(review.blockers.length, 0, "review must not be blocked");
+  assert.ok(review.warnings.length > 0, "a review design must state what is outstanding");
+
+  const ready = getReleaseVerdict(render(READY.reference, READY.type, READY.opts).result);
+  assert.equal(ready.status, "ready");
+  assert.equal(ready.orderable, true);
+  assert.equal(ready.blockers.length, 0);
+  // Ready still carries the standing external checks; "ready" never means "nothing left".
+  assert.ok(ready.standingRequirements.length > 0, "ready design dropped the standing requirements");
+});
+
+test("the HTML report states exactly the shared verdict, not a paraphrase of it", async () => {
+  const { getReleaseVerdict, getReleaseVerdictSections } = await import("../src/releaseVerdict.js");
+  [BLOCKED, REVIEW, READY].forEach((entry) => {
+    const { html, result } = render(entry.reference, entry.type, entry.opts);
+    const verdict = getReleaseVerdict(result);
+    assert.ok(html.includes(verdict.label), `report omits ${verdict.label}`);
+    assert.ok(html.includes(verdict.lead), "report paraphrases the lead sentence");
+    // Every reason the verdict carries must appear, and the section headings with them.
+    getReleaseVerdictSections(verdict).forEach((section) => {
+      assert.ok(html.includes(section.title), `report omits the ${section.title} list`);
+      section.items.forEach((item) => {
+        assert.ok(html.includes(item), `report omits a ${section.title} entry: ${item.slice(0, 48)}`);
+      });
+    });
+  });
+});
+
+test("the on-screen report renders the same verdict module as the download", () => {
+  // App.jsx cannot be imported here - it is JSX. This asserts the wiring only; that the
+  // panel actually appears on screen is checked against the deployed build.
+  const app = readFileSync(path.join(here, "..", "src", "App.jsx"), "utf8");
+  assert.match(app, /from "\.\/releaseVerdict"/, "App.jsx does not use the shared verdict");
+  assert.match(app, /<ReleaseVerdictPanel result=/, "App.jsx never renders the verdict panel");
+  // No second copy of the wording may exist outside the shared module.
+  ["App.jsx", "reportHtml.js"].forEach((name) => {
+    const source = readFileSync(path.join(here, "..", "src", name), "utf8");
+    assert.ok(!/REVIEW REQUIRED/.test(source), `${name} hardcodes a release label`);
+    assert.ok(!/RELEASE_VERDICT_STYLES\s*=/.test(source), `${name} redefines the verdict styles`);
+  });
+});
+
+test("the verdict module stays loadable outside the browser", () => {
+  const source = readFileSync(path.join(here, "..", "src", "releaseVerdict.js"), "utf8");
+  assert.ok(!/from "react"/.test(source), "releaseVerdict.js imports react");
+  assert.ok(!/import\.meta\.env/.test(source), "releaseVerdict.js reads import.meta.env");
   const bare = source.match(/from "\.\/[A-Za-z0-9_/-]+"/g) || [];
   assert.deepEqual(bare, [], `extension-less imports break node --test: ${bare.join(", ")}`);
 });
