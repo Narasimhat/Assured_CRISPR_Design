@@ -32,36 +32,40 @@ const readFixture = (name) => readFileSync(path.join(fixturesDir, name), "utf8")
 
 const CASES = [
   {
-    name: "APOE R154S: donors must encode Ser, and only the strongly blocked pair is orderable",
+    name: "APOE R154S: donors encode Ser, and both guides are strongly blocked",
     audit: "findings 1 and 2 - APOE R154S donor collision; false-positive guide blocking",
     reference: "apoe-r154s.gb",
     design: { type: "pm", mutation: "R154S", options: { deliveryMethod: "rnp" } },
     expect: {
       gene: "APOE",
-      // Not blocked: gRNA1 is strongly blocked by its own donor, so that pair is orderable.
-      // Blocking the design here would condemn the pair the report tells you to use because
-      // of the alternative it tells you not to. gRNA2 is separately marked unorderable, and
-      // co-delivery of the pair still blocks the whole set.
+      // Review, on guide GC only. gRNA2's PAM cannot be changed synonymously, so it used to
+      // carry a single seed mismatch and be refused; the engine now stacks three, which is
+      // adequate protection. What remains is the 70%/75% GC observation.
       procurement: "review",
       // The archived donor applied CGC->CGA and encoded Arg. Every emitted donor must
       // encode the requested Ser and nothing else.
       donorCount: 2,
       donorObservedAa: "S",
-      // gRNA1 has a real PAM disruption; gRNA2 has only a seed mismatch, which must
-      // never be graded as adequate protection.
-      guideBlocking: ["strong", "weak"],
+      // gRNA1 kills its PAM outright. gRNA2 cannot, so it gets three synonymous seed
+      // mismatches instead - adequate protection, though the PAM does survive.
+      guideBlocking: ["strong", "strong"],
+      // The blocking sets themselves, so a regression to single-change blocking is caught
+      // here and not only in the tier it happens to produce.
+      blockingChangeCounts: [1, 3],
       // The cross-guide protection matrix, donor by donor, is the evidence behind the
       // "do not pool" instruction: each ssODN protects only its own guide and leaves the
       // other guide's target intact. Asserting only the matrix's *size* let a mutation
       // that graded every mismatch as "strong" pass unnoticed, because summarizeGuideBlocking
       // reads result.ss while this matrix comes from assessOrientedGuideSite.
-      donorGuideProtection: [["strong", "none"], ["none", "weak"]],
+      donorGuideProtection: [["strong", "none"], ["none", "strong"]],
+      // Still false in single-pair mode: each donor carries only its own guide's changes, so
+      // the other guide's target is untouched. Co-delivery mode is what changes that.
       coDeliverySafe: false,
       guidePairs: [
         { guideName: "APOE_R154S_gRNA1", tier: "strong", orderable: true },
-        { guideName: "APOE_R154S_gRNA2", tier: "weak", orderable: false },
+        { guideName: "APOE_R154S_gRNA2", tier: "strong", orderable: true },
       ],
-      warnings: [/GC 70%/, /GC 75%/, /Order APOE_R154S_gRNA1 with its matched ssODN only/],
+      warnings: [/GC 70%/, /GC 75%/],
     },
   },
   {
@@ -145,10 +149,10 @@ const CASES = [
       gene: "TAGME",
       insertValid: true,
       insertUnexpectedStop: false,
-      // Every guide here is only weakly protected, so no pair is orderable and the design
-      // is blocked - on guide protection, not on the insert.
-      procurement: "blocked",
-      blockers: [/No guide is strongly blocked by its matched donor/i],
+      // Previously blocked: both guides relied on one seed mismatch each. With up to three
+      // synonymous changes both are now adequately protected, so what is left is review.
+      procurement: "review",
+      blockersNotMatching2: [/No guide is strongly blocked by its matched donor/i],
       blockersNotMatching: [/does not match the selected preset/i, /does not preserve the intended coding frame/i],
     },
   },
@@ -318,6 +322,22 @@ for (const entry of CASES) {
       assert.deepEqual(tiers, e.guideBlocking, `${label}: guide blocking tiers`);
     }
 
+    if (e.blockingChangeCounts) {
+      // How many synonymous changes each guide actually received. The tier alone cannot tell
+      // a single lucky PAM change from three stacked seed mismatches, and a regression to
+      // one-change blocking would keep the tier for guides whose PAM can be killed.
+      const counts = (result.gs || []).map((_, index) =>
+        (result.ss || []).filter((entry) => entry.gi === index + 1).length);
+      assert.deepEqual(counts, e.blockingChangeCounts, `${label}: blocking change counts`);
+    }
+
+    if (e.blockersNotMatching2) {
+      const joined = summarizeProcurementReadiness(result).blockers.join(" ");
+      e.blockersNotMatching2.forEach((pattern) => {
+        assert.doesNotMatch(joined, pattern, `${label}: unexpected blocker ${pattern}`);
+      });
+    }
+
     if (e.guidePairs) {
       // Release state is per guide+donor pair, so the harness has to check it per pair.
       // This expectation was silently ignored until the branch existed - an unhandled key
@@ -460,10 +480,12 @@ const apoeDesign = (options) => runDesign("pm", readFixture(APOE), "R154S", "", 
   { deliveryMethod: "rnp", expectedGene: "APOE", ...options });
 
 test("by default each donor blocks only its own guide", () => {
-  // Regression guard: co-delivery mode must not change the single-pair output.
+  // Regression guard: co-delivery mode must not change the single-pair output. Each donor
+  // strongly blocks its own guide and leaves the other guide's target completely intact,
+  // which is exactly why these two must not be pooled.
   const result = apoeDesign({});
   const matrix = result.os.map((donor) => donor.guideProtection.map((entry) => entry.tier));
-  assert.deepEqual(matrix, [["strong", "none"], ["none", "weak"]]);
+  assert.deepEqual(matrix, [["strong", "none"], ["none", "strong"]]);
   assert.equal(result.coDeliverySafe, false);
   assert.match(result.guideDonorInstruction, /Do not co-deliver/i);
 });
@@ -493,14 +515,16 @@ test("co-delivery is only declared safe when every guide is strongly disrupted",
   const result = apoeDesign({ coDeliveryBlocking: true });
   const tiers = result.os.flatMap((donor) => donor.guideProtection.map((entry) => entry.tier));
   const allStrong = tiers.every((tier) => tier === "strong");
+  // The invariant, whichever way this locus happens to come out.
   assert.equal(result.coDeliverySafe, allStrong);
 
-  // At this locus gRNA2's PAM cannot be disrupted silently, so only a seed mismatch is
-  // available and the honest answer is still "not safe to co-deliver".
-  assert.ok(tiers.includes("weak"), "fixture expected to retain a weak block");
-  assert.equal(result.coDeliverySafe, false);
-  assert.match(result.guideDonorInstruction, /could not be achieved/i);
-  assert.match(result.guideDonorInstruction, /re-cutting a correctly repaired allele/i);
+  // At this locus it now comes out safe. gRNA2's PAM still cannot be changed synonymously,
+  // but three seed mismatches protect it, and in co-delivery mode both donors carry both
+  // guides' changes - so neither guide can re-cut whichever donor performed the repair.
+  // With single-change blocking this design was correctly refused for co-delivery.
+  assert.equal(result.coDeliverySafe, true);
+  assert.ok(!tiers.includes("none"), "a guide target is left fully intact");
+  assert.match(result.guideDonorInstruction, /co-?deliver/i);
 });
 
 test("co-delivery reports the deletion product two cut sites can create", () => {
@@ -524,21 +548,28 @@ test("co-delivery guide selection searches for a strongly blockable pair", () =>
   assert.equal(typeof selection.allStronglyBlockable, "boolean");
 });
 
-test("co-delivery says so when a single guide would be better protected than any pair", () => {
-  // Co-delivery is a choice, not a free upgrade. At sites where no pair can be strongly
-  // blocked but one guide can, handing over the weaker two-guide design silently would be
-  // the wrong answer.
-  const result = apoeDesign({ coDeliveryBlocking: true });
-  assert.equal(result.coDeliverySafe, false);
-  const alternative = result.coDeliverySelection.singleGuideAlternative;
+test("co-delivery names a safer single guide only when the pair is not safe", () => {
+  // Co-delivery is a choice, not a free upgrade. Where no pair can be strongly blocked but
+  // one guide can, the safer single-guide option has to be named rather than the weaker
+  // two-guide design handed over silently.
+  //
+  // At this locus the pair *is* now safe, so there is nothing safer to recommend - the
+  // advice must not appear. Capping blocking at one change reproduces the situation the
+  // recommendation exists for.
+  const safePair = apoeDesign({ coDeliveryBlocking: true });
+  assert.equal(safePair.coDeliverySafe, true);
+  assert.doesNotMatch(safePair.guideDonorInstruction, /safer at this site than co-delivering two/i);
+
+  const constrained = apoeDesign({ coDeliveryBlocking: true, maxBlockingChanges: 1 });
+  assert.equal(constrained.coDeliverySafe, false);
+  const alternative = constrained.coDeliverySelection.singleGuideAlternative;
   assert.ok(alternative, "expected a single-guide alternative to be identified");
   assert.match(alternative.spacer, /^[ACGT]{20}$/);
-  // The advice must name the guide, not just gesture at the idea.
   assert.ok(
-    result.guideDonorInstruction.includes(alternative.spacer),
+    constrained.guideDonorInstruction.includes(alternative.spacer),
     "instruction does not name the safer single guide",
   );
-  assert.match(result.guideDonorInstruction, /safer at this site than co-delivering two/i);
+  assert.match(constrained.guideDonorInstruction, /safer at this site than co-delivering two/i);
 });
 
 test("internal-tag co-delivery also blocks every offered guide", () => {

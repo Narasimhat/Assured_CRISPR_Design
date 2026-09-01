@@ -25,6 +25,7 @@ import {
   summarizeProcurementReadiness,
 } from "../src/designEngine.js";
 import { buildBatchOrderRows } from "../src/orderRows.js";
+import * as releaseVerdictModule from "../src/releaseVerdict.js";
 import { getReleaseVerdict } from "../src/releaseVerdict.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -32,6 +33,17 @@ const fixture = (name) => readFileSync(path.join(here, "fixtures", name), "utf8"
 
 const design = (type, reference, mutation = "", tag = "", options = {}) =>
   runDesign(type, fixture(reference), mutation, tag, 400, { deliveryMethod: "rnp", ...options });
+
+/**
+ * Same design, with blocking capped at one change.
+ *
+ * The engine now stacks up to three synonymous seed mismatches, so most guides reach strong
+ * protection and the fixtures no longer produce a weak pair on their own. Tests about what
+ * the tool does with a weakly protected pair still need one. maxBlockingChanges is a real
+ * option - a designer may want fewer donor edits - not a hook invented for the suite.
+ */
+const designWeaklyBlocked = (type, reference, mutation = "", tag = "", options = {}) =>
+  design(type, reference, mutation, tag, { ...options, maxBlockingChanges: 1 });
 
 /** One workspace entry, the shape buildBatchOrderRows consumes. */
 const entry = (result, row = {}) => ({
@@ -164,7 +176,7 @@ test("audit finding 1: a donor failing its protein assertion blocks release", ()
 test("audit: alternative guides are never presented as poolable unless every donor blocks them", () => {
   // 72876/72878/72889 NKX3.1 + RNF213: one document mixed projects and WT/mutant donors,
   // making accidental co-delivery plausible.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   if ((result.gs || []).length > 1 && !result.coDeliverySafe) {
     assert.ok(result.guideDonorInstruction, "multiple guides offered with no pairing instruction");
     assert.match(result.guideDonorInstruction, /do not|only|matched/i,
@@ -313,8 +325,8 @@ test("audit: guide-to-donor pairing survives into the exported rows", () => {
   // Mutation testing found this: blanking `linkedGuide` in orderRows.js broke nothing,
   // because the only pairing assertion was against the design result.
   [
-    design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" }),
-    design("it", "synthetic-tagging.gb", "F50", "SPOT", { expectedGene: "TAGME" }),
+    designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" }),
+    designWeaklyBlocked("it", "synthetic-tagging.gb", "F50", "SPOT", { expectedGene: "TAGME" }),
   ].forEach((result) => {
     assert.equal(result.err, undefined);
     const rows = buildBatchOrderRows([entry(result)]);
@@ -351,7 +363,7 @@ test("audit: guide-to-donor pairing survives into the exported rows", () => {
 // co-delivery, where both guides share a well and an unblocked one re-cuts the repair.
 
 test("a weak alternative guide no longer condemns the pair you were told to use", () => {
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const readiness = summarizeProcurementReadiness(result);
 
   assert.notEqual(readiness.status, "blocked", "a sound pair was blocked by its alternative");
@@ -364,18 +376,23 @@ test("a weak alternative guide no longer condemns the pair you were told to use"
   assert.equal(strong.orderable, true, "the strongly blocked pair is not orderable");
   assert.equal(weak.orderable, false, "the weakly blocked pair is orderable");
 
-  // And the report must say which one, not leave the reader to infer it.
-  assert.ok(
-    readiness.warnings.some((item) => item.includes(strong.guideName) && item.includes(weak.guideName)),
-    "no instruction names the orderable pair and the one to avoid",
-  );
+  // And the report must say which one, and what to do. Asserting only that both names
+  // appear was too loose: a mutation that reduced the sentence to the bare names still
+  // passed, because both names were still in it.
+  const steer = readiness.warnings.find((item) => item.includes(strong.guideName) && item.includes(weak.guideName));
+  assert.ok(steer, "no instruction names the orderable pair and the one to avoid");
+  assert.match(steer, new RegExp(`Order ${strong.guideName} with its matched ssODN only`),
+    `the instruction does not say what to order: ${steer}`);
+  assert.match(steer, new RegExp(`Do not order ${weak.guideName}`),
+    `the instruction does not say what to avoid: ${steer}`);
+  assert.match(steer, /re-cut/i, "the instruction does not say why");
 });
 
 test("co-delivery still fails the whole set on one weak guide", () => {
   // The strict gate is not gone, it is scoped. Both guides and both ssODNs in one well is
   // exactly the case where a guide that is not blocked in every donor re-cuts the allele
   // the other donor just repaired.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE", coDeliveryBlocking: true,
   });
   const readiness = summarizeProcurementReadiness(result);
@@ -384,19 +401,25 @@ test("co-delivery still fails the whole set on one weak guide", () => {
     `blocked without naming the co-delivery reason: ${readiness.blockers.join(" | ")}`);
 });
 
-test("a design with no strongly blocked pair is still blocked outright", () => {
-  // The relaxation must not become "nothing is ever blocked". Where every guide relies on a
-  // single seed mismatch - the audited SCN5A alphaBtx shape - there is no sound pair.
-  const result = design("it", "synthetic-tagging.gb", "R100", "alphaBtx", { expectedGene: "TAGME" });
+test("the relaxation did not become 'nothing is ever blocked'", () => {
+  // A hard error still blocks outright and no pair is orderable through it. Weak protection
+  // is deliberately no longer such an error - it is a risk a designer can accept - so this
+  // uses a reference the engine cannot resolve: two annotated genes and none stated.
+  const result = design("pm", "two-genes-partial-first.gb", "L10S", "", {});
   const readiness = summarizeProcurementReadiness(result);
   assert.equal(readiness.status, "blocked");
-  assert.ok(readiness.guidePairs.every((pair) => !pair.orderable));
-  assert.ok(readiness.blockers.some((item) => /No guide is strongly blocked/i.test(item)));
+  assert.ok(readiness.blockers.some((item) => /annotates 2 genes|multiple/i.test(item)),
+    `blocked for an unexpected reason: ${readiness.blockers.join(" | ")}`);
+  // Every donor is unorderable while the design itself is blocked, whatever its pair state.
+  const { getDonorReleaseStatus } = releaseVerdictModule;
+  (result.os || []).forEach((donor) => {
+    assert.equal(getDonorReleaseStatus(result, donor.guideName), "blocked");
+  });
 });
 
 test("the exported rows state each pair's own release state", () => {
   // The distinction has to survive into the CSV, or the person ordering cannot act on it.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const readiness = summarizeProcurementReadiness(result);
   const strong = readiness.guidePairs.find((pair) => pair.orderable);
   const weak = readiness.guidePairs.find((pair) => !pair.orderable);
@@ -419,7 +442,7 @@ test("the report shows the orderable donor differently from the unorderable one"
   const { buildHistoricalContext, buildReviewItems, buildRowMeta } = await import("../src/reportInputs.js");
   const { getDonorReleaseStatus } = await import("../src/releaseVerdict.js");
 
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const readiness = summarizeProcurementReadiness(result);
   const strong = readiness.guidePairs.find((pair) => pair.orderable);
   const weak = readiness.guidePairs.find((pair) => !pair.orderable);
@@ -443,7 +466,7 @@ test("a donor failing its protein assertion is not an orderable pair", () => {
   // The design-level blocker already stops release, which is why removing the pair-level
   // check broke no test. But `orderable` is read per pair by the badges, the CSV and any
   // future consumer, so a pair whose donor mistranslates must not report itself usable.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const target = result.os[0];
   const broken = {
     ...result,
@@ -468,10 +491,10 @@ test("a donor failing its protein assertion is not an orderable pair", () => {
 // design passed.
 
 test("weak protection can be accepted, and the design still does not read as ready", () => {
-  const plain = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const plain = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const weakName = summarizeProcurementReadiness(plain).guidePairs.find((p) => !p.orderable).guideName;
 
-  const accepted = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const accepted = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE",
     acceptWeakProtection: true,
     weakProtectionReason: "RNP, short exposure; screening 48 clones with full-amplicon sequencing.",
@@ -492,7 +515,7 @@ test("weak protection can be accepted, and the design still does not read as rea
 });
 
 test("an acceptance without a reason does nothing", () => {
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE", acceptWeakProtection: true, weakProtectionReason: "   ",
   });
   const pair = summarizeProcurementReadiness(result).guidePairs.find((entry) => entry.tier !== "strong");
@@ -503,7 +526,7 @@ test("an acceptance without a reason does nothing", () => {
 test("an acceptance never overrides a donor that encodes the wrong protein", () => {
   // Weak protection is a risk. A mistranslating donor is an error, and no amount of
   // sign-off makes it orderable.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE", acceptWeakProtection: true, weakProtectionReason: "accepted after review",
   });
   const target = result.os[0];
@@ -521,7 +544,7 @@ test("an acceptance never overrides a donor that encodes the wrong protein", () 
 test("an acceptance is not honoured under co-delivery", () => {
   // There the weak guide re-cuts the allele the *other* donor just repaired - a different
   // and larger risk than the one being accepted. Order the pairs separately instead.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE",
     coDeliveryBlocking: true,
     acceptWeakProtection: true,
@@ -534,7 +557,7 @@ test("an acceptance is not honoured under co-delivery", () => {
 
 test("an accepted pair exports as orderable, with the acceptance in the wording", async () => {
   const { getDonorReleaseStatus } = await import("../src/releaseVerdict.js");
-  const accepted = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const accepted = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE",
     acceptWeakProtection: true,
     weakProtectionReason: "screening 48 clones with full-amplicon sequencing",
@@ -560,7 +583,7 @@ test("a refused pair no longer claims the design is blocked", async () => {
   assert.ok(!/design blocked/i.test(labels.donorStrand), `still claims the design is blocked: ${labels.donorStrand}`);
   assert.match(labels.donorStrand, /not strongly blocked/i);
 
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const weakName = summarizeProcurementReadiness(result).guidePairs.find((p) => !p.orderable).guideName;
   const row = buildBatchOrderRows([entry(result)])
     .find((item) => item.itemType === "Donor" && item.linkedGuide === weakName);
@@ -572,7 +595,7 @@ test("every field the acceptance collects reaches the record", () => {
   // "Accepted by" was captured by the form and shown nowhere - a field that exists only in
   // the input is not a record. Asserted rather than assumed, because the first version of
   // this feature had exactly that gap.
-  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
     expectedGene: "APOE",
     acceptWeakProtection: true,
     weakProtectionReason: "screening 48 clones with full-amplicon sequencing",

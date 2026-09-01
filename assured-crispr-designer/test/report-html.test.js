@@ -33,11 +33,15 @@ function render(reference, type, { mutation = "", tag = "", arm = 400, options =
   };
 }
 
-// A design where *no* guide is strongly blocked by its matched donor, so nothing is
-// orderable. APOE R154S is no longer blocked: one of its two pairs is sound, and a weak
-// alternative no longer condemns the pair you were told to use. This mirrors the audited
-// SCN5A alphaBtx case, where both donors relied on a single seed mismatch.
-const BLOCKED = { reference: "synthetic-tagging.gb", type: "it", opts: { mutation: "R100", tag: "alphaBtx", options: { expectedGene: "TAGME" } } };
+// A design blocked on its reference: the record annotates two genes and none was stated,
+// so which gene was designed is a guess. That is a hard error, not a risk to weigh.
+//
+// It used to be a weak-protection case, and then a no-strongly-blocked-pair case. Neither
+// survives multi-mutation blocking - the engine now stacks up to three synonymous seed
+// mismatches, so every guide in every committed fixture reaches strong protection. Weak
+// protection is also no longer a hard blocker: it is a pair-level refusal a designer can
+// accept. A blocked design needs a reason that cannot be accepted away.
+const BLOCKED = { reference: "two-genes-partial-first.gb", type: "pm", opts: { mutation: "L10S", options: {} } };
 const READY = { reference: "synthetic-tagging.gb", type: "ct", opts: { tag: "SD40-2xHA", options: { expectedGene: "TAGME" } } };
 // A design that computes cleanly but still awaits an external check. Without this case
 // the suite cannot tell "only ready is orderable" from "anything not blocked is orderable".

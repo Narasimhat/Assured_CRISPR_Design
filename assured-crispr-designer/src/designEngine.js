@@ -1,3 +1,4 @@
+import { getCodonFraction, introducesRareCodon } from "./codonUsage.js";
 import {
   codingPosToGenomic,
   describeGuidePlacementFromModel,
@@ -209,7 +210,14 @@ export function assessGuideSequence(spacer, deliveryMethod = "unknown") {
   const warnings = [];
   if (!/^[ACGT]+$/.test(sequence)) warnings.push("Guide spacer must contain DNA bases A, C, G, and T only.");
   if (sequence.length !== 20) warnings.push(`Guide spacer is ${sequence.length} nt; the design engine requires an explicit 20 nt SpCas9 spacer.`);
-  if (gc < 40 || gc > 60) warnings.push(`GC ${gc}% is outside the preferred 40-60% guide window.`);
+  // Deliberately not phrased as a prediction of failure. GC correlates with SpCas9 activity
+  // only weakly and non-monotonically: the extremes are worse on average, but individual
+  // guides well outside 40-60% are frequently highly active, and GC alone is a poor
+  // predictor next to a trained on-target model. What high GC does more reliably is raise
+  // tolerance of off-target mismatches, which is a specificity question, not an activity one.
+  if (gc < 40 || gc > 60) {
+    warnings.push(`GC ${gc}% is outside the 40-60% band where SpCas9 activity is highest on average. GC alone does not predict whether a guide cuts; confirm activity empirically or with an on-target model.`);
+  }
   if (polyG) warnings.push("Guide contains GGGG, which may reduce synthesis or activity reliability.");
   if (polyT && deliveryMethod === "u6") warnings.push("Guide contains TTTT, a Pol III termination risk for U6-driven expression.");
   if (polyT && deliveryMethod === "unknown") warnings.push("Guide contains TTTT; choose a delivery method to determine whether the U6/Pol III termination rule applies.");
@@ -225,12 +233,20 @@ function assessOrientedGuideSite(guide, rawSite) {
   for (let index = 0; index < 20; index += 1) if (donorSpacer[index] !== guide.sp[index]) mismatches.push(index + 1);
   const seedMismatches = mismatches.filter((position) => position >= 11);
   const weakenedPam = donorPam !== guide.pam && pamAssessment.tier === "weak";
-  if (weakenedPam && seedMismatches.length) {
-    return { tier: "moderate", protected: true, donorPam, mismatches, reason: `${donorPam} is a weakened PAM plus ${seedMismatches.length} seed mismatch${seedMismatches.length === 1 ? "" : "es"}.` };
+  const tier = gradeProtection({ pamWeakened: weakenedPam, seedMismatches: seedMismatches.length });
+  if (tier === "none") {
+    return { tier, protected: false, donorPam, mismatches, reason: `The full protospacer and ${donorPam} PAM remain intact.` };
   }
-  if (seedMismatches.length >= 2) return { tier: "moderate", protected: true, donorPam, mismatches, reason: `${seedMismatches.length} seed mismatches with PAM ${donorPam}.` };
-  if (mismatches.length) return { tier: "weak", protected: true, donorPam, mismatches, reason: `${mismatches.length} protospacer mismatch${mismatches.length === 1 ? "" : "es"} with PAM ${donorPam}.` };
-  return { tier: "none", protected: false, donorPam, mismatches, reason: `The full protospacer and ${donorPam} PAM remain intact.` };
+  const parts = [];
+  if (seedMismatches.length) parts.push(`${seedMismatches.length} seed mismatch${seedMismatches.length === 1 ? "" : "es"}`);
+  if (weakenedPam) parts.push("a weakened PAM");
+  if (!parts.length) parts.push(`${mismatches.length} protospacer mismatch${mismatches.length === 1 ? "" : "es"}`);
+  // The PAM survives here, so say what the protection rests on rather than implying the
+  // site cannot be cut at all.
+  const qualifier = tier === "strong"
+    ? " - cleavage is strongly disfavoured, though the PAM itself is intact"
+    : "";
+  return { tier, protected: true, donorPam, mismatches, reason: `${parts.join(" plus ")} with PAM ${donorPam}${qualifier}.` };
 }
 
 function assessGuideAgainstPointMutationDonor(guide, donor) {
@@ -258,6 +274,241 @@ function assessGuideAgainstInternalDonor(guide, donor) {
     return donor.donorSense[donorIndex] || "N";
   }).join("");
   return assessOrientedGuideSite(guide, rawSite);
+}
+
+/** CDS exon boundaries, so a silent change can avoid landing on a splice junction. */
+export function getSpliceBoundaries(model) {
+  const segments = model?.cdsSegments || [];
+  const boundaries = [];
+  segments.forEach(([start, end], index) => {
+    if (index > 0) boundaries.push(start);          // acceptor side of this exon
+    if (index < segments.length - 1) boundaries.push(end - 1); // donor side
+  });
+  return boundaries;
+}
+
+/**
+ * Distance in bp from the nearest CDS exon boundary, or Infinity for a single-exon CDS.
+ *
+ * Synonymous changes within a few bases of a junction can disrupt the splice site itself or
+ * an adjacent exonic splicing enhancer. The engine does not model splicing, so it avoids the
+ * window rather than pretending to predict the consequence.
+ */
+export const SPLICE_BOUNDARY_MARGIN = 3;
+
+export function distanceToSpliceBoundary(model, genomicPos) {
+  const boundaries = getSpliceBoundaries(model);
+  if (!boundaries.length) return Infinity;
+  return Math.min(...boundaries.map((boundary) => Math.abs(boundary - genomicPos)));
+}
+
+/**
+ * Combined protection from a set of blocking changes.
+ *
+ * A destroyed PAM ends the question: no PAM, no cut. Otherwise protection comes from seed
+ * mismatches, which SpCas9 tolerates singly and increasingly poorly in combination - so the
+ * count is what matters, not any one change. A weakened-but-alive PAM (NAG/NGA) is worth
+ * roughly one seed mismatch: it lowers cleavage without preventing it.
+ */
+/**
+ * The one rule for how much protection a set of changes gives.
+ *
+ * Two callers used to answer this separately and disagreed as soon as a guide carried more
+ * than one change: the set-based grader called three seed mismatches strong while the
+ * donor-sequence grader capped any number of seed mismatches at moderate. Same design, two
+ * tiers, depending on which code path a reader happened to hit.
+ *
+ * On the ladder itself: a destroyed PAM makes cleavage impossible, and three seed mismatches
+ * make it strongly disfavoured but not impossible. Both are graded "strong" because both are
+ * adequate protection in practice, and the reason text keeps the distinction rather than
+ * letting the tier imply the site is uncuttable.
+ */
+export function gradeProtection({ pamKilled = false, pamWeakened = false, seedMismatches = 0 } = {}) {
+  if (pamKilled) return "strong";
+  const effective = seedMismatches + (pamWeakened ? 1 : 0);
+  if (effective >= 3) return "strong";
+  if (effective === 2) return "moderate";
+  if (effective === 1) return "weak";
+  return "none";
+}
+
+export function gradeBlockingSet(mutations) {
+  const list = (mutations || []).filter(Boolean);
+  if (!list.length) return { tier: "none", seedCount: 0, pamKilled: false, pamWeakened: false };
+
+  const pamKilled = list.some((entry) => inferBlockingTier(entry) === "strong");
+  const pamWeakened = list.some((entry) => /^PAM\b/i.test(String(entry.pur || "")) && inferBlockingTier(entry) !== "strong");
+  const seedCount = list.filter((entry) => /^Seed\b/i.test(String(entry.pur || ""))).length;
+
+  const tier = gradeProtection({ pamKilled, pamWeakened, seedMismatches: seedCount });
+  return { tier, seedCount, pamKilled, pamWeakened, effective: seedCount + (pamWeakened ? 1 : 0) };
+}
+
+/**
+ * Every acceptable single blocking change for a guide, best first.
+ *
+ * Ordering is deliberate: destroy the PAM if any synonymous change can, because that is the
+ * only change that makes the site uncuttable. Otherwise work from the PAM-proximal end of
+ * the seed outward, since mismatches there cost SpCas9 the most.
+ *
+ * Within one position the alternatives are ranked by human codon usage instead of the
+ * alphabet. A silent change is silent at the protein level, not at the translation level.
+ */
+function collectSilentCandidates(model, guide, blockedPositions = new Set(), options = {}) {
+  const allowNonCoding = !!options.allowNonCoding;
+  const seq = getGenomicSequence(model);
+  const pamStart = guide.str === "+" ? guide.ps + 20 : guide.ps;
+  if (pamStart < 0 || pamStart + 3 > seq.length) return [];
+
+  const sites = [];
+  const seenPositions = new Set();
+  const addSite = (genomicPos, label, kind, pamIndex = null) => {
+    if (!Number.isFinite(genomicPos) || genomicPos < 0 || genomicPos >= seq.length) return;
+    if (blockedPositions.has(genomicPos) || seenPositions.has(genomicPos)) return;
+    seenPositions.add(genomicPos);
+    sites.push({ genomicPos, label, kind, pamIndex });
+  };
+
+  const pamIndexes = guide.str === "+" ? [1, 2] : [0, 1];
+  pamIndexes.forEach((pamIndex) => addSite(pamStart + pamIndex, "PAM", "pam", pamIndex));
+
+  // Seed, PAM-proximal first.
+  for (let spacerIndex = 19; spacerIndex >= 10; spacerIndex -= 1) {
+    const genomicPos = guide.str === "+"
+      ? guide.ps + spacerIndex
+      : guide.ps + 3 + (19 - spacerIndex);
+    addSite(genomicPos, `Seed pos ${spacerIndex + 1}/20`, "seed");
+  }
+  for (let spacerIndex = 0; spacerIndex < 10; spacerIndex += 1) {
+    const genomicPos = guide.str === "+"
+      ? guide.ps + spacerIndex
+      : guide.ps + 3 + (19 - spacerIndex);
+    addSite(genomicPos, `Guide pos ${spacerIndex + 1}/20`, "guide");
+  }
+
+  const candidates = [];
+  for (const site of sites) {
+    const { genomicPos, label, kind, pamIndex } = site;
+    const aaNumber = genomicPosToAa(model, genomicPos);
+    const codonInfo = aaNumber ? getCodonAtAa(model, aaNumber, toAA) : null;
+    const codon = codonInfo?.cod || null;
+    const codonIndex = codonInfo ? codonInfo.genomicPositions.indexOf(genomicPos) : -1;
+    const originalAA = codon ? toAA(codon) : null;
+    const originalBase = seq[genomicPos];
+    // Applies to coding and non-coding candidates alike. A non-coding position this close
+    // to a CDS boundary *is* the splice site - the intronic GT/AG - so skipping the check
+    // there guarded the milder case and waved through the dangerous one.
+    if (distanceToSpliceBoundary(model, genomicPos) < SPLICE_BOUNDARY_MARGIN) continue;
+
+    for (const alt of ["A", "C", "G", "T"]) {
+      if (alt === originalBase) continue;
+
+      if (kind === "pam") {
+        const mutantPam = seq.slice(pamStart, pamStart + 3).split("");
+        mutantPam[pamIndex] = alt;
+        const stillPam = guide.str === "+"
+          ? mutantPam.slice(1).join("") === "GG"
+          : reverseComplement(mutantPam.join("")).slice(1) === "GG";
+        if (stillPam) continue;
+        const oldPam = guide.str === "+" ? seq.slice(pamStart, pamStart + 3) : reverseComplement(seq.slice(pamStart, pamStart + 3));
+        const newPam = guide.str === "+" ? mutantPam.join("") : reverseComplement(mutantPam.join(""));
+        const pamDisruption = classifySpCas9PamDisruption(oldPam, newPam);
+        if (!pamDisruption.acceptable) continue;
+
+        if (!codonInfo || codonIndex < 0) {
+          if (!allowNonCoding) continue;
+          candidates.push({ rank: 0, usage: 1, mutation: { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `PAM ${oldPam}->${newPam} outside CDS`, mt: "noncoding", blockingTier: pamDisruption.tier, blockingReason: pamDisruption.reason, pamBefore: oldPam, pamAfter: newPam } });
+          continue;
+        }
+        const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
+        if (toAA(mutantCodon) !== originalAA) continue;
+        if (introducesRareCodon(codon, mutantCodon)) continue;
+        candidates.push({ rank: 0, usage: getCodonFraction(mutantCodon), mutation: { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: `PAM ${oldPam}->${newPam}`, mt: "silent", blockingTier: pamDisruption.tier, blockingReason: pamDisruption.reason, pamBefore: oldPam, pamAfter: newPam } });
+        continue;
+      }
+
+      const rank = kind === "seed" ? 1 : 2;
+      if (!codonInfo || codonIndex < 0) {
+        if (!allowNonCoding) continue;
+        candidates.push({ rank, usage: 1, mutation: { gp: genomicPos, nb: alt, lb: "noncoding", oc: originalBase, nc: alt, pur: `${label} outside CDS`, mt: "noncoding", blockingTier: "weak", blockingReason: `A single ${label.toLowerCase()} mismatch with an intact PAM is weak protection.` } });
+        continue;
+      }
+      const mutantCodon = `${codon.slice(0, codonIndex)}${alt}${codon.slice(codonIndex + 1)}`;
+      if (toAA(mutantCodon) !== originalAA) continue;
+      if (introducesRareCodon(codon, mutantCodon)) continue;
+      candidates.push({ rank, usage: getCodonFraction(mutantCodon), mutation: { gp: genomicPos, nb: alt, lb: `p.${originalAA}${aaNumber}${originalAA}`, oc: codon, nc: mutantCodon, pur: label, mt: "silent", blockingTier: "weak", blockingReason: `A single ${label.toLowerCase()} mismatch with an intact PAM is weak protection.` } });
+    }
+  }
+
+  // Preserve site order (PAM, then PAM-proximal seed outward) and prefer the commonest
+  // synonymous codon at each site.
+  const positionOrder = new Map(sites.map((site, index) => [site.genomicPos, index]));
+  return candidates.sort((left, right) => (
+    left.rank - right.rank
+    || positionOrder.get(left.mutation.gp) - positionOrder.get(right.mutation.gp)
+    || right.usage - left.usage
+  ));
+}
+
+/**
+ * Up to `maxChanges` synonymous changes that together stop the guide re-cutting.
+ *
+ * One change is what the engine used to emit, and one seed mismatch with an intact PAM does
+ * not reliably prevent re-cleavage - the tool said so in its own warning text and then
+ * shipped exactly that. Where the PAM cannot be destroyed synonymously, mismatches are
+ * stacked from the PAM-proximal end until protection is strong.
+ *
+ * The cap matters in the other direction: every extra mismatch lowers HDR efficiency and
+ * makes the edited allele harder to read when sequencing. Three is the usual working limit.
+ */
+export const MAX_BLOCKING_CHANGES = 3;
+
+/** Clamp a caller-supplied cap into [1, MAX_BLOCKING_CHANGES]; anything else means default. */
+export function normalizeMaxBlockingChanges(value) {
+  const requested = Number(value);
+  if (!Number.isFinite(requested)) return MAX_BLOCKING_CHANGES;
+  return Math.max(1, Math.min(MAX_BLOCKING_CHANGES, Math.floor(requested)));
+}
+
+function findBlockingSet(model, guide, blockedPositions = new Set(), options = {}) {
+  const maxChanges = Number.isFinite(options.maxChanges) ? options.maxChanges : MAX_BLOCKING_CHANGES;
+  const candidates = collectSilentCandidates(model, guide, blockedPositions, options);
+  if (!candidates.length) return [];
+
+  const chosen = [];
+  const usedPositions = new Set();
+  for (const candidate of candidates) {
+    if (chosen.length >= maxChanges) break;
+    if (usedPositions.has(candidate.mutation.gp)) continue;
+    // One PAM change is enough; a second cannot make an absent PAM more absent.
+    if (candidate.mutation.pur.startsWith("PAM") && chosen.some((entry) => entry.pur.startsWith("PAM"))) continue;
+    chosen.push(candidate.mutation);
+    usedPositions.add(candidate.mutation.gp);
+    if (gradeBlockingSet(chosen).tier === "strong") break;
+  }
+
+  const grade = gradeBlockingSet(chosen);
+  return chosen.map((mutation) => ({
+    ...mutation,
+    blockingTier: grade.tier,
+    blockingReason: describeBlockingSet(grade, chosen),
+  }));
+}
+
+function describeBlockingSet(grade, mutations) {
+  if (grade.pamKilled) {
+    const pam = mutations.find((entry) => /^PAM/.test(entry.pur));
+    return pam?.blockingReason || "The PAM is destroyed, so the site cannot be re-cut.";
+  }
+  if (grade.seedCount === 0) return "No donor change clearly disrupts this target.";
+  const parts = [`${grade.seedCount} synonymous seed mismatch${grade.seedCount === 1 ? "" : "es"} with an intact PAM`];
+  if (grade.pamWeakened) parts.push("plus a weakened PAM");
+  const strength = grade.tier === "strong"
+    ? "together give strong protection against re-cutting."
+    : grade.tier === "moderate"
+      ? "reduce but do not reliably prevent re-cutting."
+      : "are weak protection; SpCas9 tolerates a single mismatch.";
+  return `${parts.join(" ")} ${strength}`;
 }
 
 function findSilent(model, guide, blockedPositions = new Set(), options = {}) {
@@ -1208,13 +1459,12 @@ export function summarizeGuideBlocking(result) {
       reason = "The donor insertion disrupts the original guide target.";
     }
     if (tier === "none" && guideMutations.length) {
-      const tiers = guideMutations.map(inferBlockingTier);
-      const hasWeakenedPam = guideMutations.some((entry) => /^PAM\b/i.test(String(entry?.pur || "")) && inferBlockingTier(entry) === "weak");
-      const hasSeedMismatch = guideMutations.some((entry) => /^Seed\b/i.test(String(entry?.pur || "")));
-      if (tiers.includes("strong")) tier = "strong";
-      else if (tiers.includes("moderate") || (hasWeakenedPam && hasSeedMismatch)) tier = "moderate";
-      else tier = "weak";
-      reason = guideMutations.map((entry) => entry.blockingReason || entry.pur).filter(Boolean).join("; ");
+      // gradeBlockingSet is the single rule for how much protection a set of changes gives.
+      // This used to grade the set here with its own logic, which meant two answers to the
+      // same question as soon as a guide carried more than one change.
+      const grade = gradeBlockingSet(guideMutations);
+      tier = grade.tier;
+      reason = [...new Set(guideMutations.map((entry) => entry.blockingReason || entry.pur).filter(Boolean))].join("; ");
     }
     if (!reason) reason = tier === "none" ? "No donor change clearly disrupts this target." : "Guide protection needs review.";
     return { guideIndex, guideName: guide.n || `gRNA${guideIndex}`, tier, reason };
@@ -2152,13 +2402,52 @@ function selectCoDeliveryGuidesWithFallback(model, targetPos, reservedPositions,
   return null;
 }
 
-function selectInsertGuidesWithFallback(model, targetPos) {
+/**
+ * Guides near the edit, nearest window first.
+ *
+ * With `preferBlockable`, guides whose target can be adequately disrupted by synonymous
+ * changes are ranked ahead of guides that cannot, *within the same distance window*. The
+ * order of those two criteria is the whole point: HDR efficiency falls steeply with the
+ * distance between the cut and the edit, so a well-behaved guide far away loses to a usable
+ * one nearby. Widening the search is only worth it when the near window has nothing.
+ *
+ * Guides that cannot be blocked are still offered rather than discarded - they are ranked
+ * last, and the per-pair release state refuses them. Dropping them silently would leave a
+ * designer unable to see why a site is difficult, and some sites have nothing better.
+ */
+/**
+ * Blockability first, distance second - the order is the point.
+ *
+ * HDR efficiency falls steeply with the distance between the cut and the edit, so a guide
+ * that is easier to block but much further away is not automatically better. Ranking within
+ * a distance window keeps that trade honest.
+ */
+export function compareGuidesByProtectionThenDistance(left, right) {
+  return left.rank - right.rank || left.index - right.index;
+}
+
+export const PROTECTION_RANK = Object.freeze({ strong: 0, moderate: 1, weak: 2, none: 3 });
+
+function selectInsertGuidesWithFallback(model, targetPos, options = {}) {
   const windows = [10, 20, 30];
+  const preferBlockable = !!options.preferBlockable;
   for (const window of windows) {
     const guides = selectNearbyGuidesForModel(model, reverseComplement, targetPos, window);
     if (!guides.length) continue;
+    const ordered = preferBlockable
+      ? [...guides]
+        .map((guide, index) => {
+          const blockingSet = findBlockingSet(model, guide, new Set(), options.silentOptions || {});
+          const tier = gradeBlockingSet(blockingSet).tier;
+          return { guide, index, rank: PROTECTION_RANK[tier] ?? PROTECTION_RANK.none };
+        })
+        // Distance order is preserved inside a rank: selectNearbyGuidesForModel already
+        // returns nearest-first, and `index` keeps that as the tie-break.
+        .sort(compareGuidesByProtectionThenDistance)
+        .map((entry) => entry.guide)
+      : guides;
     return {
-      guides,
+      guides: ordered,
       window,
       tier: window === 10 ? "preferred" : window === 20 ? "fallback" : "distant fallback",
     };
@@ -2602,7 +2891,9 @@ export function designPM(gb, mutationString, options = {}) {
   const guideSelection = customGuideSelection
     || (options.coDeliveryBlocking
       ? selectCoDeliveryGuidesWithFallback(gb, codonInfo.g, codonInfo.genomicPositions)
-      : selectInsertGuidesWithFallback(gb, codonInfo.g));
+      // Blockability first within a window: an unblockable guide re-cuts the repair, which
+      // costs more than a few bases of extra cut-to-edit distance inside the same window.
+      : selectInsertGuidesWithFallback(gb, codonInfo.g, { preferBlockable: true }));
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the mutation site." };
   const { guides: rawSelectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
   const minimumAlternativeCutOffset = 10;
@@ -2639,26 +2930,28 @@ export function designPM(gb, mutationString, options = {}) {
   // repaired. In this mode every donor carries the blocking change for every offered guide,
   // so whichever donor performs the repair, neither guide can cut the product.
   const coDeliveryBlocking = !!options.coDeliveryBlocking;
-  const silentByGuide = selectedGuides.map((guide) => {
-    const silent = findSilent(gb, guide, blockedPositions);
-    // Only reserve positions in co-delivery mode: there, several blocking changes end up in
-    // the same donor, and two individually-silent changes landing in one codon can combine
-    // into a coding change. In single-pair mode each donor carries one change, so reserving
-    // would alter donor sequences for no benefit.
-    if (silent && coDeliveryBlocking) blockedPositions.add(silent.gp);
-    return silent;
+  const maxBlockingChanges = normalizeMaxBlockingChanges(options.maxBlockingChanges);
+  // One blocking *set* per guide, not one change. A single seed mismatch with an intact
+  // PAM does not reliably stop re-cutting - the engine's own warning said so while it
+  // emitted exactly that.
+  const blockingByGuide = selectedGuides.map((guide) => {
+    const blockingSet = findBlockingSet(gb, guide, blockedPositions, { maxChanges: maxBlockingChanges });
+    // Positions are always reserved now: several changes per guide means two individually
+    // silent changes can otherwise land in one codon and combine into a coding change.
+    blockingSet.forEach((entry) => blockedPositions.add(entry.gp));
+    return blockingSet;
   });
 
   selectedGuides.forEach((guide, index) => {
-    const silent = silentByGuide[index];
+    const blockingSet = blockingByGuide[index];
     const donorSilents = coDeliveryBlocking
-      ? silentByGuide.filter(Boolean)
-      : (silent ? [silent] : []);
+      ? blockingByGuide.flat().filter(Boolean)
+      : blockingSet;
     const donor = mkODN(gb, guide, mutationPositions, mutationBases, donorSilents, { aaNumber, intendedAa: mutAA.toUpperCase() });
     const guideName = makeGuideName(gb.gene, "pm", index, mutationString);
     result.gs.push({ n: guideName, sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, arm: appendGuideContext(buildPointMutationGuideNote(guide, guideTier, guideWindow), gb, guide) });
     if (donor?.proteinValidation?.valid) result.os.push({ ...donor, n: `ssODN${index + 1} (matched to ${guideName})`, gi: index, guideName, guideStrand: guide.str });
-    if (silent) result.ss.push({ ...silent, gi: index + 1 });
+    blockingSet.forEach((entry) => result.ss.push({ ...entry, gi: index + 1 }));
   });
   if (!result.os.length) return { err: `No donor preserved the intended ${wtAA.toUpperCase()}${aaNumber}${mutAA.toUpperCase()} protein change after guide-blocking mutations were assembled.` };
   result.os = result.os.map((donor) => ({
@@ -2741,7 +3034,8 @@ export function designIT(gb, siteString, tag, options = {}) {
 
   const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, insertionPos, { maxDistance: 30, desiredCount: 2 }) : null;
   if (customGuideSelection?.err) return { err: customGuideSelection.err };
-  const guideSelection = customGuideSelection || selectInsertGuidesWithFallback(gb, insertionPos);
+  const guideSelection = customGuideSelection
+    || selectInsertGuidesWithFallback(gb, insertionPos, { preferBlockable: true, silentOptions: { allowNonCoding: true } });
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the internal insertion site." };
   const { guides, window: guideWindow, tier: guideTier } = guideSelection;
 
@@ -2753,18 +3047,18 @@ export function designIT(gb, siteString, tag, options = {}) {
   // the insert itself strongly disrupts any guide whose protospacer it splits, so this mode
   // often has less work to do here than for a point mutation.
   const coDeliveryBlocking = !!options.coDeliveryBlocking;
+  const maxBlockingChanges = normalizeMaxBlockingChanges(options.maxBlockingChanges);
   const selectedItGuides = guides.slice(0, 2);
   const blockingByGuide = selectedItGuides.map((guide, index) => {
-    const blocking = findSilent(gb, guide, blockedPositions, { allowNonCoding: true });
-    if (blocking) blockedPositions.add(blocking.gp);
-    return blocking ? { ...blocking, gi: index + 1 } : null;
+    const blockingSet = findBlockingSet(gb, guide, blockedPositions, { allowNonCoding: true, maxChanges: maxBlockingChanges });
+    blockingSet.forEach((entry) => blockedPositions.add(entry.gp));
+    return blockingSet.map((entry) => ({ ...entry, gi: index + 1 }));
   });
 
   selectedItGuides.forEach((guide, index) => {
-    const blocking = blockingByGuide[index];
     const donorBlocking = coDeliveryBlocking
-      ? blockingByGuide.filter(Boolean)
-      : (blocking ? [blocking] : []);
+      ? blockingByGuide.flat().filter(Boolean)
+      : (blockingByGuide[index] || []);
     const donor = mkInternalOdn(gb, guide, insertionPos, preset.seq, donorBlocking);
     const guideName = makeGuideName(gb.gene, "it", index, `AFTER_${wtAA || ""}${aaNumber}`, tag);
     if (donor) {
@@ -2785,7 +3079,7 @@ export function designIT(gb, siteString, tag, options = {}) {
         donorAnnotations: annotationBase.concat(guideAnnotations, blockingAnnotations),
       });
     }
-    if (blocking) allBlockingMutations.push(blocking);
+    (blockingByGuide[index] || []).forEach((entry) => allBlockingMutations.push(entry));
   });
 
   donors.forEach((donor) => {
