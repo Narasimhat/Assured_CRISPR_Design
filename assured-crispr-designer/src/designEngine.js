@@ -1245,6 +1245,57 @@ export function collectProcurementReviewNotes(readiness) {
   ];
 }
 
+/**
+ * Release state per guide+donor pair.
+ *
+ * The orderable unit is one guide with its matched ssODN, not "the design". Grading blocking
+ * design-wide meant a weak *alternative* guide blocked the pair you were actually going to
+ * use - while the same report told you to use one matched pair only and not to pool the
+ * alternatives. Those two statements cannot both be right.
+ *
+ * Co-delivery is the exception, and it is the reason the strict gate existed. When both
+ * guides and both ssODNs go into the same well, a guide that is not blocked in every donor
+ * re-cuts the allele the other donor just repaired, so there every guide must be strong.
+ */
+export function summarizeGuidePairReadiness(result) {
+  const blocking = summarizeGuideBlocking(result);
+  const donors = result?.os || [];
+  const coDelivery = Boolean(result?.coDeliveryBlockingRequested);
+
+  const pairs = (blocking.guides || []).map((assessment) => {
+    const donor = donors.find((entry) => entry.guideName === assessment.guideName) || null;
+    const pairBlockers = [];
+    if (assessment.tier !== "strong") {
+      pairBlockers.push(`${assessment.guideName} is not strongly blocked: ${assessment.tier} (${assessment.reason})`);
+    }
+    if (donor && donor.proteinValidation && !donor.proteinValidation.valid) {
+      pairBlockers.push(`${donor.n} fails the final assembled-protein assertion.`);
+    }
+    return {
+      guideName: assessment.guideName,
+      guideIndex: assessment.guideIndex,
+      donorName: donor?.n || "",
+      tier: assessment.tier,
+      reason: assessment.reason,
+      blockers: pairBlockers,
+      orderable: pairBlockers.length === 0,
+    };
+  });
+
+  const orderable = pairs.filter((pair) => pair.orderable);
+  return {
+    coDelivery,
+    pairs,
+    orderablePairs: orderable,
+    // Plainly "at least one pair stands on its own". The co-delivery rule - that the set
+    // fails together, because an unblocked guide re-cuts the allele the other donor just
+    // repaired - is applied in summarizeProcurementReadiness, which is the only place that
+    // decides release. Encoding it here as well produced a second copy that nothing read.
+    anyOrderable: orderable.length > 0,
+    allOrderable: pairs.length > 0 && orderable.length === pairs.length,
+  };
+}
+
 export function summarizeProcurementReadiness(result) {
   if (!result || result.err) {
     return {
@@ -1272,9 +1323,27 @@ export function summarizeProcurementReadiness(result) {
     if (assessment.warnings.length) warnings.push(`${guide.n || "Guide"}: ${assessment.warnings.join(" ")}`);
   });
 
+  let pairReadiness = null;
   if (["pm", "it", "ct", "nt"].includes(result.type)) {
     const blocking = summarizeGuideBlocking(result);
-    if (blocking.status !== "pass") blockers.push(`Guide blocking is not strong for every selected guide. ${blocking.detail}`);
+    pairReadiness = summarizeGuidePairReadiness(result);
+    if (pairReadiness.coDelivery) {
+      // Both guides and both ssODNs share a well: an unblocked guide re-cuts the repaired
+      // allele, so the whole set fails together.
+      if (blocking.status !== "pass") {
+        blockers.push(`Co-delivery requires every guide to be strongly blocked in every donor. ${blocking.detail}`);
+      }
+    } else if (!pairReadiness.anyOrderable) {
+      // Nothing usable: no pair survives on its own either.
+      blockers.push(`No guide is strongly blocked by its matched donor. ${blocking.detail}`);
+    } else if (!pairReadiness.allOrderable) {
+      // At least one pair is sound. Blocking the design would condemn the pair you were
+      // told to use because of the alternative you were told not to.
+      const usable = pairReadiness.orderablePairs.map((pair) => pair.guideName).join(", ");
+      const unusable = pairReadiness.pairs.filter((pair) => !pair.orderable)
+        .map((pair) => `${pair.guideName} (${pair.tier})`).join(", ");
+      warnings.push(`Order ${usable} with its matched ssODN only. Do not order ${unusable}: not strongly blocked, so the donor can be re-cut after repair.`);
+    }
   }
 
   if (result.type === "pm") {
@@ -1302,6 +1371,9 @@ export function summarizeProcurementReadiness(result) {
     blockers,
     warnings,
     standingRequirements: [...PROCUREMENT_STANDING_REQUIREMENTS],
+    // Per-pair state, so a report or an export can mark one pair orderable and another not
+    // rather than applying a single design-wide answer to both.
+    guidePairs: pairReadiness ? pairReadiness.pairs : [],
   };
 }
 
@@ -2699,8 +2771,28 @@ export function designIT(gb, siteString, tag, options = {}) {
       donors[0].donorSense.slice(donors[0].senseInsertStart, donors[0].senseInsertEnd),
     )
     : buildInsertValidation(preset.seq, "");
+
+  // Two cut sites in one allele can lose the sequence between them to non-homologous
+  // repair. That is a property of co-delivery, not of the donors, so it applies to an
+  // internal tag exactly as it does to a point mutation.
+  let dualCutDeletionRisk = null;
+  if (coDeliveryBlocking && selectedItGuides.length > 1) {
+    const cuts = selectedItGuides.map((guide) => guide.cut).sort((left, right) => left - right);
+    const spans = cuts.slice(1).map((cut, index) => cut - cuts[index]);
+    dualCutDeletionRisk = {
+      cutSites: cuts,
+      spans,
+      note: `Co-delivering ${selectedItGuides.length} guides allows both sites to be cut in the same allele; non-homologous repair can then delete the intervening ${spans.join(" and ")} bp. Screen for the deletion product as well as the intended edit.`,
+    };
+  }
+
   return {
     type: "it",
+    // Reported, not just applied: the report section, the dual-cut warning and the release
+    // gate all read this flag, and designIT set none of them while still building the
+    // donors for co-delivery.
+    coDeliveryBlockingRequested: coDeliveryBlocking,
+    ...(dualCutDeletionRisk ? { dualCutDeletionRisk } : {}),
     gene: gb.gene,
     prot: gb.proteinLength,
     an: aaNumber,

@@ -148,8 +148,9 @@ test("procurement readiness blocks weak guide protection and always retains exte
     primerCandidates: [{ score: 1 }],
   };
   const readiness = summarizeProcurementReadiness(result);
+  // The only guide is weakly protected, so there is no orderable pair and the design blocks.
   assert.equal(readiness.status, "blocked");
-  assert.match(readiness.blockers.join(" "), /not strong/i);
+  assert.match(readiness.blockers.join(" "), /No guide is strongly blocked by its matched donor/i);
   // The external-specificity requirement is a standing requirement, not a
   // design-specific warning - it must never influence `status`, but it must always
   // reach an exported order record.

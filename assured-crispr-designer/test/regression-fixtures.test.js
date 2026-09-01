@@ -32,13 +32,17 @@ const readFixture = (name) => readFileSync(path.join(fixturesDir, name), "utf8")
 
 const CASES = [
   {
-    name: "APOE R154S: donors must encode Ser, and one weak guide blocks release",
+    name: "APOE R154S: donors must encode Ser, and only the strongly blocked pair is orderable",
     audit: "findings 1 and 2 - APOE R154S donor collision; false-positive guide blocking",
     reference: "apoe-r154s.gb",
     design: { type: "pm", mutation: "R154S", options: { deliveryMethod: "rnp" } },
     expect: {
       gene: "APOE",
-      procurement: "blocked",
+      // Not blocked: gRNA1 is strongly blocked by its own donor, so that pair is orderable.
+      // Blocking the design here would condemn the pair the report tells you to use because
+      // of the alternative it tells you not to. gRNA2 is separately marked unorderable, and
+      // co-delivery of the pair still blocks the whole set.
+      procurement: "review",
       // The archived donor applied CGC->CGA and encoded Arg. Every emitted donor must
       // encode the requested Ser and nothing else.
       donorCount: 2,
@@ -53,8 +57,11 @@ const CASES = [
       // reads result.ss while this matrix comes from assessOrientedGuideSite.
       donorGuideProtection: [["strong", "none"], ["none", "weak"]],
       coDeliverySafe: false,
-      blockers: [/not strong/i],
-      warnings: [/GC 70%/, /GC 75%/],
+      guidePairs: [
+        { guideName: "APOE_R154S_gRNA1", tier: "strong", orderable: true },
+        { guideName: "APOE_R154S_gRNA2", tier: "weak", orderable: false },
+      ],
+      warnings: [/GC 70%/, /GC 75%/, /Order APOE_R154S_gRNA1 with its matched ssODN only/],
     },
   },
   {
@@ -138,8 +145,10 @@ const CASES = [
       gene: "TAGME",
       insertValid: true,
       insertUnexpectedStop: false,
-      // The one legitimate blocker here is weak guide protection - not the insert.
-      blockers: [/not strong/i],
+      // Every guide here is only weakly protected, so no pair is orderable and the design
+      // is blocked - on guide protection, not on the insert.
+      procurement: "blocked",
+      blockers: [/No guide is strongly blocked by its matched donor/i],
       blockersNotMatching: [/does not match the selected preset/i, /does not preserve the intended coding frame/i],
     },
   },
@@ -307,6 +316,15 @@ for (const entry of CASES) {
     if (e.guideBlocking) {
       const tiers = summarizeGuideBlocking(result).guides.map((guide) => guide.tier);
       assert.deepEqual(tiers, e.guideBlocking, `${label}: guide blocking tiers`);
+    }
+
+    if (e.guidePairs) {
+      // Release state is per guide+donor pair, so the harness has to check it per pair.
+      // This expectation was silently ignored until the branch existed - an unhandled key
+      // in a declarative harness is a test that reads as coverage and asserts nothing.
+      const actual = summarizeProcurementReadiness(result).guidePairs
+        .map((pair) => ({ guideName: pair.guideName, tier: pair.tier, orderable: pair.orderable }));
+      assert.deepEqual(actual, e.guidePairs, `${label}: guide pair readiness`);
     }
 
     if (e.donorGuideProtection) {

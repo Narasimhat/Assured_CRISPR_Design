@@ -11,6 +11,7 @@
 // not belong there. Keep it free of React.
 import { collectProcurementReviewNotes, summarizeProcurementReadiness } from "./designEngine.js";
 import { getOrderRecommendationLabels } from "./reportModel.js";
+import { getDonorReleaseStatus } from "./releaseVerdict.js";
 import { getProjectTypeMeta } from "./reportHtml.js";
 
 
@@ -54,6 +55,12 @@ export function buildBatchOrderRows(entries) {
     // with the sequences - which means the wording has to carry the status too.
     const releaseStatus = procurementReadiness.status;
     const { item: orderRecommendation, donorStrand: donorStrandRecommendation } = getOrderRecommendationLabels(releaseStatus);
+    // A donor row states its own pair's release state. With a design-wide answer, an ssODN
+    // whose guide is strongly blocked exported the same wording as one whose guide is not,
+    // which is the distinction a person reading the CSV most needs.
+    const donorRecommendation = (donor) => getOrderRecommendationLabels(
+      getDonorReleaseStatus(result, donor.guideName),
+    ).donorStrand;
     const common = {
       slot,
       designLabel,
@@ -87,7 +94,7 @@ export function buildBatchOrderRows(entries) {
         strand: donor.sl || "",
         length: donor.od?.length || 0,
         linkedGuide: donor.guideName || "",
-        recommended: donorStrandRecommendation,
+        recommended: donorRecommendation(donor),
         notes: donor.guideName ? `Reverse complement to ${donor.guideName}` : "Recommended donor strand",
       }))
       : result.type === "it"
@@ -101,7 +108,7 @@ export function buildBatchOrderRows(entries) {
           strand: donor.sl || "",
           length: donor.od?.length || 0,
           linkedGuide: donor.guideName || "",
-          recommended: donorStrandRecommendation,
+          recommended: donorRecommendation(donor),
           notes: donor.guideName ? `Guide-linked internal ssODN, reverse complement to ${donor.guideName}` : "Guide-linked internal ssODN donor",
         }))
       : (result.type === "ct" || result.type === "nt")

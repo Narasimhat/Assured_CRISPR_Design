@@ -33,7 +33,11 @@ function render(reference, type, { mutation = "", tag = "", arm = 400, options =
   };
 }
 
-const BLOCKED = { reference: "apoe-r154s.gb", type: "pm", opts: { mutation: "R154S", options: { expectedGene: "APOE" } } };
+// A design where *no* guide is strongly blocked by its matched donor, so nothing is
+// orderable. APOE R154S is no longer blocked: one of its two pairs is sound, and a weak
+// alternative no longer condemns the pair you were told to use. This mirrors the audited
+// SCN5A alphaBtx case, where both donors relied on a single seed mismatch.
+const BLOCKED = { reference: "synthetic-tagging.gb", type: "it", opts: { mutation: "R100", tag: "alphaBtx", options: { expectedGene: "TAGME" } } };
 const READY = { reference: "synthetic-tagging.gb", type: "ct", opts: { tag: "SD40-2xHA", options: { expectedGene: "TAGME" } } };
 // A design that computes cleanly but still awaits an external check. Without this case
 // the suite cannot tell "only ready is orderable" from "anything not blocked is orderable".
@@ -154,11 +158,43 @@ test("the co-delivery section appears only when co-delivery was requested", () =
   // The reader must be told to screen for the deletion two cut sites can produce.
   assert.match(co.html, /Screen for the deletion product/i);
   assert.match(co.html, /delete the intervening/i);
-  // And the named safer alternative must reach the page, not just the API.
+});
+
+test("a point-mutation co-delivery report names the safer single-guide alternative", () => {
+  // Only designPM searches for a replacement guide that can be strongly blocked, so this is
+  // asserted on a PM design rather than folded into the test above. designIT reports
+  // co-delivery and the dual-cut risk but offers no such alternative - a real gap, stated
+  // here rather than hidden behind an optional assertion.
+  const co = render("apoe-r154s.gb", "pm", {
+    mutation: "R154S",
+    options: { expectedGene: "APOE", coDeliveryBlocking: true },
+  });
+  assert.ok(co.result.coDeliverySelection, "PM co-delivery produced no guide selection");
+  const alternative = co.result.coDeliverySelection.singleGuideAlternative;
+  assert.ok(alternative, "no safer single-guide alternative was found for this fixture");
   assert.ok(
-    co.html.includes(co.result.coDeliverySelection.singleGuideAlternative.spacer),
+    co.html.includes(alternative.spacer),
     "co-delivery report omits the safer single-guide alternative",
   );
+});
+
+test("an internal-tag design reports co-delivery, not just applies it", () => {
+  // designIT built donors for co-delivery but set none of the reporting fields, so the
+  // report section and the dual-cut warning never appeared - and the per-pair release gate,
+  // which reads the same flag, would have taken the lenient path for a co-delivered design.
+  const single = render("synthetic-tagging.gb", "it", { mutation: "R100", tag: "alphaBtx", options: { expectedGene: "TAGME" } });
+  assert.equal(single.result.coDeliveryBlockingRequested, false);
+  assert.equal(single.result.dualCutDeletionRisk, undefined);
+
+  const co = render("synthetic-tagging.gb", "it", {
+    mutation: "R100",
+    tag: "alphaBtx",
+    options: { expectedGene: "TAGME", coDeliveryBlocking: true },
+  });
+  assert.equal(co.result.coDeliveryBlockingRequested, true);
+  assert.ok(co.result.dualCutDeletionRisk, "internal-tag co-delivery does not warn about the deletion product");
+  assert.ok(co.result.dualCutDeletionRisk.spans.length > 0);
+  assert.match(co.html, /Screen for the deletion product/i);
 });
 
 test("the app shell and the report describe designs from one list", async () => {

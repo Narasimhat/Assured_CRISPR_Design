@@ -56,7 +56,25 @@ export function getReleaseVerdict(result) {
     blockers: readiness.blockers || [],
     warnings: readiness.warnings || [],
     standingRequirements: readiness.standingRequirements || [],
+    guidePairs: readiness.guidePairs || [],
   };
+}
+
+/**
+ * Release state for one donor, which is its guide+donor pair's state - not the design's.
+ *
+ * A design can be "review required" overall while one pair is sound and another is not.
+ * Painting both donors with the design-level answer made a strongly blocked pair read the
+ * same as a weak one, and it is why a whole design used to be condemned by an alternative
+ * the report told you not to use.
+ */
+export function getDonorReleaseStatus(result, donorGuideName) {
+  const verdict = getReleaseVerdict(result);
+  // A design-wide blocker (wrong reference, failed protein assertion) sinks every pair.
+  if (verdict.status === "blocked") return "blocked";
+  const pair = verdict.guidePairs.find((entry) => entry.guideName === donorGuideName);
+  if (pair && !pair.orderable) return "blocked";
+  return verdict.status;
 }
 
 /** The reason lists, in the order both surfaces present them. */

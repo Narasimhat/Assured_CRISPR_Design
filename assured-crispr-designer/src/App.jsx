@@ -10,7 +10,7 @@ import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessCh
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { buildHistoricalContext, buildReviewItems, buildRowMeta } from "./reportInputs";
-import { getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict";
+import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict";
 import { buildBatchOrderRows, buildSafeToken, formatBatchDesignLabel } from "./orderRows";
 import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
 import { formatBuildLabel } from "./buildInfo";
@@ -4023,7 +4023,7 @@ export default function App() {
                 <LocusMapCard result={selectedEntry.result} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
-                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseStatus={selectedProcurementReadiness?.status} />)}
+                {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseStatus={getDonorReleaseStatus(selectedEntry.result, donor.guideName)} />)}
                 {selectedEntry.result.type === "ko" && (
                   <>
                     <div style={{ color: "#555", fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
@@ -4429,7 +4429,7 @@ export default function App() {
                   <>
                     <InternalProteinPreviewCard result={selectedEntry.result} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
-                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} releaseStatus={selectedProcurementReadiness?.status} />)}
+                    {(selectedEntry.result.os || []).map((donor) => <InternalDonorPreview key={donor.n} donor={donor} releaseStatus={getDonorReleaseStatus(selectedEntry.result, donor.guideName)} />)}
                   </>
                 )}
                 {(selectedEntry.result.type === "ct" || selectedEntry.result.type === "nt") && (

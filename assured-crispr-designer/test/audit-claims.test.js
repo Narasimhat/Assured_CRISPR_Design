@@ -21,6 +21,7 @@ import {
   collectProcurementReviewNotes,
   runDesign,
   summarizeGuideBlocking,
+  summarizeGuidePairReadiness,
   summarizeProcurementReadiness,
 } from "../src/designEngine.js";
 import { buildBatchOrderRows } from "../src/orderRows.js";
@@ -338,4 +339,122 @@ test("audit: guide-to-donor pairing survives into the exported rows", () => {
         `${result.type}: ${donorRows.length} donors exported against ${linked.size} distinct guides`);
     }
   });
+});
+
+
+// --- per-pair release state ----------------------------------------------------------
+//
+// Grading blocking design-wide meant one weak *alternative* guide blocked the pair you were
+// actually going to use, while the same report told you to use one matched pair only and
+// not to pool the alternatives. Both statements cannot be right. The orderable unit is a
+// guide with its matched ssODN, so that is where release state is decided - except under
+// co-delivery, where both guides share a well and an unblocked one re-cuts the repair.
+
+test("a weak alternative guide no longer condemns the pair you were told to use", () => {
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const readiness = summarizeProcurementReadiness(result);
+
+  assert.notEqual(readiness.status, "blocked", "a sound pair was blocked by its alternative");
+  const pairs = readiness.guidePairs;
+  assert.equal(pairs.length, 2);
+
+  const strong = pairs.find((pair) => pair.tier === "strong");
+  const weak = pairs.find((pair) => pair.tier === "weak");
+  assert.ok(strong && weak, "fixture must have one strong and one weak pair to mean anything");
+  assert.equal(strong.orderable, true, "the strongly blocked pair is not orderable");
+  assert.equal(weak.orderable, false, "the weakly blocked pair is orderable");
+
+  // And the report must say which one, not leave the reader to infer it.
+  assert.ok(
+    readiness.warnings.some((item) => item.includes(strong.guideName) && item.includes(weak.guideName)),
+    "no instruction names the orderable pair and the one to avoid",
+  );
+});
+
+test("co-delivery still fails the whole set on one weak guide", () => {
+  // The strict gate is not gone, it is scoped. Both guides and both ssODNs in one well is
+  // exactly the case where a guide that is not blocked in every donor re-cuts the allele
+  // the other donor just repaired.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE", coDeliveryBlocking: true,
+  });
+  const readiness = summarizeProcurementReadiness(result);
+  assert.equal(readiness.status, "blocked", "co-delivery with a weak guide was not blocked");
+  assert.ok(readiness.blockers.some((item) => /Co-delivery requires every guide/i.test(item)),
+    `blocked without naming the co-delivery reason: ${readiness.blockers.join(" | ")}`);
+});
+
+test("a design with no strongly blocked pair is still blocked outright", () => {
+  // The relaxation must not become "nothing is ever blocked". Where every guide relies on a
+  // single seed mismatch - the audited SCN5A alphaBtx shape - there is no sound pair.
+  const result = design("it", "synthetic-tagging.gb", "R100", "alphaBtx", { expectedGene: "TAGME" });
+  const readiness = summarizeProcurementReadiness(result);
+  assert.equal(readiness.status, "blocked");
+  assert.ok(readiness.guidePairs.every((pair) => !pair.orderable));
+  assert.ok(readiness.blockers.some((item) => /No guide is strongly blocked/i.test(item)));
+});
+
+test("the exported rows state each pair's own release state", () => {
+  // The distinction has to survive into the CSV, or the person ordering cannot act on it.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const readiness = summarizeProcurementReadiness(result);
+  const strong = readiness.guidePairs.find((pair) => pair.orderable);
+  const weak = readiness.guidePairs.find((pair) => !pair.orderable);
+
+  const donorRows = buildBatchOrderRows([entry(result)]).filter((row) => row.itemType === "Donor");
+  const strongRow = donorRows.find((row) => row.linkedGuide === strong.guideName);
+  const weakRow = donorRows.find((row) => row.linkedGuide === weak.guideName);
+  assert.ok(strongRow && weakRow, "both donor rows must be present");
+
+  assert.ok(!/do not order|blocked/i.test(strongRow.recommended),
+    `the orderable pair's donor is marked unorderable: ${strongRow.recommended}`);
+  assert.match(weakRow.recommended, /do not order|blocked/i,
+    `the weak pair's donor does not warn against ordering: ${weakRow.recommended}`);
+  assert.notEqual(strongRow.recommended, weakRow.recommended,
+    "both donors export the same recommendation, so the per-pair distinction is lost");
+});
+
+test("the report shows the orderable donor differently from the unorderable one", async () => {
+  const { buildReportHtml } = await import("../src/reportHtml.js");
+  const { buildHistoricalContext, buildReviewItems, buildRowMeta } = await import("../src/reportInputs.js");
+  const { getDonorReleaseStatus } = await import("../src/releaseVerdict.js");
+
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const readiness = summarizeProcurementReadiness(result);
+  const strong = readiness.guidePairs.find((pair) => pair.orderable);
+  const weak = readiness.guidePairs.find((pair) => !pair.orderable);
+  assert.equal(getDonorReleaseStatus(result, strong.guideName), readiness.status);
+  assert.equal(getDonorReleaseStatus(result, weak.guideName), "blocked");
+
+  const meta = buildRowMeta({ gene: "APOE", projectType: "pm" }, result);
+  const html = buildReportHtml(meta, result, "apoe-r154s.gb",
+    buildHistoricalContext(meta, result, "pm"), buildReviewItems(meta, result, "apoe-r154s.gb"), null);
+
+  // The weak pair must be refused in the document, and the instruction naming both must
+  // reach the page rather than sitting only in the API.
+  assert.match(html, /do not order/i, "the report does not refuse the weak pair's donor");
+  assert.ok(html.includes(strong.guideName) && html.includes(weak.guideName),
+    "the report does not name both guides");
+});
+
+
+test("a donor failing its protein assertion is not an orderable pair", () => {
+  // The design-level blocker already stops release, which is why removing the pair-level
+  // check broke no test. But `orderable` is read per pair by the badges, the CSV and any
+  // future consumer, so a pair whose donor mistranslates must not report itself usable.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const target = result.os[0];
+  const broken = {
+    ...result,
+    os: result.os.map((donor) => (donor === target
+      ? { ...donor, proteinValidation: { ...donor.proteinValidation, valid: false, observedAa: "R" } }
+      : donor)),
+  };
+
+  const pairs = summarizeGuidePairReadiness(broken).pairs;
+  const affected = pairs.find((pair) => pair.guideName === target.guideName);
+  assert.ok(affected, "the mistranslating donor's pair is missing");
+  assert.equal(affected.orderable, false, "a pair whose donor mistranslates reports itself orderable");
+  assert.ok(affected.blockers.some((item) => /protein assertion/i.test(item)),
+    `the pair does not say why: ${affected.blockers.join(" | ")}`);
 });

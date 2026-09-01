@@ -12,7 +12,7 @@
 import { summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness } from "./designEngine.js";
 import { getDonorStrandBadge } from "./reportModel.js";
 import { DESIGN_TYPES } from "./designTypes.js";
-import { getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict.js";
+import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -1235,15 +1235,16 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const readinessBlock = buildDesignReadinessHtml(result);
   const locusMapBlock = buildLocusMapHtml(result);
   const snapshotBlock = buildReportSnapshotHtml(result);
-  const releaseStatus = getReleaseVerdict(result).status;
+  // Per donor, not per design: the guide+donor pair is the orderable unit.
+  const donorStatus = (donor) => getDonorReleaseStatus(result, donor.guideName);
   const donorBlock = result.type === "pm"
     ? ((result.os || []).length
-      ? (result.os || []).map((donor) => buildPmDonorHtml(donor, releaseStatus)).join("")
+      ? (result.os || []).map((donor) => buildPmDonorHtml(donor, donorStatus(donor))).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
       : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
-        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, releaseStatus)).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, donorStatus(donor))).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
       : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>
