@@ -3,3 +3,6 @@ dist
 .env
 .env.local
 .DS_Store
+
+# Generated design output - reports and payloads stay out of the repository.
+outputs

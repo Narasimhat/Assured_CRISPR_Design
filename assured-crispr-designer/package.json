@@ -9,6 +9,7 @@
     "build:gh-pages": "GITHUB_PAGES=1 vite build",
     "preview": "vite preview",
     "design": "node scripts/run_design.mjs",
+    "export-report": "node scripts/export_report.mjs",
     "test": "node --test"
   },
   "dependencies": {

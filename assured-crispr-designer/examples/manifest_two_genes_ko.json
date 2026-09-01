@@ -1,0 +1,10 @@
+{
+  "gene_symbol": "TARGETB",
+  "edit_type": "knockout",
+  "species": "synthetic",
+  "cell_line": "",
+  "notes": "Reference annotates a neighbouring gene, so the design carries a reference issue.",
+  "extra": {
+    "reference_file": "../test/fixtures/two-genes-partial-first.gb"
+  }
+}
