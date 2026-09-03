@@ -35,15 +35,19 @@ const design = (type, reference, mutation = "", tag = "", options = {}) =>
   runDesign(type, fixture(reference), mutation, tag, 400, { deliveryMethod: "rnp", ...options });
 
 /**
- * Same design, with blocking capped at one change.
+ * A design whose two pairs differ: one adequately protected, one not.
  *
- * The engine now stacks up to three synonymous seed mismatches, so most guides reach strong
- * protection and the fixtures no longer produce a weak pair on their own. Tests about what
- * the tool does with a weakly protected pair still need one. maxBlockingChanges is a real
- * option - a designer may want fewer donor edits - not a hook invented for the suite.
+ * Tests about per-pair release state need that contrast. R154S no longer provides it - with
+ * changes chosen to minimise predicted residual activity, both of its pairs reach strong at
+ * full depth. APOE Q39S does: one guide's PAM can be destroyed outright (CFD ~0.016) while
+ * the other's site stays around 0.43 even with three synonymous changes.
+ *
+ * Using a real asymmetric site rather than capping the blocking depth: capping produces a
+ * design where *neither* pair is orderable, which tests something different.
  */
-const designWeaklyBlocked = (type, reference, mutation = "", tag = "", options = {}) =>
-  design(type, reference, mutation, tag, { ...options, maxBlockingChanges: 1 });
+const ASYMMETRIC_MUTATION = "Q39S";
+const designAsymmetric = (options = {}) =>
+  design("pm", "apoe-r154s.gb", ASYMMETRIC_MUTATION, "", { expectedGene: "APOE", ...options });
 
 /** One workspace entry, the shape buildBatchOrderRows consumes. */
 const entry = (result, row = {}) => ({
@@ -176,7 +180,7 @@ test("audit finding 1: a donor failing its protein assertion blocks release", ()
 test("audit: alternative guides are never presented as poolable unless every donor blocks them", () => {
   // 72876/72878/72889 NKX3.1 + RNF213: one document mixed projects and WT/mutant donors,
   // making accidental co-delivery plausible.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designAsymmetric();
   if ((result.gs || []).length > 1 && !result.coDeliverySafe) {
     assert.ok(result.guideDonorInstruction, "multiple guides offered with no pairing instruction");
     assert.match(result.guideDonorInstruction, /do not|only|matched/i,
@@ -307,13 +311,36 @@ test("audit: the standing external check is stated on every design, including re
 
 // --- The document must not outrun the code -------------------------------------------------
 
-test("audit: the document's application-change list is the one this file covers", () => {
-  // If a change is added to the audit's closing list, it needs a check here. This fails
-  // loudly on drift rather than letting the document accumulate unverified assurances.
+test("audit: the document's application-change list is the one the suite covers", () => {
+  // If a change is added to the audit's closing list, it needs a check somewhere. This fails
+  // loudly on drift rather than letting the document accumulate unverified assurances - it
+  // fired when the 2026-09-01 entries were added, which is what it is for.
+  //
+  // The count spans two files: the original five are checked here, and the five added for
+  // multi-mutation blocking, codon usage, the splice guard, per-pair release and the weak
+  // protection acceptance are checked in blocking-strategy.test.js and below.
   const doc = readFileSync(path.join(here, "..", "..", "audit", "2026_GE_design_audit.md"), "utf8");
   const section = doc.split("## Application changes driven by this audit")[1] || "";
   const bullets = section.split("\n").filter((line) => line.trim().startsWith("- "));
-  assert.equal(bullets.length, 5, `the audit lists ${bullets.length} application changes; this file was written against 5`);
+  // Nine, not ten: stacking, codon usage and the splice guard share one bullet.
+  assert.equal(bullets.length, 9, `the audit lists ${bullets.length} application changes; the suite was written against 9`);
+
+  // Each newer claim names a mechanism; assert the mechanism exists rather than trusting the
+  // count alone, which a reworded bullet could satisfy without any code behind it.
+  const engine = readFileSync(path.join(here, "..", "src", "designEngine.js"), "utf8");
+  [
+    ["stack up to three synonymous seed mismatches", /MAX_BLOCKING_CHANGES = 3/],
+    ["weight synonymous choices by codon usage", /introducesRareCodon/],
+    ["keep changes away from a CDS exon boundary", /SPLICE_BOUNDARY_MARGIN/],
+    ["decide release per guide\\+donor pair", /summarizeGuidePairReadiness/],
+    ["record a reviewed acceptance", /getWeakProtectionAcceptance/],
+  ].forEach(([claim, mechanism]) => {
+    assert.match(engine, mechanism, `the audit claims "${claim}" but ${mechanism} is absent`);
+  });
+
+  // And the document must no longer say the engine rejects a supplied donor, which it cannot.
+  assert.ok(!/The current engine rejects this donor/.test(doc),
+    "the audit still claims the engine rejects the archived donor");
 });
 
 
@@ -325,8 +352,8 @@ test("audit: guide-to-donor pairing survives into the exported rows", () => {
   // Mutation testing found this: blanking `linkedGuide` in orderRows.js broke nothing,
   // because the only pairing assertion was against the design result.
   [
-    designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" }),
-    designWeaklyBlocked("it", "synthetic-tagging.gb", "F50", "SPOT", { expectedGene: "TAGME" }),
+    designAsymmetric(),
+    design("it", "synthetic-tagging.gb", "F50", "SPOT", { expectedGene: "TAGME" }),
   ].forEach((result) => {
     assert.equal(result.err, undefined);
     const rows = buildBatchOrderRows([entry(result)]);
@@ -363,7 +390,7 @@ test("audit: guide-to-donor pairing survives into the exported rows", () => {
 // co-delivery, where both guides share a well and an unblocked one re-cuts the repair.
 
 test("a weak alternative guide no longer condemns the pair you were told to use", () => {
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designAsymmetric();
   const readiness = summarizeProcurementReadiness(result);
 
   assert.notEqual(readiness.status, "blocked", "a sound pair was blocked by its alternative");
@@ -392,7 +419,7 @@ test("co-delivery still fails the whole set on one weak guide", () => {
   // The strict gate is not gone, it is scoped. Both guides and both ssODNs in one well is
   // exactly the case where a guide that is not blocked in every donor re-cuts the allele
   // the other donor just repaired.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designAsymmetric({
     expectedGene: "APOE", coDeliveryBlocking: true,
   });
   const readiness = summarizeProcurementReadiness(result);
@@ -419,7 +446,7 @@ test("the relaxation did not become 'nothing is ever blocked'", () => {
 
 test("the exported rows state each pair's own release state", () => {
   // The distinction has to survive into the CSV, or the person ordering cannot act on it.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designAsymmetric();
   const readiness = summarizeProcurementReadiness(result);
   const strong = readiness.guidePairs.find((pair) => pair.orderable);
   const weak = readiness.guidePairs.find((pair) => !pair.orderable);
@@ -442,7 +469,7 @@ test("the report shows the orderable donor differently from the unorderable one"
   const { buildHistoricalContext, buildReviewItems, buildRowMeta } = await import("../src/reportInputs.js");
   const { getDonorReleaseStatus } = await import("../src/releaseVerdict.js");
 
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designAsymmetric();
   const readiness = summarizeProcurementReadiness(result);
   const strong = readiness.guidePairs.find((pair) => pair.orderable);
   const weak = readiness.guidePairs.find((pair) => !pair.orderable);
@@ -466,7 +493,7 @@ test("a donor failing its protein assertion is not an orderable pair", () => {
   // The design-level blocker already stops release, which is why removing the pair-level
   // check broke no test. But `orderable` is read per pair by the badges, the CSV and any
   // future consumer, so a pair whose donor mistranslates must not report itself usable.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designAsymmetric();
   const target = result.os[0];
   const broken = {
     ...result,
@@ -491,10 +518,10 @@ test("a donor failing its protein assertion is not an orderable pair", () => {
 // design passed.
 
 test("weak protection can be accepted, and the design still does not read as ready", () => {
-  const plain = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const plain = designAsymmetric();
   const weakName = summarizeProcurementReadiness(plain).guidePairs.find((p) => !p.orderable).guideName;
 
-  const accepted = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const accepted = designAsymmetric({
     expectedGene: "APOE",
     acceptWeakProtection: true,
     weakProtectionReason: "RNP, short exposure; screening 48 clones with full-amplicon sequencing.",
@@ -515,7 +542,7 @@ test("weak protection can be accepted, and the design still does not read as rea
 });
 
 test("an acceptance without a reason does nothing", () => {
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designAsymmetric({
     expectedGene: "APOE", acceptWeakProtection: true, weakProtectionReason: "   ",
   });
   const pair = summarizeProcurementReadiness(result).guidePairs.find((entry) => entry.tier !== "strong");
@@ -526,7 +553,7 @@ test("an acceptance without a reason does nothing", () => {
 test("an acceptance never overrides a donor that encodes the wrong protein", () => {
   // Weak protection is a risk. A mistranslating donor is an error, and no amount of
   // sign-off makes it orderable.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designAsymmetric({
     expectedGene: "APOE", acceptWeakProtection: true, weakProtectionReason: "accepted after review",
   });
   const target = result.os[0];
@@ -544,7 +571,7 @@ test("an acceptance never overrides a donor that encodes the wrong protein", () 
 test("an acceptance is not honoured under co-delivery", () => {
   // There the weak guide re-cuts the allele the *other* donor just repaired - a different
   // and larger risk than the one being accepted. Order the pairs separately instead.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designAsymmetric({
     expectedGene: "APOE",
     coDeliveryBlocking: true,
     acceptWeakProtection: true,
@@ -557,7 +584,7 @@ test("an acceptance is not honoured under co-delivery", () => {
 
 test("an accepted pair exports as orderable, with the acceptance in the wording", async () => {
   const { getDonorReleaseStatus } = await import("../src/releaseVerdict.js");
-  const accepted = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const accepted = designAsymmetric({
     expectedGene: "APOE",
     acceptWeakProtection: true,
     weakProtectionReason: "screening 48 clones with full-amplicon sequencing",
@@ -583,7 +610,7 @@ test("a refused pair no longer claims the design is blocked", async () => {
   assert.ok(!/design blocked/i.test(labels.donorStrand), `still claims the design is blocked: ${labels.donorStrand}`);
   assert.match(labels.donorStrand, /not strongly blocked/i);
 
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
+  const result = designAsymmetric();
   const weakName = summarizeProcurementReadiness(result).guidePairs.find((p) => !p.orderable).guideName;
   const row = buildBatchOrderRows([entry(result)])
     .find((item) => item.itemType === "Donor" && item.linkedGuide === weakName);
@@ -595,7 +622,7 @@ test("every field the acceptance collects reaches the record", () => {
   // "Accepted by" was captured by the form and shown nowhere - a field that exists only in
   // the input is not a record. Asserted rather than assumed, because the first version of
   // this feature had exactly that gap.
-  const result = designWeaklyBlocked("pm", "apoe-r154s.gb", "R154S", "", {
+  const result = designAsymmetric({
     expectedGene: "APOE",
     acceptWeakProtection: true,
     weakProtectionReason: "screening 48 clones with full-amplicon sequencing",
@@ -614,4 +641,30 @@ test("every field the acceptance collects reaches the record", () => {
   const row = buildBatchOrderRows([entry(result)])
     .find((item) => item.itemType === "Donor" && item.linkedGuide === pair.guideName);
   assert.match(row.reviewNotes, /Accepted by: N\. Telugu/, "the export drops the attribution");
+});
+
+
+test("the on-screen order preview shows every safety column the CSV does", () => {
+  // The CSV carried a "Recommended" column and the on-screen preview did not, so the file a
+  // supplier receives said "do not order" where the screen said nothing. Asserted on source
+  // because App.jsx is JSX and cannot be imported here - which is exactly why the omission
+  // survived. The columns that carry safety state are the ones that must match.
+  const app = readFileSync(path.join(here, "..", "src", "App.jsx"), "utf8");
+
+  const csvHeaders = app.match(/const headers = \[([^\]]+)\]/);
+  assert.ok(csvHeaders, "could not find the CSV header list");
+  const csv = csvHeaders[1].split(",").map((entry) => entry.trim().replace(/^"|"$/g, ""));
+
+  // App.jsx has fifteen tables built this way, so pick the order preview by a column only
+  // it has. The first version of this test matched whichever came first and reported the
+  // preview was missing columns it does have.
+  const headerLists = [...app.matchAll(/<tr>\{\[([^\]]+)\]\.map\(\(label\)/g)]
+    .map((match) => match[1].split(",").map((entry) => entry.trim().replace(/^"|"$/g, "")));
+  const preview = headerLists.find((list) => list.includes("Sequence To Order"));
+  assert.ok(preview, `no order-preview header list among ${headerLists.length} tables`);
+
+  ["Review Status", "Linked Guide", "Recommended"].forEach((column) => {
+    assert.ok(csv.includes(column), `the CSV lost the ${column} column`);
+    assert.ok(preview.includes(column), `the on-screen preview omits the ${column} column`);
+  });
 });

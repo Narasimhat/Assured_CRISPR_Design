@@ -981,6 +981,7 @@ function createBatchRow(index) {
     notes: "",
     deliveryMethod: "unknown",
     coDelivery: false,
+    maxBlockingChanges: "3",
     acceptWeakProtection: false,
     weakProtectionReason: "",
     acceptedBy: "",
@@ -3088,6 +3089,10 @@ export default function App() {
           // A reviewed decision to order a pair whose guide is only weakly blocked. It
           // requires a reason, never overrides a mistranslating donor, and is not
           // honoured under co-delivery.
+          // How many synonymous changes a guide may receive. Three is adequate protection
+          // where the PAM cannot be destroyed; fewer means less donor editing, which can
+          // matter more at a difficult locus.
+          maxBlockingChanges: Number(row.maxBlockingChanges || 3),
           acceptWeakProtection: !!row.acceptWeakProtection,
           weakProtectionReason: row.weakProtectionReason || "",
           acceptedBy: row.acceptedBy || "",
@@ -3555,6 +3560,7 @@ export default function App() {
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide delivery</div><select value={row.deliveryMethod || "unknown"} onChange={(event) => updateBatchRow(index, "deliveryMethod", event.target.value)} style={SELECT_STYLE}><option value="unknown">Not decided</option><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression plasmid</option></select></label>
+                        <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide-blocking changes per guide</div><select value={row.maxBlockingChanges || "3"} onChange={(event) => updateBatchRow(index, "maxBlockingChanges", event.target.value)} style={SELECT_STYLE}><option value="3">Up to 3 - stop when protection is strong (default)</option><option value="2">Up to 2</option><option value="1">1 only - fewest donor edits</option></select><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>Where a synonymous PAM change is available it is used alone. Otherwise synonymous seed mismatches are stacked from the PAM-proximal end. More changes protect better against re-cutting; fewer keep HDR efficiency higher and the edited allele easier to read.</div></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}><input type="checkbox" checked={!!row.coDelivery} onChange={(event) => updateBatchRow(index, "coDelivery", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Co-transfect both guides and both ssODNs</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>Builds every donor to block every offered guide, and prefers guides whose targets can both be silently destroyed. Leave off when you deliver one matched guide/ssODN pair at a time.</div></span></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: row.coDelivery ? 0.5 : 1 }}><input type="checkbox" disabled={!!row.coDelivery} checked={!!row.acceptWeakProtection} onChange={(event) => updateBatchRow(index, "acceptWeakProtection", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Accept weak guide protection and order anyway</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>{row.coDelivery ? "Not available with co-delivery: there a weakly blocked guide re-cuts the allele the other donor just repaired. Order the pairs separately instead." : "Records a reviewed decision to order a pair whose guide is only weakly blocked. The advice stays in the report and the design never reads as ready. It never overrides a donor that fails its protein assertion."}</div></span></label>
                         {!!row.acceptWeakProtection && !row.coDelivery && (
@@ -4763,7 +4769,10 @@ export default function App() {
               </div>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1280 }}>
                 <thead>
-                  <tr>{["Slot", "Design", "Review Status", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
+                  {/* Same safety-relevant columns as order_preview.csv. "Recommended" was in the
+                      CSV and not on screen, which is the screen-versus-download divergence this
+                      app keeps removing: the file said do-not-order and the preview did not. */}
+                  <tr>{["Slot", "Design", "Review Status", "Item", "Name", "Sequence To Order", "PAM", "Strand", "Length", "Linked Guide", "Recommended", "Notes"].map((label) => <th key={label} style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#5D7288", color: "#ffffff", textAlign: "left" }}>{label}</th>)}</tr>
                 </thead>
                 <tbody>
                   {batchOrderRows.map((row, rowIndex) => (
@@ -4778,6 +4787,7 @@ export default function App() {
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.strand || "n/a"}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.length}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.linkedGuide || "n/a"}</td>
+                      <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: /do not order|^No\b/i.test(row.recommended || "") ? "#FEE2E2" : /accepted/i.test(row.recommended || "") ? "#FEF0C7" : "#ffffff", fontWeight: 600 }}>{row.recommended || ""}</td>
                       <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{row.notes || ""}</td>
                     </tr>
                   ))}

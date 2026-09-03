@@ -104,3 +104,31 @@ documented quickstart used to fail with `ENOENT`.
 - `extra.custom_guides` passes an explicit guide list to the engine.
 - `extra.co_delivery: true` builds every donor to block every offered guide — set it when
   both guides and both ssODNs are transfected together.
+- `extra.design_options` is passed through to the engine verbatim. The options that change
+  what gets synthesised or released:
+  - `maxBlockingChanges` (1-3, default 3) — how many synonymous changes a guide may receive
+    when its PAM cannot be destroyed silently. Fewer means less donor editing and lower
+    protection against re-cutting.
+  - `acceptWeakProtection` with `weakProtectionReason` (required) and optional `acceptedBy` —
+    a reviewed decision to order a pair whose guide is only weakly blocked. Without a reason
+    it is ignored. It never overrides a donor that fails its protein assertion and is not
+    honoured under co-delivery.
+  - `deliveryMethod` — `rnp` or `u6`. Changes which guide-sequence warnings apply.
+
+```json
+{
+  "gene_symbol": "APOE",
+  "mutation": "R154S",
+  "edit_type": "snp knock-in",
+  "extra": {
+    "reference_file": "../test/fixtures/apoe-r154s.gb",
+    "design_options": {
+      "deliveryMethod": "rnp",
+      "maxBlockingChanges": 3,
+      "acceptWeakProtection": true,
+      "weakProtectionReason": "RNP, short exposure; screening 48 clones with full-amplicon sequencing",
+      "acceptedBy": "N. Telugu"
+    }
+  }
+}
+```

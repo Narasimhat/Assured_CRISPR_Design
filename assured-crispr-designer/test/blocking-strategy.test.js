@@ -49,24 +49,29 @@ const changesFor = (result, guideIndex) => (result.ss || []).filter((entry) => e
 
 // --- stacking -----------------------------------------------------------------------
 
-test("a guide whose PAM cannot be destroyed gets stacked seed mismatches, not one", () => {
-  // APOE_R154S_gRNA2 is the case that prompted this: its PAM has no synonymous change, so
-  // the engine used to hand over a single seed mismatch and call the pair unusable.
+test("changes are added until predicted residual activity is below threshold", async () => {
+  // The rule is a score, not a count. Two things this replaced, both wrong:
+  //
+  //   - "a destroyed PAM needs one change" - changing NGG to NCG leaves 0.107 of the
+  //     original activity per the published PAM table, so it is not sufficient alone.
+  //   - "three seed mismatches are adequate" - on this very fixture, three chosen by
+  //     position left 0.30. Chosen by score, three reach 0.019.
+  //
+  // Position class is no longer asserted either: the engine takes PAM-distal positions when
+  // the identity there costs more activity than a PAM-proximal one, which the CFD table
+  // says happens.
+  const { CFD_PROTECTION_THRESHOLDS, scoreResidualActivity } = await import("../src/designEngine.js");
   const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
-  const tiers = summarizeGuideBlocking(result).guides;
 
-  const pamGuide = tiers.find((guide) => changesFor(result, guide.guideIndex).some((c) => /^PAM/.test(c.pur)));
-  const seedGuide = tiers.find((guide) => !changesFor(result, guide.guideIndex).some((c) => /^PAM/.test(c.pur)));
-  assert.ok(pamGuide && seedGuide, "fixture must have one PAM-killable and one not");
-
-  // One change is enough when it destroys the PAM; more would be pointless donor edits.
-  assert.equal(changesFor(result, pamGuide.guideIndex).length, 1);
-  assert.equal(pamGuide.tier, "strong");
-
-  const seedChanges = changesFor(result, seedGuide.guideIndex);
-  assert.equal(seedChanges.length, 3, "the seed-only guide should receive three changes");
-  assert.ok(seedChanges.every((c) => /^Seed pos/.test(c.pur)), "changes should be in the seed");
-  assert.equal(seedGuide.tier, "strong");
+  summarizeGuideBlocking(result).guides.forEach((entry) => {
+    const guide = result.gs.find((g) => g.n === entry.guideName);
+    const changes = changesFor(result, entry.guideIndex);
+    const scored = scoreResidualActivity(result.gb, guide, changes);
+    assert.ok(scored, `${entry.guideName}: site could not be scored`);
+    assert.ok(scored.score <= CFD_PROTECTION_THRESHOLDS.strong,
+      `${entry.guideName}: residual activity ${scored.score} is above the threshold`);
+    assert.equal(entry.tier, "strong");
+  });
 });
 
 test("blocking depth is capped, and the cap is honoured", () => {
@@ -83,16 +88,34 @@ test("blocking depth is capped, and the cap is honoured", () => {
   assert.equal(normalizeMaxBlockingChanges(undefined), MAX_BLOCKING_CHANGES);
 });
 
-test("stacking stops as soon as protection is adequate", () => {
-  // A guide whose PAM dies takes one change even though three are allowed.
-  const result = design("pm", "apoe-r154s.gb", "R176C", "", { expectedGene: "APOE" });
-  const guides = summarizeGuideBlocking(result).guides;
-  guides.forEach((guide) => {
-    const changes = changesFor(result, guide.guideIndex);
-    if (changes.some((c) => /^PAM/.test(c.pur))) {
-      assert.equal(changes.length, 1, "a destroyed PAM needs no further mismatches");
-    }
+test("no donor carries a change it did not need", async () => {
+  // Every extra mismatch costs HDR efficiency, so the last change added must have been
+  // necessary: without it the site is still above the protection threshold. This is what
+  // "stop as soon as it is adequate" means once the stopping rule is a score.
+  const { CFD_PROTECTION_THRESHOLDS, scoreResidualActivity } = await import("../src/designEngine.js");
+  const cases = [
+    design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" }),
+    design("pm", "apoe-r154s.gb", "R176C", "", { expectedGene: "APOE" }),
+    design("it", "synthetic-tagging.gb", "F50", "SPOT", { expectedGene: "TAGME" }),
+    design("ct", "synthetic-tagging.gb", "", "SD40-2xHA", { expectedGene: "TAGME" }),
+  ];
+  let checked = 0;
+  cases.forEach((result) => {
+    (result.gs || []).forEach((guide, index) => {
+      const changes = changesFor(result, index + 1);
+      if (!changes.length) return;
+      const full = scoreResidualActivity(result.gb, guide, changes);
+      if (!full || full.score > CFD_PROTECTION_THRESHOLDS.strong) return;
+      checked += 1;
+      // result.ss preserves the order changes were chosen in, so the last one is the one
+      // that crossed the threshold.
+      const withoutLast = scoreResidualActivity(result.gb, guide, changes.slice(0, -1));
+      assert.ok(withoutLast && withoutLast.score > CFD_PROTECTION_THRESHOLDS.strong,
+        `${guide.n}: the last of ${changes.length} changes was unnecessary`
+        + ` (${withoutLast ? withoutLast.score : "unscoreable"} without it)`);
+    });
   });
+  assert.ok(checked >= 4, `expected at least 4 protected guides to check, saw ${checked}`);
 });
 
 // --- one grading rule ----------------------------------------------------------------
@@ -123,14 +146,19 @@ test("the set-based and donor-based graders agree", () => {
   });
 });
 
-test("a strong tier from mismatches alone does not claim the site is uncuttable", () => {
+test("protection is reported as a number, not only as a tier", () => {
+  // A tier is a reading of a score against thresholds this tool chose. The score itself is
+  // published, so it travels with the design and a reviewer can disagree with the cut points
+  // without re-deriving anything.
   const result = design("pm", "apoe-r154s.gb", "R154S", "", { expectedGene: "APOE" });
   const donor = result.os.find((entry) => /gRNA2/.test(entry.guideName));
   const own = donor.guideProtection.find((entry) => entry.guideIndex === 2);
   assert.equal(own.tier, "strong");
-  // The PAM survives, so the wording has to say what the protection rests on.
-  assert.match(own.reason, /seed mismatch/i);
-  assert.match(own.reason, /PAM itself is intact|strongly disfavoured/i);
+  assert.ok(Number.isFinite(own.cfd) && own.cfd >= 0 && own.cfd <= 1, `no usable score: ${own.cfd}`);
+  assert.match(own.reason, /predicted residual activity/i);
+  assert.match(own.reason, /CFD/);
+  // And it must not claim the site cannot be cut - only a destroyed PAM does that.
+  assert.ok(!/cannot be (re-)?cut|uncuttable|impossible/i.test(own.reason), `overclaims: ${own.reason}`);
 });
 
 // --- codon usage ----------------------------------------------------------------------
@@ -324,81 +352,182 @@ test("guides are ordered by protection first and distance second", async () => {
 });
 
 
-test("a tag on an exon junction gets no blocking change on the splice site", async () => {
-  // Residue 200 of the synthetic fixture sits on the exon 1/2 junction, so the guides there
-  // straddle it and the seed reaches into the intron.
+test("a tag near an exon junction gets no blocking change on the splice site", async () => {
+  // Sites 197-199 of the synthetic fixture are where this guard does work. Removing it makes
+  // each of them place a synonymous change 1 bp from the CDS junction - in the intronic
+  // GT/AG - because that change scores better than any alternative. With the guard they take
+  // one 6 bp away instead.
   //
-  // This found a real defect. The guard was applied only on the coding branches, and
-  // internal tags allow non-coding positions - so a non-coding position within 3 bp of a CDS
-  // boundary, which is the intronic GT/AG splice site itself, went through unchecked. The
-  // design emitted changes 1 and 2 bp from the junction. The guard now runs before the
-  // coding/non-coding split.
+  // The test used to use site 200, which stacked three position-ordered changes at 3-5 bp.
+  // Once changes are chosen by score that site takes a single change at 4 bp and removing the
+  // guard changes nothing there, so the mutation survived. Scanning all 393 sites with the
+  // guard removed found the three that actually depend on it.
   const { getSpliceBoundaries, SPLICE_BOUNDARY_MARGIN } = await import("../src/designEngine.js");
-  const result = design("it", "synthetic-tagging.gb", "200", "SPOT", { expectedGene: "TAGME" });
-  assert.equal(result.err, undefined);
 
-  const boundaries = getSpliceBoundaries(result.gb);
-  assert.ok(boundaries.length >= 2, "fixture must be multi-exon for this test to mean anything");
+  ["197", "198", "199", "200", "201", "202", "203"].forEach((site) => {
+    const result = design("it", "synthetic-tagging.gb", site, "SPOT", { expectedGene: "TAGME" });
+    assert.equal(result.err, undefined, `site ${site}: ${result.err}`);
 
-  const distances = (result.ss || []).map((change) =>
-    Math.min(...boundaries.map((boundary) => Math.abs(boundary - change.gp))));
-  assert.ok(distances.length > 0, "no blocking changes to check - this test would be vacuous");
+    const boundaries = getSpliceBoundaries(result.gb);
+    assert.ok(boundaries.length >= 2, "fixture must be multi-exon for this test to mean anything");
 
-  // Non-vacuous in the other direction too: the changes must sit *close* to the junction,
-  // or this site is not exercising the guard at all.
-  assert.ok(Math.min(...distances) >= SPLICE_BOUNDARY_MARGIN,
-    `a blocking change is ${Math.min(...distances)} bp from a splice boundary`);
-  assert.ok(Math.min(...distances) < SPLICE_BOUNDARY_MARGIN + 4,
-    `changes are ${Math.min(...distances)} bp away - this site no longer exercises the guard`);
+    const changes = result.ss || [];
+    assert.ok(changes.length > 0, `site ${site}: no blocking changes to check`);
+    changes.forEach((change) => {
+      const nearest = Math.min(...boundaries.map((boundary) => Math.abs(boundary - change.gp)));
+      assert.ok(nearest >= SPLICE_BOUNDARY_MARGIN,
+        `site ${site}: ${change.pur} at ${change.gp} is ${nearest} bp from a splice boundary`);
+    });
+  });
+
+  // Non-vacuous in the other direction: these sites must stay close enough to the junction
+  // that the guard is the only thing keeping changes out of it.
+  const near = design("it", "synthetic-tagging.gb", "198", "SPOT", { expectedGene: "TAGME" });
+  const boundaries = getSpliceBoundaries(near.gb);
+  const nearest = Math.min(...(near.ss || []).map((change) =>
+    Math.min(...boundaries.map((boundary) => Math.abs(boundary - change.gp)))));
+  assert.ok(nearest < SPLICE_BOUNDARY_MARGIN + 6,
+    `site 198 now places changes ${nearest} bp away - it no longer exercises the guard`);
 
   // And avoiding the junction must not have cost the protection.
-  assert.ok(summarizeGuideBlocking(result).guides.every((guide) => guide.tier === "strong"),
+  assert.ok(summarizeGuideBlocking(near).guides.every((guide) => guide.tier === "strong"),
     "avoiding the splice site lost the blocking");
 });
 
 
-test("each blocking change installs the commonest synonymous codon available", () => {
-  // Ordering by usage changes the design at 212 of the 394 sites in this fixture, so it is
-  // not a cosmetic preference. At site 17 the difference is ATC (Ile, 0.48) against ATA
-  // (0.16) - a threefold difference in how often the cell uses that codon.
-  //
-  // The property is checked generally rather than by naming expected codons: at every
-  // changed position, no synonymous alternative may be more common than the one chosen.
+// Removed: "each blocking change installs the commonest synonymous codon available".
+//
+// That was true while candidates were ordered by position then codon usage. Selection is now
+// driven by predicted residual activity, with codon usage only breaking ties between changes
+// that protect equally - so the commonest synonymous codon is deliberately not always taken.
+// What still holds, and is asserted above, is the rare-codon floor: no change installs a
+// codon below 10% usage within its family.
+test("codon usage remains a tie-break, and the rare-codon floor still applies", () => {
   const sites = ["10", "17", "50", "111", "200", "291"];
-  let compared = 0;
-
+  let checked = 0;
   sites.forEach((site) => {
     const result = design("it", "synthetic-tagging.gb", site, "SPOT", { expectedGene: "TAGME" });
     if (result.err) return;
-    (result.ss || [])
-      .filter((change) => change.mt === "silent")
-      // PAM changes are excluded: there the base is not free. It has to be one that destroys
-      // the NGG *and* keeps the amino acid, so usage cannot be the deciding factor. At site
-      // 17 that forces GCC->GCA (0.23) even though GCT (0.26) is commoner - GCT leaves the
-      // PAM alive. The same genomic position at site 10 is a seed change, where the base is
-      // free, and there the engine does pick GCT.
-      .filter((change) => !/^PAM/.test(change.pur))
-      .forEach((change) => {
-        const original = change.oc;
-        const chosen = change.nc;
-        const codonIndex = [...original].findIndex((base, index) => base !== chosen[index]);
-        assert.ok(codonIndex >= 0, `${site}: ${original} -> ${chosen} changes nothing`);
-
-        const synonymous = ["A", "C", "G", "T"]
-          .filter((base) => base !== original[codonIndex])
-          .map((base) => original.slice(0, codonIndex) + base + original.slice(codonIndex + 1))
-          // Only alternatives that keep the same amino acid are real options.
-          .filter((candidate) => TRANSLATE[candidate] === TRANSLATE[original]);
-
-        synonymous.forEach((alternative) => {
-          assert.ok(
-            getCodonFraction(chosen) >= getCodonFraction(alternative),
-            `site ${site}: chose ${chosen} (${getCodonFraction(chosen)}) over ${alternative} (${getCodonFraction(alternative)})`,
-          );
-        });
-        compared += synonymous.length;
-      });
+    (result.ss || []).filter((change) => change.mt === "silent").forEach((change) => {
+      const before = getCodonFraction(change.oc);
+      const after = getCodonFraction(change.nc);
+      checked += 1;
+      assert.ok(after >= RARE_CODON_FLOOR || after >= before,
+        `site ${site}: ${change.oc} (${before}) -> ${change.nc} (${after}) installs a rare codon`);
+      // Every installed codon must be a real codon, which a lookup miss would not be.
+      assert.ok(TRANSLATE[change.nc], `site ${site}: ${change.nc} is not a codon`);
+      assert.equal(TRANSLATE[change.nc], TRANSLATE[change.oc],
+        `site ${site}: ${change.oc} -> ${change.nc} is not synonymous`);
+    });
   });
+  assert.ok(checked > 0, "no silent coding changes were examined - this test would be vacuous");
+});
 
-  assert.ok(compared > 0, "no synonymous alternatives were compared - this test would be vacuous");
+
+// --- terminal tags and reporters ---------------------------------------------------------
+//
+// The blocking strategy first landed on point mutations and internal tags only. designCT and
+// designNT kept calling the older single-change finder, so a C- or N-terminal reporter
+// knock-in received one synonymous change, chosen alphabetically, with no splice guard and
+// no codon-usage weighting.
+//
+// It is often masked for terminal tags: when the insert splits a guide's protospacer the
+// insertion itself destroys the site. It is not masked when a guide cuts near the stop or
+// ATG without spanning the insertion point.
+//
+// COVERAGE GAP, stated rather than implied. All ten SpCas9 guides within 60 bp of the stop
+// codon in synthetic-tagging.gb have a synonymous PAM change available, and under CFD one
+// such change reaches 0.0161 - below the protection threshold on its own. So a terminal-tag
+// design takes a single change here and never enters the stacking path.
+//
+// Mutation testing confirms the consequence: removing the blocking cap, the homology-arm
+// predicate, or blockability-first guide ranking from designCT/designNT changes no design in
+// this fixture. Four mutations survive there and are expected to.
+//
+// The tests below therefore assert the wiring, the cap, splice clearance and donor presence
+// - not that stacking alters a terminal-tag design. The stacking and scoring code is shared
+// with designPM and designIT, which are covered on sites where it demonstrably changes the
+// output. Closing this needs a fixture engineered so no guide near a stop codon has a
+// synonymous PAM change: a fixture built solely to reach a branch, judged not worth the
+// artificiality.
+
+const TERMINAL_CASES = [
+  ["ct", "SD40-2xHA"],
+  ["nt", "N:SD40-Linker"],
+];
+
+test("terminal tag designs use the same blocking strategy as the rest", () => {
+  TERMINAL_CASES.forEach(([type, tag]) => {
+    const result = design(type, "synthetic-tagging.gb", "", tag, { expectedGene: "TAGME" });
+    assert.equal(result.err, undefined, `${type}: ${result.err}`);
+
+    // Every emitted change must carry the shared grading vocabulary, which the old
+    // single-change path did not produce for a stacked set.
+    (result.ss || []).forEach((change) => {
+      assert.ok(["strong", "moderate", "weak", "none"].includes(change.blockingTier),
+        `${type}: ${change.pur} has tier ${change.blockingTier}`);
+    });
+
+    // And the cap must be respected here too.
+    (result.gs || []).forEach((_, index) => {
+      const count = (result.ss || []).filter((change) => change.gi === index + 1).length;
+      assert.ok(count <= MAX_BLOCKING_CHANGES, `${type}: guide ${index + 1} received ${count} changes`);
+    });
+  });
+});
+
+test("terminal tag blocking changes stay clear of splice boundaries", async () => {
+  const { getSpliceBoundaries, SPLICE_BOUNDARY_MARGIN } = await import("../src/designEngine.js");
+  TERMINAL_CASES.forEach(([type, tag]) => {
+    const result = design(type, "synthetic-tagging.gb", "", tag, { expectedGene: "TAGME" });
+    const boundaries = getSpliceBoundaries(result.gb);
+    assert.ok(boundaries.length >= 2, "fixture must be multi-exon for this test to mean anything");
+    (result.ss || []).forEach((change) => {
+      const nearest = Math.min(...boundaries.map((boundary) => Math.abs(boundary - change.gp)));
+      assert.ok(nearest >= SPLICE_BOUNDARY_MARGIN,
+        `${type}: ${change.pur} at ${change.gp} is ${nearest} bp from a splice boundary`);
+    });
+  });
+});
+
+test("terminal tag blocking changes are inside the donor that gets ordered", () => {
+  // The reason the position predicate exists. A terminal-tag design only applies a change
+  // that lands in a homology arm, so stacking without that restriction would credit changes
+  // in the tier that the oligo never carries.
+  TERMINAL_CASES.forEach(([type, tag]) => {
+    const result = design(type, "synthetic-tagging.gb", "", tag, { expectedGene: "TAGME" });
+    const donor = result.donor || "";
+    assert.ok(donor.length > 100, `${type}: no donor to check`);
+
+    (result.ss || []).forEach((change) => {
+      // The donor is the assembled 5' arm + insert + 3' arm, so a credited change must be
+      // findable as an actual difference from the reference at its own position.
+      const reference = result.gb.sequence || result.gb.seq || "";
+      assert.notEqual(reference[change.gp], change.nb,
+        `${type}: ${change.pur} claims to change ${reference[change.gp]} to the same base`);
+      assert.ok(donor.includes(change.nc) || donor.includes(change.nb),
+        `${type}: ${change.pur} is credited but its base is not in the donor`);
+    });
+  });
+});
+
+test("co-delivery guide selection scores blockability the way the design blocks", async () => {
+  // Selection used the single-change finder while the design stacks up to three, so it
+  // under-rated every guide whose PAM cannot be killed but whose seed can be mismatched -
+  // and then reported that no pair could be strongly blocked.
+  const engine = readFileSync(path.join(here, "..", "src", "designEngine.js"), "utf8");
+  const selector = engine.slice(engine.indexOf("function selectCoDeliveryGuidesWithFallback"));
+  const body = selector.slice(0, selector.indexOf("\nfunction "));
+  assert.match(body, /findBlockingSet/, "co-delivery selection does not use the stacked strategy");
+  assert.ok(!/findSilent\(/.test(body), "co-delivery selection still scores by a single change");
+
+  // And behaviourally: at the APOE locus the pair is only jointly protectable because gRNA2
+  // can be stacked to strong. Selection has to see that.
+  const result = design("pm", "apoe-r154s.gb", "R154S", "", {
+    expectedGene: "APOE", coDeliveryBlocking: true,
+  });
+  assert.ok(result.coDeliverySelection, "no co-delivery selection was produced");
+  assert.equal(result.coDeliverySelection.stronglyBlockableSelected, 2,
+    "selection does not credit both guides as strongly blockable");
+  assert.equal(result.coDeliverySafe, true);
 });

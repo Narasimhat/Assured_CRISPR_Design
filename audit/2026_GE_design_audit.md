@@ -6,15 +6,15 @@ Source root: `U:\DATA MANAGMENT\Projects\Gene_Editing_Projects\Projects\2026_GE`
 
 ## Scope and interpretation
 
-- Reviewed 28 directories named `Project plan`, containing 158 unique files. The design-bearing set included 31 DOCX, 17 PDF, 15 HTML, 29 XLSX, 11 TXT, 6 CSV, 20 GenBank, 5 SnapGene DNA, and 1 FASTA file. Images and scanner files were inventoried but were not treated as design specifications.
+- Reviewed 28 directories named `Project plan`, containing 158 unique files. The file inventory was re-counted on 2026-09-01 and matches: 31 DOCX, 29 XLSX, 20 GenBank, 17 PDF, 15 HTML, 11 TXT, 6 CSV, 1 FASTA. The design-bearing set included 31 DOCX, 17 PDF, 15 HTML, 29 XLSX, 11 TXT, 6 CSV, 20 GenBank, 5 SnapGene DNA, and 1 FASTA file. Images and scanner files were inventoried but were not treated as design specifications.
 - Duplicate templates and the six individual Landthaler reports repeated inside the parent `Project plan` were counted once.
 - Sequence checks used the rules now implemented in ASSURED CRISPR Designer: explicit 20 nt SpCas9 spacers, guide GC/poly-G/poly-T review, strict PAM disruption (NAG/NGA are not accepted as dead PAMs), final assembled-donor translation, guide/donor cross-protection, primer thermodynamics, and WT-versus-edited amplicon reporting.
 - This is a computational and document-consistency audit. Genome-wide specificity, cell-line genotype, transcript choice, and wet-lab suitability still require independent confirmation before procurement or experimental use.
 
 ## Highest-priority findings
 
-1. **APOE R154S donor collision:** the donor linked to `APOE_R154S_gRNA2` applies `CGC -> CGA` at the same codon requested as `CGC -> AGC`. The assembled donor therefore encodes Arg instead of the requested Ser. The current engine rejects this donor with a final protein assertion.
-2. **Systematic false-positive guide blocking:** multiple reports call NAG/NGA PAM changes or one seed mismatch “guide blocking present.” These include APOE R176C, APOE V254E, PHF6 S199E/S199A, SCN5A internal tags, and several Landthaler tag designs. The current engine grades these as review-required and only passes strong disruption for every selected guide.
+1. **APOE R154S donor collision:** the donor linked to `APOE_R154S_gRNA2` applies `CGC -> CGA` at the same codon requested as `CGC -> AGC`. The assembled donor therefore encodes Arg instead of the requested Ser. The current engine does not produce this donor: it applies `CGC -> AGC` and asserts the assembled protein carries Ser at 154, blocking release if it does not. It has no entry point that validates a *supplied* oligo, so it cannot be said to reject the archived one - do not reuse that sequence on the strength of this tool. (Corrected 2026-09-01: this line previously claimed the engine "rejects this donor", which overstated what is checkable.)
+2. **Systematic false-positive guide blocking:** multiple reports call NAG/NGA PAM changes or one seed mismatch “guide blocking present.” These include APOE R176C, APOE V254E, PHF6 S199E/S199A, SCN5A internal tags, and several Landthaler tag designs. The current engine never grades NAG/NGA as strong, and grades a single seed mismatch as weak. Since 2026-09-01 it also *fixes* the underlying problem rather than only reporting it: where the PAM cannot be changed synonymously it stacks up to three synonymous seed mismatches, which is adequate protection. Several of the archived designs were unsafe because one change was all that was attempted, not because the site could not be protected.
 3. **Systematic false-positive primer readiness:** several reports label primer pairs ready despite extreme Tm/GC, self-/hetero-dimer risk, low-complexity runs, fallback placement, or lack of outside-homology-arm margin. The clearest examples are APOE R154S/V254E, EIF3D, EIF4E, UPF1, EIF4G1, and EIF4G3. The current engine no longer marks fallback or failed thermodynamic pairs ordering-ready.
 4. **Order export lacked safety state:** older vendor workbooks carry sequences but not the design-readiness findings. The application now labels exports as procurement drafts and includes `Review Status` and `Review Notes` in the retained order preview/CSV.
 5. **Metadata and copy-forward defects:** the POLQ plan says “knockout RetSat”; one APOE4 plan carries the APOE2 IRIS ID; several APOE/INS plans contain blank or incomplete guide rows; and the NALCN V316M/K1115N plans live only inside the E280D project document.
@@ -56,4 +56,17 @@ Source root: `U:\DATA MANAGMENT\Projects\Gene_Editing_Projects\Projects\2026_GE`
 - Compute procurement readiness separately from computational design success.
 - Carry `Review Status` and the full review reasons into the combined order preview and CSV.
 - Describe vendor-format XLSX files as procurement drafts because their fixed upload schema cannot preserve the full safety review.
-- Retain the earlier fixes for strict PAM classification, final donor translation, cross-guide protection, primer thermodynamics/outside-arm placement, delivery-specific poly-T, guide GC/poly-G, transcript assumptions, and edited-versus-WT validation amplicons.
+- Retain the earlier fixes for strict PAM classification, final donor translation, cross-guide protection, primer thermodynamics/outside-arm placement, delivery-specific poly-T, guide GC/poly-G, transcript assumptions, and edited-versus-WT recommended amplicons.
+- Grade guide blocking by CFD (Doench et al. 2016) applied to the repaired allele, choosing synonymous changes that minimise predicted residual activity, weighting equal choices by human codon usage, and keeping blocking changes at least 3 bp from a CDS exon boundary. This supersedes the mismatch-count rule, which over-credited both a lone synonymous PAM change (NCG retains 0.107 of NGG activity) and arbitrary seed stacks (three chosen by position left 0.30 on the APOE R154S fixture).
+- Decide release per guide+donor pair rather than per design, so a weakly protected alternative cannot condemn a soundly protected pair. Co-delivery remains all-or-nothing, because there an unblocked guide re-cuts the allele the other donor repaired.
+- Allow a reviewed, reasoned acceptance of weak protection, recorded in the report and the export. It never overrides a donor that fails its protein assertion, and never lets a design read as ready.
+- Report guide GC as an observation rather than a prediction of failure. GC correlates with SpCas9 activity weakly; it is not a substitute for an on-target model.
+
+## Verification of this document
+
+The claims this document makes about the application are executable, in
+`assured-crispr-designer/test/audit-claims.test.js`. A test fails if the list above grows
+without a corresponding check, so the document cannot accumulate unverified assurances.
+
+Not verified here: the per-project findings have not been re-derived against the current
+engine. That needs the internal 2026_GE project files, which stay outside the repository.

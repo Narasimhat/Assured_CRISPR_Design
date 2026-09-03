@@ -50,8 +50,10 @@ const CASES = [
       // mismatches instead - adequate protection, though the PAM does survive.
       guideBlocking: ["strong", "strong"],
       // The blocking sets themselves, so a regression to single-change blocking is caught
-      // here and not only in the tier it happens to produce.
-      blockingChangeCounts: [1, 3],
+      // here and not only in the tier it happens to produce. Both guides take three: a
+      // synonymous PAM change alone leaves about 0.107 of the original activity, which is
+      // above the protection threshold, so gRNA1 does not stop at its PAM change either.
+      blockingChangeCounts: [3, 3],
       // The cross-guide protection matrix, donor by donor, is the evidence behind the
       // "do not pool" instruction: each ssODN protects only its own guide and leaves the
       // other guide's target intact. Asserting only the matrix's *size* let a mutation

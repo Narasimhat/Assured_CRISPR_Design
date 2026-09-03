@@ -169,10 +169,15 @@ test("a point-mutation co-delivery report names the safer single-guide alternati
   // asserted on a PM design rather than folded into the test above. designIT reports
   // co-delivery and the dual-cut risk but offers no such alternative - a real gap, stated
   // here rather than hidden behind an optional assertion.
+  // Capped at one change on purpose. At full depth this pair is now jointly protectable -
+  // three stacked seed mismatches protect gRNA2 - so there is nothing safer to recommend and
+  // the advice correctly does not appear. The recommendation exists for the case where no
+  // pair can be strongly blocked, which one change reproduces.
   const co = render("apoe-r154s.gb", "pm", {
     mutation: "R154S",
-    options: { expectedGene: "APOE", coDeliveryBlocking: true },
+    options: { expectedGene: "APOE", coDeliveryBlocking: true, maxBlockingChanges: 1 },
   });
+  assert.equal(co.result.coDeliverySafe, false, "fixture must be co-delivery-unsafe to mean anything");
   assert.ok(co.result.coDeliverySelection, "PM co-delivery produced no guide selection");
   const alternative = co.result.coDeliverySelection.singleGuideAlternative;
   assert.ok(alternative, "no safer single-guide alternative was found for this fixture");
