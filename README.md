@@ -67,6 +67,10 @@ error, not a risk - and it is unavailable under co-delivery.
 - The design engine returns a terse internal result shape with no schema. Reports, exports and the CLI consume it by convention, so a change to that shape is not caught by validation.
 - The 26 archived 2026_GE designs have not been re-derived against the current engine. The audit's claims *about this application* are executable; its per-project findings are not.
 
+## Agent science skills
+
+Cursor agents in this repo can use [Google DeepMind Science Skills](https://github.com/google-deepmind/science-skills) (Ensembl, ClinVar, gnomAD, AlphaGenome, UniProt, and related databases). They are installed under [`.agents/skills/`](./.agents/skills/); see [`.agents/README.md`](./.agents/README.md) for CRISPR-relevant skills, update commands, and credential notes.
+
 ## Local development
 
 ```bash
