@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wgs-agent"
+version = "0.1.0"
+description = "A small tool-calling agent for whole-genome sequencing QC, alignment, and VCF summary"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+wgs-agent = "wgs_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["wgs_agent*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
