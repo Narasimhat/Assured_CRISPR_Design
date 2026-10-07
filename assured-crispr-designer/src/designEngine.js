@@ -16,6 +16,7 @@ import {
   normalizeRawSequenceToTranscriptModel,
   selectNearbyGuidesForModel,
 } from "./transcriptModel.js";
+import { MINIMUM_ALTERNATIVE_CUT_OFFSET, pickGuidePair } from "./guideSelection.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -2506,22 +2507,27 @@ function selectInsertGuidesWithFallback(model, targetPos, options = {}) {
   const windows = [10, 20, 30];
   const preferBlockable = !!options.preferBlockable;
   for (const window of windows) {
-    const guides = selectNearbyGuidesForModel(model, reverseComplement, targetPos, window);
+    let guides;
+    if (preferBlockable) {
+      // Every candidate in the window is scored before the pair is chosen. Choosing the pair
+      // first (selectNearbyGuidesForModel: nearest guide, then a distinct partner) and ranking
+      // afterwards meant a better-protected guide within 10 bp of the nearest guide's cut was
+      // never scored at all. Distance order is preserved inside a class: candidates are
+      // nearest-first and `index` keeps that as the final tie-break.
+      const candidates = findSpCas9Guides(model, reverseComplement, targetPos, window)
+        .sort((left, right) => Math.abs(left.d) - Math.abs(right.d));
+      const entries = candidates.map((guide, index) => {
+        const blockingSet = findBlockingSet(model, guide, new Set(), options.silentOptions || {});
+        const tier = gradeBlockingSet(blockingSet).tier;
+        return { guide, index, rank: PROTECTION_RANK[tier] ?? PROTECTION_RANK.none };
+      });
+      guides = pickGuidePair(entries, { minimumCutOffset: MINIMUM_ALTERNATIVE_CUT_OFFSET });
+    } else {
+      guides = selectNearbyGuidesForModel(model, reverseComplement, targetPos, window);
+    }
     if (!guides.length) continue;
-    const ordered = preferBlockable
-      ? [...guides]
-        .map((guide, index) => {
-          const blockingSet = findBlockingSet(model, guide, new Set(), options.silentOptions || {});
-          const tier = gradeBlockingSet(blockingSet).tier;
-          return { guide, index, rank: PROTECTION_RANK[tier] ?? PROTECTION_RANK.none };
-        })
-        // Distance order is preserved inside a rank: selectNearbyGuidesForModel already
-        // returns nearest-first, and `index` keeps that as the tie-break.
-        .sort(compareGuidesByProtectionThenDistance)
-        .map((entry) => entry.guide)
-      : guides;
     return {
-      guides: ordered,
+      guides,
       window,
       tier: window === 10 ? "preferred" : window === 20 ? "fallback" : "distant fallback",
     };
