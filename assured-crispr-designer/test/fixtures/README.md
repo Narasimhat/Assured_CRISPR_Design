@@ -49,6 +49,17 @@ everything identifying the project is dropped.
 - **Useful residues:** 50 is Phe, 100 is Arg. Internal-tag sites on either side of the
   locus produce donors on opposite strands, which is what exercises orientation handling.
 
+### `nr2f2-ng016753.gb`
+
+- **Source:** NCBI RefSeqGene `NG_016753.1` (21,336 bp), unmodified, retrieved 2026-10-07.
+- **Gene:** NR2F2 (Gene ID 7026), CDS `join(11179..11620,13149..13676,16421..16695)`, protein
+  `NP_066285.1` (414 aa). The record also annotates the antisense gene `NR2F2-AS1` first, so the
+  design must be told the intended gene.
+- **What it pins:** C-terminal tag guide selection. The guide nearest the stop codon (-12 bp)
+  grades a tier below the guide at -14 bp, whose cut is 2 bp from it. Guide selection used to
+  choose the pair by proximity before scoring, which discarded the better guide.
+- Public reference sequence only; contains no project or subject data.
+
 ## Adding a fixture
 
 Add the reference here, then add a case to `CASES` in `../regression-fixtures.test.js`.

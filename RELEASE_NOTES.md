@@ -1,5 +1,31 @@
 # Release notes
 
+## Unreleased
+
+### Guide selection scores every candidate before choosing the pair
+
+- The guide ranking is documented as blockability first and distance second, within a distance
+  window. The code did not do that: it took the nearest guide, added a distinct partner by strand
+  and distance, and only then ranked those two. A better-protected guide whose cut was within
+  10 bp of the nearest guide's cut was discarded without being scored. On NR2F2 (C-terminal tag)
+  the guide at -14 bp (strongly blockable, 40% GC) was dropped for sitting 2 bp from a guide at
+  -12 bp that grades one tier lower, and the tool offered an AT-rich guide in its place.
+- Every candidate in the window is now scored, and the pair is chosen from the scored set (new
+  `src/guideSelection.js`). A pair of distinct guides is still offered whenever one exists; the
+  lead guide is the best-protected one that has a distinct partner.
+- Among equally protected guides, extreme spacer composition (GC below 25% or above 75%, or one
+  base making up more than 60% of the spacer) ranks behind ordinary composition. This is a
+  tie-break, not a gate, and does not replace the genome-wide specificity check that the tool
+  still does not perform.
+- Custom guides and the co-delivery selector are unchanged.
+- Results that change on re-run: a design whose nearest guide has no distinct partner now offers
+  the best pair of distinct guides instead of that one guide. Of the nine fixture designs checked,
+  two changed. NR2F2 C-terminal SD40-V5 is the case above. The bundled APOE R176C example offered
+  one guide (+1 bp) and now offers two (-4 bp and +8 bp), each strongly blocked by its own
+  matched ssODN and not poolable, as for APOE R154S. The other seven are identical.
+- New tests: `test/guide-selection.test.js`, and an NR2F2 case in the regression fixtures
+  (`test/fixtures/nr2f2-ng016753.gb`, RefSeqGene `NG_016753.1`).
+
 ## 1.0.0 — 2026-09-01
 
 First release intended for routine use. The theme of the work behind it is narrow: the tool

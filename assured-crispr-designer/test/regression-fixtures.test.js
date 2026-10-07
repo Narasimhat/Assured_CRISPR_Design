@@ -158,6 +158,26 @@ const CASES = [
       blockersNotMatching: [/does not match the selected preset/i, /does not preserve the intended coding frame/i],
     },
   },
+  {
+    name: "NR2F2 C-terminal tag: a better-protected guide inside 10 bp of the nearest guide is still offered",
+    audit: "guide selection - the nearest guide was taken first and a better-protected guide whose cut was under 10 bp away was discarded before it was ever scored",
+    reference: "nr2f2-ng016753.gb",
+    design: { type: "ct", tag: "SD40-V5", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "NR2F2" } },
+    expect: {
+      gene: "NR2F2",
+      insertValid: true,
+      primerStrategy: "recommended-outside-homology-arms",
+      // The nearest guide (ATTTATTGAATTGCCATATA, -12 bp) grades one tier below the guide at
+      // -14 bp, whose cut is 2 bp away. Choosing the pair before scoring discarded it; the
+      // engine now scores every candidate in the window first, so it leads. The partner is
+      // the best distinct guide, and every distinct candidate here is AT-rich, so it is
+      // reported through the GC observation rather than hidden.
+      guideSpacers: ["CAGTTTTAACTGGCCGTATA", "AATAAATAAATAAAATAAGA"],
+      guideBlocking: ["strong", "strong"],
+      procurement: "review",
+      warnings: [/GC 5%/],
+    },
+  },
   // ----- refusal paths -----
   {
     name: "refusal: an unsupported C-terminal cassette",
@@ -355,6 +375,12 @@ for (const entry of CASES) {
     }
 
     if (e.coDeliverySafe !== undefined) assert.equal(result.coDeliverySafe, e.coDeliverySafe);
+
+    if (e.guideSpacers) {
+      // Which guides were chosen, in order. The tiers alone cannot show that a better guide
+      // was never considered: a design with two strong guides passes either way.
+      assert.deepEqual((result.gs || []).map((guide) => guide.sp), e.guideSpacers, `${label}: selected guides`);
+    }
 
     if (e.insertValid) {
       const v = result.insertValidation || {};
