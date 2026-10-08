@@ -40,6 +40,33 @@
   compare the untreated tagged protein with wild type before using it for degradation.
 - New tests: `test/spaced-sd40-v5.test.js`, and two NR2F2 cases in the regression fixtures.
 
+### Report layout: shorter, one copy of each thing, detail one click away
+
+- The HTML report no longer repeats itself. The knock-in QC checklist that duplicated Design Readiness
+  is gone; the insert DNA and amino-acid strings, printed twice when expected and designed were
+  identical, are printed once (and both, in full, when they differ, with the mismatch badge); review
+  checkpoints already printed word for word under Release status or Design Readiness are not listed a
+  third time, with a one-line note saying so.
+- Order: release status, a four-cell snapshot strip (the donor cell now names the format and arms), the
+  design scheme, then Gene Information, gRNA Sequences, Recommended Primers, Donor Design, Design
+  Readiness, Review Checkpoints, Additional Info. Section numbers follow what is present.
+- Layout: one centred column (980 px), thin-ruled tables with a light header, label/value pairs in a
+  four-column table instead of a card each, primers in one table instead of two cards with nested
+  cards, readiness as one row per check with items to review first and passes last, and a print
+  stylesheet. Page structure uses tables and blocks only, no card grids.
+- Folded by default (HTML `details`, no script): alternative primer pairs, coding frame and insert
+  sequence and translation, target region map, the suggested figure legend, the plain-text summary, and,
+  for point-mutation and internal-tag ssODNs, the opposite (reference-only) strand and the coding
+  frame view. The strand to order stays visible. Folds are closed in print, so print or save a copy
+  with them opened if the detail is needed on paper.
+- No design content was removed: every folded or de-duplicated item is still in the document, and the
+  engine, the app's on-screen results and the order exports are unchanged.
+- New tests: `test/report-layout.test.js` (26) checks section order and numbering, one copy of the
+  insert sequence and the mismatch case, readiness ordering and one row per check, no repetition under
+  Review Checkpoints, closed folds, the folded reference strand, and renumbering with historical
+  matches. Seven mutations (QC list back, unsorted readiness, no de-duplication, mismatch hidden, open
+  folds, scheme after the sections, reference strand not folded) each fail a test.
+
 ### Donor format and arm control for terminal tags
 
 - New `src/donorFormat.js` (pure functions) plans the donor for C- and N-terminal tags. Three formats:

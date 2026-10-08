@@ -144,49 +144,10 @@ export function buildPrimerSummaryItems(result) {
   }));
 }
 
-function buildSummaryCardsHtml(items, options = {}) {
-  if (!items?.length) return "";
-  const minWidth = options.minWidth || 200;
-  return `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(${minWidth}px,1fr));gap:12px;margin:0 0 16px 0;">
-      ${items.map((item) => `
-        <div style="padding:12px 14px;border-radius:14px;border:1px solid #D0D5DD;background:#FCFCFD;">
-          <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;margin-bottom:6px;">${item.label}</div>
-          <div style="color:#111827;font-size:15px;font-weight:700;line-height:1.4;${item.monospace ? "font-family:Consolas,monospace;" : ""}">${item.value || "n/a"}</div>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
 function buildPrimerSummaryHtml(result) {
   const primers = buildPrimerSummaryItems(result);
   if (!primers.length) return `<p class="sub">No recommended primers were generated for this design.</p>`;
-  return `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;margin:0 0 12px 0;">
-      ${primers.map((primer) => `
-        <div style="padding:14px;border-radius:16px;border:1px solid #D0D5DD;background:#FCFCFD;">
-          <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
-            <div style="font-size:13px;font-weight:800;color:#111827;">${primer.name}</div>
-            <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;background:#EEF2FF;color:#344054;font-size:11px;font-weight:700;">${primer.length}</span>
-          </div>
-          <div style="padding:10px 12px;border-radius:12px;background:#FFFFFF;border:1px solid #E4E7EC;font-family:Consolas,monospace;font-size:13px;line-height:1.6;overflow-wrap:anywhere;margin-bottom:10px;">${primer.sequence}</div>
-          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;">
-            ${[
-              ["Tm", primer.tm],
-              ["GC", primer.gc],
-              ["Clamp", primer.clamp],
-            ].map(([label, value]) => `
-              <div style="padding:8px 10px;border-radius:10px;background:#FFFFFF;border:1px solid #E4E7EC;">
-                <div style="color:#667085;font-size:10px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;margin-bottom:4px;">${label}</div>
-                <div style="color:#111827;font-size:13px;font-weight:700;">${value}</div>
-              </div>
-            `).join("")}
-          </div>
-        </div>
-      `).join("")}
-    </div>
-  `;
+  return `<table>${tableHtml([["Primer", "Sequence (5'-3')", "Length", "Tm", "GC", "Clamp"]], true)}${tableHtml(primers.map((primer) => [primer.name, `<span class="mono">${primer.sequence}</span>`, primer.length, primer.tm, primer.gc, primer.clamp]))}</table>`;
 }
 
 export function buildPrimerCandidateRows(result) {
@@ -352,7 +313,17 @@ export function buildPmDonorComparison(donor) {
 }
 
 function tableHtml(rows, header = false) {
-  return rows.map((row) => `<tr>${row.map((cell, index) => header ? `<th style="padding:8px 10px;border:1px solid #bbbbbb;background:#2E75B6;color:#ffffff;text-align:left;">${cell}</th>` : `<td style="padding:8px 10px;border:1px solid #bbbbbb;vertical-align:top;${index === 0 ? "background:#F0F4F8;font-weight:700;width:220px;" : "background:#FFFFFF;"}">${cell}</td>`).join("")}</tr>`).join("");
+  return rows.map((row) => `<tr>${row.map((cell, index) => header
+    ? `<th style="padding:6px 8px;border:1px solid #e5e7eb;background:#f1f5f9;color:#344054;text-align:left;font-weight:700;">${cell}</th>`
+    : `<td style="padding:5px 8px;border:1px solid #e5e7eb;vertical-align:top;${index === 0 ? "background:#f8fafc;font-weight:700;" : ""}">${cell}</td>`).join("")}</tr>`).join("");
+}
+
+// Label/value pairs laid out `pairsPerRow` to a row: the compact replacement for a card per item.
+function buildKeyValueTableHtml(items, pairsPerRow = 2) {
+  if (!items?.length) return "";
+  const rows = [];
+  for (let i = 0; i < items.length; i += pairsPerRow) rows.push(items.slice(i, i + pairsPerRow));
+  return `<table class="kv">${rows.map((row) => `<tr>${row.map((item) => `<th>${item.label}</th><td${item.monospace ? ' class="mono"' : ""}>${item.value || "n/a"}</td>`).join("")}${"<th></th><td></td>".repeat(pairsPerRow - row.length)}</tr>`).join("")}</table>`;
 }
 
 function buildAlignedRowHtml(label, { prefix = "", tokens = [], suffix = "" }, diffIndexes = [], mode = "donor", tokenWidth = "4ch") {
@@ -430,6 +401,13 @@ function buildPmStrandCardHtml(strand, releaseStatus = "ready") {
   `;
 }
 
+// The strand to order is shown; the opposite strand is for reference only and sits behind a fold.
+function renderStrandCards(strands, renderCard) {
+  const ordered = strands.filter((strand) => strand.recommended);
+  const reference = strands.filter((strand) => !strand.recommended);
+  return `${ordered.map(renderCard).join("")}${reference.length ? `<details class="fold"><summary>Opposite strand (reference only, not for ordering)</summary><div class="body">${reference.map(renderCard).join("")}</div></details>` : ""}`;
+}
+
 function buildPmDonorHtml(donor, releaseStatus = "ready") {
   const comparison = buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
@@ -444,14 +422,13 @@ function buildPmDonorHtml(donor, releaseStatus = "ready") {
     <p style="font-size:12px;color:${donor.proteinValidation?.valid ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>Final donor protein assertion:</strong> ${proteinValidation}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
-    ${strands.map((strand) => buildPmStrandCardHtml(strand, releaseStatus)).join("")}
-    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
-      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Coding Frame View</div>
+    ${renderStrandCards(strands, (strand) => buildPmStrandCardHtml(strand, releaseStatus))}
+    <details class="fold"><summary>Coding frame view (WT and donor codons and amino acids)</summary><div class="body">
       ${buildAlignedRowHtml("WT codons", { prefix: comparison.wt.prefix, tokens: comparison.wt.codons, suffix: comparison.wt.suffix }, comparison.diffCodonIndexes, "wt")}
       ${buildAlignedRowHtml("Donor codons", { prefix: comparison.donor.prefix, tokens: comparison.donor.codons, suffix: comparison.donor.suffix }, comparison.diffCodonIndexes, "donor")}
       ${buildAlignedRowHtml("WT amino acids", { tokens: comparison.wtAa }, comparison.diffAaIndexes, "wt")}
       ${buildAlignedRowHtml("Donor amino acids", { tokens: comparison.donorAa }, comparison.diffAaIndexes, "donor")}
-    </div>
+    </div></details>
   `;
 }
 
@@ -497,10 +474,7 @@ function buildKnockinProteinHtml(preview, title = "Protein Translation View") {
   `;
 }
 
-function buildInsertValidationHtml(validation) {
-  if (!validation) return "";
-  const expectedAa = (validation.expectedAas || []).join("");
-  const actualAa = (validation.actualAas || []).join("");
+function insertValidationBadges(validation) {
   const badges = [
     {
       label: validation.matchesPreset ? "Preset matches donor" : "Preset mismatch",
@@ -520,34 +494,60 @@ function buildInsertValidationHtml(validation) {
       background: validation.unexpectedStop ? "#FEE4E2" : "#FEF3C7",
     });
   }
-  return `
-    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
-      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Insert Identity Check</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
-        ${badges.map((badge) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>`).join("")}
-      </div>
-      <div style="font-size:12px;color:#555;margin-bottom:8px;">Expected insert: ${validation.expectedLengthBp} bp | Designed donor insert: ${validation.actualLengthBp} bp</div>
-      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Expected insert DNA</div>
-      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${validation.expectedSequence || "n/a"}</div>
-      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Designed donor insert DNA</div>
-      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${validation.actualSequence || "n/a"}</div>
-      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Expected insert amino acids</div>
-      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${expectedAa || "n/a"}</div>
-      <div style="color:#667085;font-size:11px;margin-bottom:4px;">Designed donor insert amino acids</div>
-      <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;">${actualAa || "n/a"}</div>
-      ${(validation.canonicalChecks || []).map((check) => `
+  return badges;
+}
+
+// `bare` drops the title and badges (the caller shows them); identical expected and designed
+// sequences are printed once, and both are printed whenever they differ.
+function buildInsertValidationHtml(validation, { bare = false } = {}) {
+  if (!validation) return "";
+  const expectedAa = (validation.expectedAas || []).join("");
+  const actualAa = (validation.actualAas || []).join("");
+  const badges = insertValidationBadges(validation);
+  const mono = "font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;";
+  const label = (text) => `<div style="color:#667085;font-size:11px;margin:8px 0 3px 0;">${text}</div>`;
+  const identical = validation.matchesPreset && (validation.expectedSequence || "") === (validation.actualSequence || "") && expectedAa === actualAa;
+  const sequences = identical
+    ? `${label("Insert DNA (identical to the preset)")}<div style="${mono}">${validation.actualSequence || "n/a"}</div>${label("Insert amino acids (identical to the preset)")}<div style="${mono}">${actualAa || "n/a"}</div>`
+    : `${label("Expected insert DNA")}<div style="${mono}">${validation.expectedSequence || "n/a"}</div>${label("Designed donor insert DNA")}<div style="${mono}">${validation.actualSequence || "n/a"}</div>${label("Expected insert amino acids")}<div style="${mono}">${expectedAa || "n/a"}</div>${label("Designed donor insert amino acids")}<div style="${mono}">${actualAa || "n/a"}</div>`;
+  const canonical = (validation.canonicalChecks || []).map((check) => `
         <div style="margin-top:10px;padding-top:10px;border-top:1px solid #E5E7EB;">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px;">
             <span style="font-size:12px;font-weight:700;color:#111827;">${check.label}</span>
             <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${check.matches ? "#047857" : "#B42318"};background:${check.matches ? "#D1FAE5" : "#FEE4E2"};">${check.matches ? "Protein matches reference" : "Protein mismatch"}</span>
           </div>
           ${check.sourceUrl ? `<div style="color:#667085;font-size:11px;margin-bottom:6px;">Source: <a href="${check.sourceUrl}" target="_blank" rel="noreferrer" style="color:#2E75B6;text-decoration:none;">${check.sourceUrl}</a></div>` : ""}
-          <div style="color:#667085;font-size:11px;margin-bottom:4px;">Reference amino acids</div>
-          <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin-bottom:8px;">${check.expectedAas || "n/a"}</div>
-          <div style="color:#667085;font-size:11px;margin-bottom:4px;">Designed amino acids</div>
-          <div style="font-family:Consolas,monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;">${check.actualAas || "n/a"}</div>
+          ${label("Reference amino acids")}<div style="${mono}">${check.expectedAas || "n/a"}</div>
+          ${label("Designed amino acids")}<div style="${mono}">${check.actualAas || "n/a"}</div>
         </div>
-      `).join("")}
+      `).join("");
+  const head = bare ? "" : `
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Insert Identity Check</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">
+        ${badges.map((badge) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>`).join("")}
+      </div>`;
+  return `
+    <div style="margin:${bare ? "10px 0 0 0" : "0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc"};">
+      ${head}
+      <div style="font-size:12px;color:#555;">Expected insert: ${validation.expectedLengthBp} bp | Designed donor insert: ${validation.actualLengthBp} bp</div>
+      ${sequences}
+      ${canonical}
+    </div>
+  `;
+}
+
+// The donor-section summary of what was inserted: the verdict badges stay visible, the sequences
+// and codon-by-codon views (long, and repeated in the donor listing) sit one click away.
+function buildInsertVerificationHtml(result) {
+  const validation = result.insertValidation;
+  const protein = result.type === "it" ? buildInternalProteinHtml(result) : buildKnockinProteinHtml(result.proteinPreview);
+  if (!validation && !protein) return "";
+  const chips = validation ? insertValidationBadges(validation).map((badge) => `<span style="display:inline-block;margin:0 6px 4px 0;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>`).join("") : "";
+  const lengths = validation ? `<span class="sub">Expected insert ${validation.expectedLengthBp} bp, designed ${validation.actualLengthBp} bp.</span>` : "";
+  return `
+    <div style="margin:8px 0 12px 0;">
+      <div>${chips}${lengths}</div>
+      <details class="fold"><summary>Coding frame, insert sequence and translation</summary><div class="body">${protein}${validation ? buildInsertValidationHtml(validation, { bare: true }) : ""}</div></details>
     </div>
   `;
 }
@@ -594,33 +594,6 @@ export function buildKnockinQcChecks(result) {
     },
   ];
   return checks;
-}
-
-function buildKnockinQcSummaryHtml(result) {
-  const checks = buildKnockinQcChecks(result);
-  if (!checks.length) return "";
-  const styleFor = (status) => status === "pass"
-    ? { color: "#8a5a12", background: "#D1FAE5", label: "Pass" }
-    : status === "warn"
-      ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
-      : { color: "#475467", background: "#EAECF0", label: "N/A" };
-  return `
-    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
-      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Knock-in QC Summary</div>
-      ${checks.map((check) => {
-        const badge = styleFor(check.status);
-        return `
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-top:1px solid #E5E7EB;">
-            <div style="min-width:0;">
-              <div style="font-size:12px;font-weight:700;color:#111827;">${check.label}</div>
-              <div style="font-size:12px;color:#555;margin-top:2px;">${check.detail}</div>
-            </div>
-            <span style="display:inline-flex;align-items:center;white-space:nowrap;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>
-          </div>
-        `;
-      }).join("")}
-    </div>
-  `;
 }
 
 function describeDonorFormatSummary(format) {
@@ -828,42 +801,38 @@ function buildReportSnapshotHtml(result) {
   const items = buildReportSnapshotItems(result);
   if (!items.length) return "";
   const toneColor = (tone) => tone === "accent" ? "#2E75B6" : tone === "warm" ? "#B54708" : tone === "success" ? "#067647" : "#111827";
+  const format = result.donorFormat;
+  const subline = (item) => {
+    if (item.label !== "Donor" || !format) return "";
+    const arms = format.arms.five === format.arms.three ? `${format.arms.five}` : `${format.arms.five}/${format.arms.three}`;
+    return `<div style="font-size:12px;color:#667085;margin-top:2px;">${format.short}, arms ${arms}</div>`;
+  };
   return `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:0 0 16px 0;">
-      ${items.map((item) => `
-        <div style="padding:12px 14px;border-radius:12px;border:1px solid ${toneColor(item.tone)}22;background:#f8fafc;">
-          <div style="font-size:11px;font-weight:700;color:#667085;margin-bottom:4px;">${item.label}</div>
-          <div style="font-size:18px;font-weight:800;color:${toneColor(item.tone)};">${item.value}</div>
-        </div>
-      `).join("")}
-    </div>
+    <table class="strip"><tr>${items.map((item) => `<td><div style="font-size:11px;font-weight:700;color:#667085;text-transform:uppercase;letter-spacing:0.4px;">${item.label}</div><div style="font-size:16px;font-weight:800;color:${toneColor(item.tone)};margin-top:2px;">${item.value}</div>${subline(item)}</td>`).join("")}</tr></table>
   `;
 }
 
 function buildDesignReadinessHtml(result) {
   const checks = buildDesignReadinessChecks(result);
   if (!checks.length) return "";
-  const styleFor = (status) => status === "pass"
-    ? { color: "#8a5a12", background: "#D1FAE5", label: "Pass" }
+  const pill = (status) => status === "pass"
+    ? { color: "#067647", background: "#D1FAE5", label: "Pass" }
     : status === "warn"
       ? { color: "#B42318", background: "#FEE4E2", label: "Review" }
       : { color: "#475467", background: "#EAECF0", label: "N/A" };
+  // Items that need a decision come first; passes are last and kept to one line of small text.
+  const rank = (status) => (status === "warn" ? 0 : status === "pass" ? 2 : 1);
+  const ordered = checks.map((check, index) => ({ check, index }))
+    .sort((a, b) => rank(a.check.status) - rank(b.check.status) || a.index - b.index).map((entry) => entry.check);
+  const count = (status) => checks.filter((check) => check.status === status).length;
+  const others = checks.length - count("warn") - count("pass");
   return `
-    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#f8fafc;">
-      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">Design Readiness</div>
-      ${checks.map((check) => {
-        const badge = styleFor(check.status);
-        return `
-          <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:8px 0;border-top:1px solid #E5E7EB;">
-            <div style="min-width:0;">
-              <div style="font-size:12px;font-weight:700;color:#111827;">${check.label}</div>
-              <div style="font-size:12px;color:#555;margin-top:2px;">${check.detail}</div>
-            </div>
-            <span style="display:inline-flex;align-items:center;white-space:nowrap;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span>
-          </div>
-        `;
-      }).join("")}
-    </div>
+    <p class="sub">${checks.length} checks: <b style="color:#B42318;">${count("warn")} to review</b>, ${others} not applicable or not automated, <b style="color:#067647;">${count("pass")} pass</b>.</p>
+    <table class="checks">${ordered.map((check) => {
+      const badge = pill(check.status);
+      const muted = check.status === "pass";
+      return `<tr><td style="width:62px;"><span style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.color};background:${badge.background};">${badge.label}</span></td><td style="width:210px;font-weight:700;color:#111827;">${check.label}</td><td style="color:${muted ? "#667085" : "#344054"};font-size:${muted ? 12 : 12.5}px;">${check.detail}</td></tr>`;
+    }).join("")}</table>
   `;
 }
 
@@ -996,13 +965,13 @@ export function buildDesignSchemeHtml(result) {
   const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(standalone)}`;
   const caption = buildDesignSchemeCaption(result);
   return `
-    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#ffffff;">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:8px;">
-        <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Design Scheme</div>
+    <div style="margin:14px 0 16px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-bottom:8px;">
+        <span style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Design Scheme</span>
         <a download="${escapeSchemeHtml(buildDesignSchemeFilename(result))}" href="${href}" style="font-size:12px;color:#0F766E;">Download SVG</a>
       </div>
       ${svg}
-      ${caption ? `<p style="font-size:12px;line-height:1.5;color:#344054;margin:10px 0 0 0;"><b>Suggested figure legend (draft; complete the bracketed fields):</b> ${escapeSchemeHtml(caption)}</p>` : ""}
+      ${caption ? `<details class="fold"><summary>Suggested figure legend (draft; complete the bracketed fields)</summary><div class="body"><p style="margin:0;font-size:12px;line-height:1.5;color:#344054;">${escapeSchemeHtml(caption)}</p></div></details>` : ""}
     </div>
   `;
 }
@@ -1012,14 +981,14 @@ export function buildDonorFormatHtml(result) {
   const info = describeDonorFormat(result?.donorFormat);
   if (!info) return "";
   const warn = info.status === "warn";
-  const list = (items, color) => (items.length ? `<ul style="margin:4px 0 8px 18px;padding:0;font-size:12px;line-height:1.5;color:${color};">${items.map((item) => `<li>${escapeSchemeHtml(item)}</li>`).join("")}</ul>` : "");
+  const list = (items, color) => (items.length ? `<ul style="margin:2px 0 6px 18px;padding:0;font-size:12px;line-height:1.5;color:${color};">${items.map((item) => `<li>${escapeSchemeHtml(item)}</li>`).join("")}</ul>` : "");
   const order = result.donorFormat.orderSequence
-    ? `<div style="font-size:12px;color:#344054;margin:8px 0 4px 0;"><b>Sequence to order (${escapeSchemeHtml(result.donorFormat.orderStrand)} strand, 5'-3', ${result.donorFormat.orderSequence.length} nt)</b></div><pre style="white-space:pre-wrap;word-break:break-all;font-family:Consolas,monospace;font-size:12px;background:#f8fafc;border:1px solid #d7dee7;border-radius:8px;padding:8px;margin:0 0 8px 0;">${escapeSchemeHtml(result.donorFormat.orderSequence)}</pre>`
+    ? `<div style="font-size:12px;color:#344054;margin:8px 0 4px 0;"><b>Sequence to order (${escapeSchemeHtml(result.donorFormat.orderStrand)} strand, 5'-3', ${result.donorFormat.orderSequence.length} nt)</b></div><div class="mono" style="word-break:break-all;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;">${escapeSchemeHtml(result.donorFormat.orderSequence)}</div>`
     : "";
   return `
-    <div style="margin:0 0 14px 0;padding:12px;border:1px solid ${warn ? "#f5c26b" : "#d7dee7"};border-radius:12px;background:${warn ? "#fffaf0" : "#f8fafc"};">
-      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">${escapeSchemeHtml(info.heading)}</div>
-      <table style="margin:0 0 8px 0;font-size:12px;">${info.rows.map(([label, value]) => `<tr><td style="padding:3px 10px 3px 0;color:#667085;white-space:nowrap;vertical-align:top;">${escapeSchemeHtml(label)}</td><td style="padding:3px 0;">${escapeSchemeHtml(value)}</td></tr>`).join("")}</table>
+    <div style="margin:0 0 12px 0;padding:2px 0 2px 12px;border-left:4px solid ${warn ? "#f59e0b" : "#d0d5dd"};">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;">${escapeSchemeHtml(info.heading)}</div>
+      ${buildKeyValueTableHtml(info.rows.map(([label, value]) => ({ label: escapeSchemeHtml(label), value: escapeSchemeHtml(value) })), 1)}
       ${list(info.problems, "#B42318")}
       ${list(info.notes, "#344054")}
       <div style="font-size:12px;color:#344054;"><b>Synthesis pre-check</b> <span style="color:#667085;">(${escapeSchemeHtml(info.synthesisScope)})</span></div>
@@ -1169,7 +1138,7 @@ function buildInternalDonorHtml(donor, releaseStatus = "ready") {
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
     ${blockingSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Guide-blocking mutation:</strong><br/>${blockingSummary}</p>` : ""}
-    ${strands.map((strand) => {
+    ${renderStrandCards(strands, (strand) => {
       const badge = getDonorStrandBadge(strand, releaseStatus);
       return `
       <div style="margin:0 0 12px 0;padding:12px;border:1px solid ${badge.border};border-radius:12px;background:${badge.panel};">
@@ -1188,7 +1157,7 @@ function buildInternalDonorHtml(donor, releaseStatus = "ready") {
         ${buildInternalSequenceHtml("Donor ssODN", strand.donor, strand.guideSiteIndexes, strand.guidePamIndexes, strand.silentIndexes, strand.annotations, "donor")}
       </div>
     `;
-    }).join("")}
+    })}
   `;
 }
 
@@ -1287,8 +1256,6 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const hasHistoricalMatches = Boolean(historicalContext?.topMatches?.length);
   const brunelloReferenceGuideSet = getBrunelloReferenceGuideSet(result, brunelloLibrary);
-  const reviewSectionNumber = 5 + (hasHistoricalMatches ? 1 : 0);
-  const additionalInfoSectionNumber = reviewSectionNumber + 1;
   const releaseVerdictBlock = buildReleaseVerdictHtml(result);
   const coDeliveryBlock = buildCoDeliveryHtml(result);
   const readinessBlock = buildDesignReadinessHtml(result);
@@ -1304,54 +1271,92 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
       : result.type === "ko"
       ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
-        ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, donorStatus(donor))).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
-      : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildDonorFormatHtml(result)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
+        ? `${buildInsertVerificationHtml(result)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, donorStatus(donor))).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
+      : `${buildDonorFormatHtml(result)}${buildInsertVerificationHtml(result)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
+  // Section numbers follow what is present: the matched-records section only exists with matches.
+  let nextSection = 5;
+  const historicalNumber = hasHistoricalMatches ? nextSection++ : null;
+  const readinessNumber = nextSection++;
+  const reviewNumber = nextSection++;
+  const additionalNumber = nextSection++;
+  const alternativePrimers = primerCandidateRows.length
+    ? `<details class="fold"><summary>Alternative primer pairs (${primerCandidateRows.length})</summary><div class="body"><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table></div></details>`
+    : "";
+  // A warning already printed word for word in the release status or the readiness table is not
+  // listed a third time here.
+  const alreadyShown = new Set([
+    ...getReleaseVerdictSections(getReleaseVerdict(result)).flatMap((section) => section.items),
+    ...buildDesignReadinessChecks(result).map((check) => check.detail),
+  ]);
+  const remainingReviewItems = (reviewItems || []).filter((item) => !alreadyShown.has(item.text));
+  const omittedReviewItems = (reviewItems || []).length - remainingReviewItems.length;
+  const reviewNote = omittedReviewItems
+    ? `<p class="sub">${omittedReviewItems} item${omittedReviewItems === 1 ? " is" : "s are"} already shown above under Release status or Design Readiness and ${omittedReviewItems === 1 ? "is" : "are"} not repeated.</p>`
+    : "";
+  const primerMeta = [result.amp ? `Expected amplicon: ${result.amp}` : "Expected amplicon: n/a", result.primerStrategy ? `Primer strategy: ${result.primerStrategy}` : ""].filter(Boolean).join(" &middot; ");
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${formatDesignLabel(meta, result)}</title>
 <style>
-body{font-family:Calibri,Arial,sans-serif;margin:24px;color:#333}
-h1{font-size:24px;margin:18px 0 4px 0}
-h2{font-size:18px;margin:20px 0 10px 0;color:#1f2937}
-h3{font-size:15px}
-table{border-collapse:collapse;width:100%;margin:8px 0 14px 0}
-p{font-size:13px;line-height:1.45}
-.sub{color:#555;font-size:13px}
-.note{color:#555;font-style:italic}
+*{box-sizing:border-box}
+body{font-family:Calibri,Arial,sans-serif;margin:0;color:#1f2937;background:#ffffff;font-size:14px}
+.wrap{max-width:980px;margin:0 auto;padding:18px 24px 40px 24px}
+h1{font-size:22px;margin:6px 0 2px 0;color:#111827}
+h2{font-size:16px;margin:26px 0 8px 0;padding-bottom:5px;border-bottom:2px solid #e5e7eb;color:#111827}
+h3{font-size:14px}
+table{border-collapse:collapse;width:100%;margin:6px 0 12px 0;font-size:12.5px}
+p{font-size:13px;line-height:1.45;margin:6px 0}
+.sub{color:#667085;font-size:13px}
+.note{color:#667085;font-style:italic}
+.meta{color:#667085;font-size:12px}
+.mono{font-family:Consolas,'DejaVu Sans Mono',monospace;font-size:12.5px;overflow-wrap:anywhere}
+table.kv th{width:15%;text-align:left;font-weight:600;color:#667085;font-size:12px;padding:4px 8px;border-bottom:1px solid #eef2f6;vertical-align:top}
+table.kv td{padding:4px 8px;border-bottom:1px solid #eef2f6;font-size:13px;font-weight:500;color:#111827;vertical-align:top}
+table.strip td{border:1px solid #e5e7eb;padding:8px 12px;vertical-align:top;background:#f8fafc}
+table.checks td{padding:5px 8px;border-bottom:1px solid #eef2f6;vertical-align:top;font-size:12.5px}
+details.fold{border:1px solid #e5e7eb;border-radius:8px;margin:10px 0}
+details.fold>summary{cursor:pointer;padding:7px 12px;font-weight:700;font-size:13px;color:#344054;background:#f8fafc;border-radius:8px}
+details.fold[open]>summary{border-bottom:1px solid #e5e7eb;border-radius:8px 8px 0 0}
+details.fold>.body{padding:8px 12px 10px 12px}
+@media print{.wrap{max-width:none;padding:0}details.fold{break-inside:avoid}h2{break-after:avoid}}
 </style>
 </head>
 <body>
-  <table>${tableHtml(headerRows)}</table>
+<div class="wrap">
+  <div class="meta">${headerRows.map(([label, value]) => `${label}: ${value}`).join(" &middot; ")}</div>
   <h1>Design: ${formatDesignLabel(meta, result)}</h1>
   <p class="sub">${meta.notes || "Strategy document generated by ASSURED CRISPR Designer."}</p>
   ${releaseVerdictBlock}
   ${coDeliveryBlock}
   ${snapshotBlock}
+  ${designSchemeBlock}
   <h2>1. Gene Information</h2>
-  ${buildSummaryCardsHtml(geneInfoItems, { minWidth: 210 })}
+  ${buildKeyValueTableHtml(geneInfoItems, 2)}
   <h2>2. gRNA Sequences</h2>
   <table>${tableHtml([["Name", "Sequence", "Strand", "GC", "Notes"]], true)}${tableHtml(guideRows)}</table>
   <h2>3. Recommended Primers</h2>
   ${buildPrimerSummaryHtml(result)}
-  <p class="sub">Expected amplicon: ${result.amp || "n/a"}</p>
-  ${result.primerStrategy ? `<p class="sub">Primer strategy: ${result.primerStrategy}</p>` : ""}
-  ${primerCandidateRows.length ? `<h3>Alternative Recommended Primer Pairs</h3><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table>` : ""}
-  ${readinessBlock}
-  ${designSchemeBlock}
-  ${locusMapBlock}
+  <p class="sub">${primerMeta}</p>
+  ${alternativePrimers}
   <h2>4. ${resolvedSectionTitle}</h2>
   <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
   ${result.type === "ko" && brunelloReferenceGuideSet ? `<details style="margin:0 0 14px 0;padding:12px;border:1px solid #FDBA74;border-radius:12px;background:#FFF7ED;"><summary style="cursor:pointer;font-weight:700;color:#9A3412;">Brunello CRISPRko Reference Guides (${brunelloReferenceGuideSet.guides.length})</summary><div style="margin-top:10px;"><p>${brunelloReferenceGuideSet.source}. ${brunelloReferenceGuideSet.summary}${brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}</p><table>${tableHtml([["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand"]], true)}${tableHtml(brunelloReferenceGuideSet.guides.map((guide) => [guide.spacer, guide.pam, `Exon ${guide.exon}`, String(guide.ruleSet2), guide.transcript, guide.strand]))}</table></div></details>` : ""}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
-  ${hasHistoricalMatches ? `<h2>5. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
-  <h2>${reviewSectionNumber}. Review Checkpoints</h2>
-  ${buildReviewListHtml(reviewItems)}
-  <h2>${additionalInfoSectionNumber}. Additional Info</h2>
-  <p>${buildDesignSummary(result).replace(/\n/g, "<br/>")}</p>
+  ${hasHistoricalMatches ? `<h2>${historicalNumber}. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
+  <h2>${readinessNumber}. Design Readiness</h2>
+  ${readinessBlock}
+  ${locusMapBlock ? `<details class="fold"><summary>Target region map</summary><div class="body">${locusMapBlock}</div></details>` : ""}
+  <h2>${reviewNumber}. Review Checkpoints</h2>
+  ${reviewNote}
+  ${buildReviewListHtml(remainingReviewItems)}
+  <h2>${additionalNumber}. Additional Info</h2>
+  <details class="fold"><summary>Plain-text summary for the lab notebook</summary><div class="body"><p>${buildDesignSummary(result).replace(/\n/g, "<br/>")}</p></div></details>
+</div>
 </body>
 </html>`;
 }
