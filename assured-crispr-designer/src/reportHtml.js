@@ -734,6 +734,11 @@ export function buildDesignReadinessChecks(result) {
         status: (result.gs || []).length <= 1 || result.coDeliverySafe ? "pass" : "warn",
         detail: result.guideDonorInstruction || "Use each guide only with its matched donor.",
       }] : []),
+      ...(result.guideUse ? [{
+        label: "Guide use",
+        status: result.guideUse.status,
+        detail: result.guideUse.detail,
+      }] : []),
       ...(result.donorFormat ? [{
         label: "Donor format and synthesis",
         status: result.donorFormat.status,

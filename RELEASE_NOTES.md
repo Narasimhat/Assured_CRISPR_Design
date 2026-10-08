@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Guide use for terminal tags, and two guides by default
+
+- C- and N-terminal tag designs now state how the offered guides can be used with the one donor
+  (`guideUse` in the result, new `src/guideUse.js`; a "Guide use" row in the readiness table of the
+  report). It says whether every guide is strongly protected in the donor (both can then be
+  delivered together), what the unprotected guide risks (re-cutting a correctly repaired allele), and,
+  for two guides, how many bp lie between the cuts, because two cuts on one allele can delete that
+  stretch by non-homologous repair. Spacers with extreme composition are named there. The text states
+  facts about the design; it does not choose between one guide and two.
+- Two guides is the default posture, matching the lab convention (knockouts: two guides; SNP and
+  small-tag knock-ins: two guides, each ssODN carrying the silent changes for both; large knock-ins:
+  two guides and one donor carrying the silent changes for both). "Co-transfect both guides and both
+  ssODNs" in the batch form is now on by default, so SNP and small-tag ssODNs block both guides unless
+  it is switched off. C- and N-terminal donors already blocked both guides and are unchanged.
+- No donor sequence changes. New tests: `test/guide-use.test.js`.
+
 ### Guide selection scores every candidate before choosing the pair
 
 - The guide ranking is documented as blockability first and distance second, within a distance
