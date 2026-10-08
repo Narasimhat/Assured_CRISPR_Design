@@ -237,7 +237,7 @@ function regionOf(index, five, insertBp) {
   return { region: "3\u2032 arm", offset: five + insertBp };
 }
 
-export function buildDonorFormatReport({ plan, donor, insertBp, firstGuideStrand }) {
+export function buildDonorFormatReport({ plan, donor, insertBp, firstGuideStrand, guides }) {
   const sequence = String(donor || "").toUpperCase();
   const totalLength = sequence.length;
   const { five, three } = plan.arms;
@@ -285,7 +285,31 @@ export function buildDonorFormatReport({ plan, donor, insertBp, firstGuideStrand
   const status = limitProblems.length || (synthesisRelevant && issues.length) ? "warn" : "pass";
 
   // Only an explicit or automatic ssODN choice picks a strand; a format inferred from length changes nothing.
-  const strand = format === "ssodn" && !inferred ? (firstGuideStrand === "+" ? "antisense" : "sense") : null;
+  // The ssODN to use with a guide is complementary to that guide's PAM-bearing strand. Two guides
+  // on the same strand share one ssODN; guides on opposite strands each need their own, which has
+  // the same insert and blocking changes on the other strand.
+  const guideList = guides?.length ? guides : [{ str: firstGuideStrand }];
+  const strand = format === "ssodn" && !inferred ? matchedSsodnStrand(guideList[0].str) : null;
+  const orderStrands = [];
+  if (strand) {
+    guideList.forEach((guide, index) => {
+      if (index > 0 && guide.str !== "+" && guide.str !== "-") return;
+      const matched = matchedSsodnStrand(guide.str);
+      const existing = orderStrands.find((entry) => entry.strand === matched);
+      const label = guide.name || `guide ${index + 1}`;
+      if (existing) {
+        existing.guideNames.push(label);
+        existing.guideStrands.push(guide.str);
+      } else {
+        orderStrands.push({
+          strand: matched,
+          sequence: matched === "antisense" ? reverseComplement(sequence) : sequence,
+          guideNames: [label],
+          guideStrands: [guide.str],
+        });
+      }
+    });
+  }
   return {
     requested: plan.requestedFormat,
     recommended: plan.recommended,
@@ -304,7 +328,12 @@ export function buildDonorFormatReport({ plan, donor, insertBp, firstGuideStrand
     notes, status,
     orderStrand: strand,
     orderSequence: strand ? (strand === "antisense" ? reverseComplement(sequence) : sequence) : null,
+    orderStrands,
   };
+}
+
+function matchedSsodnStrand(guideStrand) {
+  return guideStrand === "+" ? "antisense" : "sense";
 }
 
 // Plain description used by the app card and the HTML report so both say the same thing.
@@ -318,7 +347,10 @@ export function describeDonorFormat(report) {
     ["Donor length", `${report.totalLength} bp (${arms.five} + ${report.insertBp} + ${arms.three}), GC ${report.gc}%`],
   ];
   if (report.recommended && report.requested !== null) rows.push(["Recommended for this insert", `${DONOR_FORMATS[report.recommended.format].short}. ${report.recommended.reason}`]);
-  if (report.orderStrand) rows.push(["Strand to order", `${report.orderStrand === "sense" ? "Sense (genomic + strand as supplied)" : "Antisense (reverse complement of the supplied strand)"}, the strand complementary to the PAM-bearing strand of guide 1, as for the point-mutation ssODNs.`]);
+  if (report.orderStrands?.length > 1) {
+    const strandText = (entry) => `${entry.strand === "sense" ? "sense (genomic + strand as supplied)" : "antisense (reverse complement of the supplied strand)"} for ${entry.guideNames.join(" and ")} (${entry.guideStrands.map((str) => `${str} strand`).join(", ")})`;
+    rows.push(["Strands to order", `Two ssODNs, ${report.orderStrands.map(strandText).join("; ")}. They carry the same insert and the same blocking changes for both guides and differ only in strand; each is complementary to the PAM-bearing strand of its guide. Order both and deliver both with the two guides.`]);
+  } else if (report.orderStrand) rows.push(["Strand to order", `${report.orderStrand === "sense" ? "Sense (genomic + strand as supplied)" : "Antisense (reverse complement of the supplied strand)"}, the strand complementary to the PAM-bearing strand of ${report.orderStrands?.[0]?.guideNames?.length > 1 ? "both guides" : "guide 1"}, as for the point-mutation ssODNs.`]);
   const synthesis = report.synthesis.relevant
     ? (report.synthesis.issues.length
       ? report.synthesis.issues.map((item) => `${item.region}: ${item.detail}${item.location ? ` (${item.location})` : ""}`)
