@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### QC design file for the Assured QC app
+
+- New "Download QC design file (JSON) for trace analysis" button next to the HTML report download. It writes the
+  design as `assured-qc-design/1` (`src/qcExport.js`): the reference window, guides with cut positions, donors
+  placed on the reference, every base the donors change (intended edit or blocking change), primers and expected
+  amplicon sizes. The Sanger-trace QC app builds its expected alleles from this file alone.
+- Works for knockouts (deletion between the cuts), point mutations, internal tags, and C- or N-terminal tags with
+  ssODNs or donor blocks. Up to three guides are exported.
+- No design output changes. New tests: `test/qc-export.test.js`.
+
 ### Second ssODN strand when the two guides are on opposite strands
 
 - A small-tag (ssODN) C- or N-terminal design used to give one ssODN strand, chosen from guide 1.
