@@ -40,6 +40,38 @@
   compare the untreated tagged protein with wild type before using it for degradation.
 - New tests: `test/spaced-sd40-v5.test.js`, and two NR2F2 cases in the regression fixtures.
 
+### Design scheme figure: drawn from every design, in the app, the report and the CLI
+
+- New `src/designScheme.js` draws a publication-style schematic from a design result, as a pure
+  function (no React, no DOM), so the app, the HTML report and the CLI produce the same figure.
+  Panel a (all design types) shows the guides with PAM and cut sites, the reference allele, the
+  donor(s), the edited allele and the screening PCR with wild-type and edited sizes, on a bp axis
+  relative to the insertion or edit site. For C- and N-terminal tags, panel b shows the sequence and
+  reading frame at the insertion site (reference against edited, cassette segments shaded, changed
+  bases marked) and panel c the layout of the tagged protein. Point-mutation, internal-tag and
+  knockout designs get panel a.
+- Every number and sequence in the figure is read from the result (guide positions, arm and cassette
+  lengths, primer positions, blocking changes, translated codons); nothing is typed in per design.
+  All text is XML-escaped.
+- App: a "Design scheme" card between the readiness summary and the target region map, with Download
+  SVG, Download PNG (4x, rasterised in the browser) and Copy figure legend. Report: the same figure
+  is embedded inline with a Download SVG link and a draft figure legend. CLI:
+  `export_report.mjs --scheme-svg <file>` also writes the standalone SVG.
+- The figure legend is a draft: bracketed fields (for example `[cell line]`) are left for the author.
+- Limits: the figure shows the donor the engine builds (symmetric arms); it does not show
+  genome-wide specificity, which the tool still does not check. Browser PNG export and the on-screen
+  card are not covered by `node --test` (no DOM); the SVG they are made from is.
+- New tests: `test/design-scheme.test.js` (42) checks the figure against the result for C-terminal
+  (new and built-in SD40-V5 cassettes), N-terminal, internal-tag, point-mutation and knockout
+  designs: guide distances equal the engine's, donor, amplicon and protein sizes match, the sequence
+  rows equal the genome flank and the donor cassette ends, the edited-allele amplicon bar is longer
+  than the wild-type bar by the net insertion, markup is well formed and inside the canvas, text is
+  escaped, and the report places the block before the locus map. Mutation checks (off-by-one anchor,
+  wrong amplicon end, escaping removed, wrong deletion size, wrong protein length, shifted flank)
+  each fail a test.
+- Found while testing, not changed here: other parts of the report HTML interpolate the gene name
+  from the uploaded record without escaping it.
+
 ## 1.0.0 — 2026-09-01
 
 First release intended for routine use. The theme of the work behind it is narrow: the tool
