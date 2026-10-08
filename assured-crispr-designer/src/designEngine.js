@@ -1088,6 +1088,46 @@ const DONOR_PRESETS = {
   ...GENERATED_TERMINAL_TAGS.presets,
 };
 
+// C-terminal SD40-V5 with a flexible spacer. The built-in "SD40-V5" cassette puts V5 directly on
+// the SD40 C-terminal tail, the part of SD40 that contacts cereblon (Mercer et al., Science 2024,
+// doi:10.1126/science.adk4422), and uses the 11-aa house linker upstream. These two entries add a
+// GGGGS spacer between SD40 and V5, and the second also replaces the upstream linker with
+// (GGGGS)x3 for targets whose C-terminus should sit further from the tag. Codons are
+// diversified (no repeated 9-mers, no runs of five, no BsaI/BsmBI/BbsI sites) so the donors
+// synthesise cleanly. C-terminal only: there is no N-terminal counterpart.
+const GS_LINKER_15 = "GGAGGAGGTGGGTCCGGAGGCGGAGGATCAGGCGGCGGAGGTTCA";
+const GS_SPACER_5 = "GGTGGCGGCGGTTCA";
+
+function buildSpacedSD40V5Entries() {
+  const sd40 = CASSETTES["N:SD40-Linker"].seq.slice(0, -COMMON_LINKER.length);
+  const variants = [
+    { name: "SD40-GGGGS-V5", linkerLabel: "Linker", linkerSeq: COMMON_LINKER },
+    { name: "GGGGS3-SD40-GGGGS-V5", linkerLabel: "Linker (GGGGS)x3", linkerSeq: GS_LINKER_15 },
+  ];
+  const entries = { cassettes: {}, presets: {} };
+  variants.forEach(({ name, linkerLabel, linkerSeq }) => {
+    const seq = `${linkerSeq}${sd40}${GS_SPACER_5}${V5_TAG_SEQ}TAA`;
+    entries.cassettes[name] = { seq, len: seq.length, pos: "C-term" };
+    entries.presets[name] = {
+      ct: {
+        seq,
+        segments: [
+          { label: linkerLabel, role: "LINKER", color: DONOR_COLORS.LINKER, seq: linkerSeq },
+          { label: "SD40", role: "TAG", color: DONOR_COLORS.TAG, seq: sd40 },
+          { label: "GGGGS spacer", role: "LINKER", color: DONOR_COLORS.LINKER, seq: GS_SPACER_5 },
+          { label: "V5 tag", role: "DETECT", color: DONOR_COLORS.DETECT, seq: V5_TAG_SEQ },
+          { label: "Stop", role: "STOP", color: DONOR_COLORS.STOP, seq: "TAA" },
+        ],
+      },
+    };
+  });
+  return entries;
+}
+
+const SPACED_SD40_V5 = buildSpacedSD40V5Entries();
+Object.assign(CASSETTES, SPACED_SD40_V5.cassettes);
+Object.assign(DONOR_PRESETS, SPACED_SD40_V5.presets);
+
 function getInsertPreset(name, orientation) {
   const preset = DONOR_PRESETS[name];
   if (preset) return { ...preset[orientation], segments: cloneSegments(preset[orientation].segments) };

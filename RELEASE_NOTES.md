@@ -26,6 +26,20 @@
 - New tests: `test/guide-selection.test.js`, and an NR2F2 case in the regression fixtures
   (`test/fixtures/nr2f2-ng016753.gb`, RefSeqGene `NG_016753.1`).
 
+### SD40-V5 C-terminal cassettes with a GGGGS spacer
+
+- The built-in `SD40-V5` cassette fuses V5 directly onto the SD40 C-terminal tail, which is the
+  part of SD40 that contacts cereblon, and uses the 11-aa house linker upstream. Two C-terminal
+  variants are added, both selectable under "Fusion / linker" for a C-terminal tag:
+  - `SD40-GGGGS-V5`: house linker, SD40, GGGGS spacer, V5, stop (201 bp, 66 aa added).
+  - `GGGGS3-SD40-GGGGS-V5`: (GGGGS)x3 linker, SD40, GGGGS spacer, V5, stop (213 bp, 70 aa added).
+- Both reuse the SD40 and V5 modules of `SD40-V5` unchanged. The Gly-Ser DNA is codon-diversified
+  (no repeated 9-mers, no runs of five, no BsaI/BsmBI/BbsI sites). Guide selection and blocking
+  do not depend on the cassette, and existing cassettes and designs are unchanged.
+- Whether a longer linker or spacer helps a given target is not something the tool can predict;
+  compare the untreated tagged protein with wild type before using it for degradation.
+- New tests: `test/spaced-sd40-v5.test.js`, and two NR2F2 cases in the regression fixtures.
+
 ## 1.0.0 — 2026-09-01
 
 First release intended for routine use. The theme of the work behind it is narrow: the tool
