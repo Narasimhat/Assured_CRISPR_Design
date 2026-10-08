@@ -178,6 +178,36 @@ const CASES = [
       warnings: [/GC 5%/],
     },
   },
+  {
+    name: "NR2F2 C-terminal SD40-GGGGS-V5: the spacer cassette changes the insert, not the guides",
+    audit: "tag variants - a cassette that only differs in its linker must leave guide choice and blocking unchanged",
+    reference: "nr2f2-ng016753.gb",
+    design: { type: "ct", tag: "SD40-GGGGS-V5", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "NR2F2" } },
+    expect: {
+      gene: "NR2F2",
+      insertValid: true,
+      primerStrategy: "recommended-outside-homology-arms",
+      guideSpacers: ["CAGTTTTAACTGGCCGTATA", "AATAAATAAATAAAATAAGA"],
+      guideBlocking: ["strong", "strong"],
+      procurement: "review",
+      warnings: [/GC 5%/],
+    },
+  },
+  {
+    name: "NR2F2 C-terminal GGGGS3-SD40-GGGGS-V5: the flexible-linker cassette changes the insert, not the guides",
+    audit: "tag variants - a cassette that only differs in its linker must leave guide choice and blocking unchanged",
+    reference: "nr2f2-ng016753.gb",
+    design: { type: "ct", tag: "GGGGS3-SD40-GGGGS-V5", arm: 400, options: { deliveryMethod: "rnp", expectedGene: "NR2F2" } },
+    expect: {
+      gene: "NR2F2",
+      insertValid: true,
+      primerStrategy: "recommended-outside-homology-arms",
+      guideSpacers: ["CAGTTTTAACTGGCCGTATA", "AATAAATAAATAAAATAAGA"],
+      guideBlocking: ["strong", "strong"],
+      procurement: "review",
+      warnings: [/GC 5%/],
+    },
+  },
   // ----- refusal paths -----
   {
     name: "refusal: an unsupported C-terminal cassette",

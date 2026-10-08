@@ -262,6 +262,8 @@ const CONSTRUCT_BUILDER_OPTIONS = {
         { cassette: "dTAG-HA", label: "dTAG-HA", kind: "tag" },
         { cassette: "SD40-V5", label: "SD40-V5", kind: "tag" },
         { cassette: "SD40-HA", label: "SD40-HA", kind: "tag" },
+        { cassette: "SD40-GGGGS-V5", label: "SD40-GGGGS-V5 (spacer)", kind: "tag" },
+        { cassette: "GGGGS3-SD40-GGGGS-V5", label: "(GGGGS)3-SD40-GGGGS-V5 (flexible)", kind: "tag" },
         { cassette: "miniIAA7-V5", label: "miniIAA7-V5", kind: "tag" },
         { cassette: "miniIAA7-HA", label: "miniIAA7-HA", kind: "tag" },
       ],
