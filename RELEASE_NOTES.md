@@ -164,6 +164,18 @@
 - Found while testing, not changed here: other parts of the report HTML interpolate the gene name
   from the uploaded record without escaping it.
 
+### Design scheme: each ssODN is drawn with the changes it carries
+
+- The point-mutation and internal-tag scheme drew, under each ssODN, only the blocking changes of
+  the guide that ssODN is matched to. That was right when each ssODN blocks only its own guide, and
+  wrong with co-delivery (now the batch-form default): every ssODN then carries the changes for
+  every guide, but the second ssODN was drawn as if it lacked the first guide's. The figure now
+  draws the markers from each donor's own list of changes, and the row title says which other
+  guide it also blocks (for example "ssODN1 (matched to gRNA1; also blocks gRNA2)").
+- Without co-delivery the figure is unchanged. No donor sequence changes; the report text was
+  already correct, only the picture was not.
+- Test added to `test/design-scheme.test.js` (APOE R176C, with and without co-delivery).
+
 ## 1.0.0 — 2026-09-01
 
 First release intended for routine use. The theme of the work behind it is narrow: the tool

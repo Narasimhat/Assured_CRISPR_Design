@@ -370,7 +370,16 @@ function panelASsodn(c, ctx, top) {
     const left = donor.donorStart; const right = donor.donorEnd;
     c.line(X(left), refMid + 9, X(left), midY - 9, { stroke: COLORS.connector, sw: 0.5, dash: "3 2" });
     c.line(X(right), refMid + 9, X(right + insertLength), midY - 9, { stroke: COLORS.connector, sw: 0.5, dash: "3 2" });
-    rowTitle(c, midY - 20, `${String(donor.n || `ssODN ${index + 1}`).replace(/\s*\(matched to .*\)/, "")} (matched to gRNA${(donor.gi ?? index) + 1}), ${isIt ? (right - left) + insertLength : right - left} nt`);
+    // A donor shows the blocking changes it actually carries. With co-delivery every ssODN carries
+    // the changes for every guide, so the matched guide alone is not the whole story.
+    const matchedGuide = (donor.gi ?? index) + 1;
+    const ownPositions = Array.isArray(donor.silentMutations) ? new Set(donor.silentMutations.map((item) => item.gp)) : null;
+    const carried = marks.filter((mark) => mark.gp >= left && mark.gp < right && mark.gp !== anchor
+      && (ownPositions ? ownPositions.has(mark.gp) : mark.gi === matchedGuide));
+    const carriedGuides = [...new Set(carried.map((mark) => mark.gi))].sort((a, b) => a - b);
+    const otherGuides = carriedGuides.filter((guide) => guide !== matchedGuide);
+    const alsoBlocks = otherGuides.length ? `; also blocks ${otherGuides.map((guide) => `gRNA${guide}`).join(" + ")}` : "";
+    rowTitle(c, midY - 20, `${String(donor.n || `ssODN ${index + 1}`).replace(/\s*\(matched to .*\)/, "")} (matched to gRNA${matchedGuide}${alsoBlocks}), ${isIt ? (right - left) + insertLength : right - left} nt`);
     c.rect(X(left), midY - 7, X(Math.min(anchor, right)) - X(left), 14, { fill: COLORS.arm });
     if (isIt) {
       c.rect(X(anchor), midY - 9, insertLength * scale, 18, { fill: "#33a02c" });
@@ -379,8 +388,7 @@ function panelASsodn(c, ctx, top) {
       c.rect(X(anchor) , midY - 9, Math.max(scale, 2.2), 18, { fill: COLORS.alarm });
       c.rect(X(anchor) + Math.max(scale, 2.2), midY - 7, Math.max(X(right) - X(anchor) - Math.max(scale, 2.2), 0), 14, { fill: COLORS.arm });
     }
-    marks.filter((mark) => mark.gi === (donor.gi ?? index) + 1 && mark.gp >= left && mark.gp < right && mark.gp !== anchor)
-      .forEach((mark) => drawMarker(c, X(shiftX(mark.gp)) + 0.5 * scale, midY - 9));
+    carried.forEach((mark) => drawMarker(c, X(shiftX(mark.gp)) + 0.5 * scale, midY - 9));
     y += 34;
   });
   const markList = marks.map((mark) => `gRNA${mark.gi}: ${mark.text}`);
