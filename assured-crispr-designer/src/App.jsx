@@ -2217,12 +2217,14 @@ function DonorFormatCard({ result }) {
   const info = describeDonorFormat(result?.donorFormat);
   if (!info) return null;
   const warn = info.status === "warn";
-  const order = result.donorFormat.orderSequence;
+  const orders = result.donorFormat.orderStrands?.length > 1
+    ? result.donorFormat.orderStrands
+    : (result.donorFormat.orderSequence ? [{ strand: result.donorFormat.orderStrand, sequence: result.donorFormat.orderSequence, guideNames: [] }] : []);
   const list = (items, color) => (items.length ? <ul style={{ margin: "4px 0 8px 18px", padding: 0, fontSize: 13, lineHeight: 1.5, color }}>{items.map((item) => <li key={item}>{item}</li>)}</ul> : null);
-  const copyOrder = async () => {
+  const copyOrder = async (sequence, label) => {
     try {
-      await navigator.clipboard.writeText(order);
-      setNote("Sequence copied.");
+      await navigator.clipboard.writeText(sequence);
+      setNote(`${label} copied.`);
     } catch (copyError) {
       setNote(`Copy failed: ${copyError.message}`);
     }
@@ -2244,16 +2246,19 @@ function DonorFormatCard({ result }) {
       {list(info.notes, "#344054")}
       <div style={{ fontSize: 13, color: "#344054" }}><b>Synthesis pre-check</b> <span style={{ color: "#667085" }}>({info.synthesisScope})</span></div>
       {list(info.synthesis, warn ? "#B54708" : "#344054")}
-      {order && (
-        <div style={{ marginTop: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#344054", marginBottom: 4 }}>
-            <b>Sequence to order ({result.donorFormat.orderStrand} strand, 5′-3′, {order.length} nt)</b>
-            <button type="button" onClick={copyOrder} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, padding: "4px 8px", fontSize: 12 }}>Copy</button>
-            {note && <span style={{ color: "#475467" }}>{note}</span>}
+      {orders.map((entry, index) => {
+        const label = orders.length > 1 ? `ssODN ${index + 1}` : "Sequence";
+        return (
+          <div key={entry.strand} style={{ marginTop: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#344054", marginBottom: 4 }}>
+              <b>{orders.length > 1 ? `ssODN ${index + 1} to order` : "Sequence to order"} ({entry.strand} strand{entry.guideNames?.length ? ` for ${entry.guideNames.join(" and ")}` : ""}, 5′-3′, {entry.sequence.length} nt)</b>
+              <button type="button" onClick={() => copyOrder(entry.sequence, label)} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, padding: "4px 8px", fontSize: 12 }}>Copy</button>
+              {index === orders.length - 1 && note && <span style={{ color: "#475467" }}>{note}</span>}
+            </div>
+            <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "Consolas, monospace", fontSize: 12, background: "#ffffff", border: "1px solid #d7dee7", borderRadius: 8, padding: 8, margin: 0 }}>{entry.sequence}</pre>
           </div>
-          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "Consolas, monospace", fontSize: 12, background: "#ffffff", border: "1px solid #d7dee7", borderRadius: 8, padding: 8, margin: 0 }}>{order}</pre>
-        </div>
-      )}
+        );
+      })}
     </div>
   );
 }

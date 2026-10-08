@@ -46,6 +46,42 @@ function buildInsertDonorOrderName(result) {
   return `${buildSafeToken(result.gene, "GENE")}_${buildSafeToken(result.tag, "TAG")}_${side}_donor`;
 }
 
+// An ssODN is ordered as one strand per PAM-bearing strand of its guide (see donorFormat.js); two
+// guides on opposite strands give two ssODNs. Other formats are ordered as the donor was built.
+function buildInsertDonorOrderRows(result, common, recommended) {
+  const side = result.type === "ct" ? "C-terminal" : "N-terminal";
+  const baseName = buildInsertDonorOrderName(result);
+  const strands = result.donorFormat?.orderStrands || [];
+  if (strands.length > 1) {
+    return strands.map((entry, index) => ({
+      ...common,
+      itemType: "Donor",
+      name: `${baseName}_ssODN${index + 1}_${entry.strand}`,
+      sequence: entry.sequence,
+      spacer: "",
+      pam: "",
+      strand: "",
+      length: entry.sequence.length,
+      linkedGuide: entry.guideNames.join(", "),
+      recommended,
+      notes: `${side} HDR donor (${result.donorFormat.short}, ${entry.strand} strand for ${entry.guideNames.join(" and ")}; same insert and blocking changes as the other ssODN, deliver both)`,
+    }));
+  }
+  return [{
+    ...common,
+    itemType: "Donor",
+    name: baseName,
+    sequence: result.donorFormat?.orderSequence || result.donor || "",
+    spacer: "",
+    pam: "",
+    strand: "",
+    length: (result.donorFormat?.orderSequence || result.donor)?.length || 0,
+    linkedGuide: "",
+    recommended,
+    notes: `${side} HDR donor${buildDonorFormatOrderNote(result.donorFormat)}`,
+  }];
+}
+
 function buildInternalDonorOrderName(result, donor, donorIndex) {
   return `${buildSafeToken(result.gene, "GENE")}_${result.wA}${result.an}_${buildSafeToken(result.tag, "TAG")}_${donor.n || `ssODN${donorIndex + 1}`}`;
 }
@@ -120,20 +156,7 @@ export function buildBatchOrderRows(entries) {
           notes: donor.guideName ? `Guide-linked internal ssODN, reverse complement to ${donor.guideName}` : "Guide-linked internal ssODN donor",
         }))
       : (result.type === "ct" || result.type === "nt")
-        ? [{
-          ...common,
-          itemType: "Donor",
-          name: buildInsertDonorOrderName(result),
-          // An ssODN is ordered as one strand (see donorFormat.js); other formats as the donor as built.
-          sequence: result.donorFormat?.orderSequence || result.donor || "",
-          spacer: "",
-          pam: "",
-          strand: "",
-          length: (result.donorFormat?.orderSequence || result.donor)?.length || 0,
-          linkedGuide: "",
-          recommended: orderRecommendation,
-          notes: `${result.type === "ct" ? "C-terminal" : "N-terminal"} HDR donor${buildDonorFormatOrderNote(result.donorFormat)}`,
-        }]
+        ? buildInsertDonorOrderRows(result, common, orderRecommendation)
         : [];
     const primers = (result.ps || []).map((primer) => ({
       ...common,

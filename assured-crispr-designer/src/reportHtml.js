@@ -987,9 +987,14 @@ export function buildDonorFormatHtml(result) {
   if (!info) return "";
   const warn = info.status === "warn";
   const list = (items, color) => (items.length ? `<ul style="margin:2px 0 6px 18px;padding:0;font-size:12px;line-height:1.5;color:${color};">${items.map((item) => `<li>${escapeSchemeHtml(item)}</li>`).join("")}</ul>` : "");
-  const order = result.donorFormat.orderSequence
-    ? `<div style="font-size:12px;color:#344054;margin:8px 0 4px 0;"><b>Sequence to order (${escapeSchemeHtml(result.donorFormat.orderStrand)} strand, 5'-3', ${result.donorFormat.orderSequence.length} nt)</b></div><div class="mono" style="word-break:break-all;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;">${escapeSchemeHtml(result.donorFormat.orderSequence)}</div>`
-    : "";
+  const orderEntries = result.donorFormat.orderStrands?.length > 1
+    ? result.donorFormat.orderStrands
+    : (result.donorFormat.orderSequence ? [{ strand: result.donorFormat.orderStrand, sequence: result.donorFormat.orderSequence, guideNames: [] }] : []);
+  const order = orderEntries.map((entry, index) => {
+    const title = orderEntries.length > 1 ? `ssODN ${index + 1} to order` : "Sequence to order";
+    const forGuides = entry.guideNames?.length ? ` for ${entry.guideNames.join(" and ")}` : "";
+    return `<div style="font-size:12px;color:#344054;margin:8px 0 4px 0;"><b>${escapeSchemeHtml(title)} (${escapeSchemeHtml(entry.strand)} strand${escapeSchemeHtml(forGuides)}, 5'-3', ${entry.sequence.length} nt)</b></div><div class="mono" style="word-break:break-all;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 8px;">${escapeSchemeHtml(entry.sequence)}</div>`;
+  }).join("");
   return `
     <div style="margin:0 0 12px 0;padding:2px 0 2px 12px;border-left:4px solid ${warn ? "#f59e0b" : "#d0d5dd"};">
       <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;">${escapeSchemeHtml(info.heading)}</div>

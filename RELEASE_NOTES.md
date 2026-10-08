@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Second ssODN strand when the two guides are on opposite strands
+
+- A small-tag (ssODN) C- or N-terminal design used to give one ssODN strand, chosen from guide 1.
+  When guide 2 is on the other strand, its matched ssODN is the other strand of the same sequence,
+  so the result now carries both (`donorFormat.orderStrands`: strand, sequence, guides it matches).
+  The insert and the blocking changes for both guides are identical in the two; only the strand
+  differs. Two guides on the same strand share one ssODN, a single guide gives one, and donor blocks
+  and AAV cassettes give none, as before. `orderStrand` and `orderSequence` still hold the strand
+  matched to guide 1.
+- The app card and the HTML report print each ssODN with the guide it matches, the description row
+  reads "Strands to order", and the order table gets one donor row per ssODN
+  (`..._donor_ssODN1_antisense`, `..._donor_ssODN2_sense`) linked to its guide.
+- NR2F2 with SD40-V5 is a donor block and is unaffected; its default pair is on one strand anyway.
+- New tests: `test/ssodn-strands.test.js`.
+
 ### Guide use for terminal tags, and two guides by default
 
 - C- and N-terminal tag designs now state how the offered guides can be used with the one donor
