@@ -18,6 +18,7 @@ import {
 } from "./transcriptModel.js";
 import { MINIMUM_ALTERNATIVE_CUT_OFFSET, pickGuidePair } from "./guideSelection.js";
 import { buildDonorFormatReport, planDonorArms } from "./donorFormat.js";
+import { describeGuideUse } from "./guideUse.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -3431,6 +3432,11 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
     guideWindow: guideWindow,
     guideTier,
     guideProtection,
+    guideUse: describeGuideUse({
+      guides: guides.slice(0, 2).map((guide, index) => ({ name: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, str: guide.str, gc: guide.gc, d: guide.d, cut: guide.cut })),
+      protection: guideProtection,
+      anchorWord: "stop codon",
+    }),
     gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "ct", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, ps: guide.ps, cut: guide.cut, note: appendGuideContext(buildInsertGuideNote(guide, "stop", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
     ps: primerPair ? [
@@ -3654,6 +3660,11 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
     guideWindow: guideWindow,
     guideTier,
     guideProtection,
+    guideUse: describeGuideUse({
+      guides: guides.slice(0, 2).map((guide, index) => ({ name: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, str: guide.str, gc: guide.gc, d: guide.d, cut: guide.cut })),
+      protection: guideProtection,
+      anchorWord: "start codon",
+    }),
     gs: guides.slice(0, 2).map((guide, index) => ({ n: makeGuideName(gb.gene, "nt", index, "", tag), sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, d: guide.d, ps: guide.ps, cut: guide.cut, note: appendGuideContext(buildInsertGuideNote(guide, "start codon replacement site", guideTier, guideWindow), gb, guide) })),
     ss: silentMutations,
     ps: primerPair ? [
