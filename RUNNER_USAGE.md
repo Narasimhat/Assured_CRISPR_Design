@@ -36,6 +36,14 @@ This is the same document the app writes from **Download HTML report** — the t
 asserts the two are byte-for-byte identical. The script prints only the path it wrote, so it
 composes in a pipeline.
 
+To also write the design scheme figure (the one the report embeds) as a standalone SVG for slides
+or a manuscript, add `--scheme-svg`; the script then prints the report path followed by the SVG path:
+
+```bash
+npm run export-report -- --manifest examples/manifest_apoe_r176c.json \
+  --output outputs/apoe_r176c_report.html --scheme-svg outputs/apoe_r176c_scheme.svg
+```
+
 `outputs/` is git-ignored. Generated reports and payloads stay out of the repository.
 
 ## Exit codes

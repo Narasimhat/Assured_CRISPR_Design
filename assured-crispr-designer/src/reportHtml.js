@@ -13,6 +13,7 @@ import { summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerRead
 import { getDonorStrandBadge } from "./reportModel.js";
 import { DESIGN_TYPES } from "./designTypes.js";
 import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict.js";
+import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg, supportsDesignScheme } from "./designScheme.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -970,6 +971,29 @@ export function buildLocusMapItems(result, window) {
   return items;
 }
 
+const escapeSchemeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+// Publication-style design scheme (see designScheme.js): inline SVG, a one-click SVG download and a
+// draft figure legend. Empty string when the design type or result cannot be drawn.
+export function buildDesignSchemeHtml(result) {
+  if (!supportsDesignScheme(result)) return "";
+  const svg = buildDesignSchemeSvg(result, { responsive: true });
+  if (!svg) return "";
+  const standalone = buildDesignSchemeSvg(result);
+  const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(standalone)}`;
+  const caption = buildDesignSchemeCaption(result);
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid #d7dee7;border-radius:12px;background:#ffffff;">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:8px;">
+        <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">Design Scheme</div>
+        <a download="${escapeSchemeHtml(buildDesignSchemeFilename(result))}" href="${href}" style="font-size:12px;color:#0F766E;">Download SVG</a>
+      </div>
+      ${svg}
+      ${caption ? `<p style="font-size:12px;line-height:1.5;color:#344054;margin:10px 0 0 0;"><b>Suggested figure legend (draft; complete the bracketed fields):</b> ${escapeSchemeHtml(caption)}</p>` : ""}
+    </div>
+  `;
+}
+
 function buildLocusMapHtml(result) {
   const window = normalizeLocusWindow(result);
   if (!window) return "";
@@ -1233,6 +1257,7 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const releaseVerdictBlock = buildReleaseVerdictHtml(result);
   const coDeliveryBlock = buildCoDeliveryHtml(result);
   const readinessBlock = buildDesignReadinessHtml(result);
+  const designSchemeBlock = buildDesignSchemeHtml(result);
   const locusMapBlock = buildLocusMapHtml(result);
   const snapshotBlock = buildReportSnapshotHtml(result);
   // Per donor, not per design: the guide+donor pair is the orderable unit.
@@ -1280,6 +1305,7 @@ p{font-size:13px;line-height:1.45}
   ${result.primerStrategy ? `<p class="sub">Primer strategy: ${result.primerStrategy}</p>` : ""}
   ${primerCandidateRows.length ? `<h3>Alternative Recommended Primer Pairs</h3><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table>` : ""}
   ${readinessBlock}
+  ${designSchemeBlock}
   ${locusMapBlock}
   <h2>4. ${resolvedSectionTitle}</h2>
   <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>

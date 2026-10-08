@@ -14,6 +14,7 @@ import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } f
 import { buildBatchOrderRows, buildSafeToken, formatBatchDesignLabel } from "./orderRows";
 import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
 import { formatBuildLabel } from "./buildInfo";
+import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg } from "./designScheme";
 
 const COLORS = {
   bg: "#F5F7FB",
@@ -2156,6 +2157,74 @@ function DesignReadinessCard({ result }) {
   );
 }
 
+// Publication-style design scheme drawn by designScheme.js. The markup comes from that module,
+// which escapes every piece of text it emits, so it is safe to inject here.
+function DesignSchemeCard({ result }) {
+  const [note, setNote] = useState("");
+  const inlineSvg = useMemo(() => buildDesignSchemeSvg(result, { responsive: true }), [result]);
+  const fileSvg = useMemo(() => buildDesignSchemeSvg(result), [result]);
+  const caption = useMemo(() => buildDesignSchemeCaption(result), [result]);
+  if (!inlineSvg) return null;
+  const fileName = buildDesignSchemeFilename(result);
+  const saveBlob = (blob, name) => {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const downloadSvg = () => {
+    saveBlob(new Blob([fileSvg], { type: "image/svg+xml;charset=utf-8" }), fileName);
+    setNote("SVG downloaded.");
+  };
+  const downloadPng = () => {
+    const url = URL.createObjectURL(new Blob([fileSvg], { type: "image/svg+xml;charset=utf-8" }));
+    const image = new Image();
+    image.onload = () => {
+      const factor = 4;
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width * factor;
+      canvas.height = image.height * factor;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => {
+        if (blob) { saveBlob(blob, fileName.replace(/\.svg$/, ".png")); setNote("PNG downloaded."); }
+        else setNote("PNG export failed in this browser; use the SVG.");
+      }, "image/png");
+    };
+    image.onerror = () => { URL.revokeObjectURL(url); setNote("PNG export failed in this browser; use the SVG."); };
+    image.src = url;
+  };
+  const copyCaption = async () => {
+    try {
+      await navigator.clipboard.writeText(caption);
+      setNote("Figure legend copied.");
+    } catch (copyError) {
+      setNote(`Copy failed: ${copyError.message}`);
+    }
+  };
+  const buttonStyle = { ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, padding: "6px 10px", fontSize: 12 };
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: "1px solid #d7dee7", borderRadius: 12, background: "#ffffff" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase" }}>Design scheme</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          {note && <span style={{ fontSize: 12, color: "#475467" }}>{note}</span>}
+          <button type="button" onClick={downloadSvg} style={buttonStyle}>Download SVG</button>
+          <button type="button" onClick={downloadPng} style={buttonStyle}>Download PNG (4x)</button>
+          {caption && <button type="button" onClick={copyCaption} style={buttonStyle}>Copy figure legend</button>}
+        </div>
+      </div>
+      <div dangerouslySetInnerHTML={{ __html: inlineSvg }} />
+      {caption && <p style={{ fontSize: 12, lineHeight: 1.5, color: "#344054", margin: "10px 0 0 0" }}><b>Suggested figure legend (draft; complete the bracketed fields):</b> {caption}</p>}
+    </div>
+  );
+}
+
 function LocusMapCard({ result }) {
   const window = normalizeLocusWindow(result);
   if (!window) return null;
@@ -4047,6 +4116,7 @@ export default function App() {
                 )}
 
                 <DesignReadinessCard result={selectedEntry.result} />
+                <DesignSchemeCard result={selectedEntry.result} />
                 <LocusMapCard result={selectedEntry.result} />
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
