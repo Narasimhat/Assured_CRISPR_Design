@@ -22,6 +22,7 @@ const fixture = (name) => readFileSync(
 
 const CASES = [
   { key: "ct", label: "NR2F2 C-terminal SD40-V5 (GGGGS)x3", args: ["ct", "nr2f2-ng016753.gb", "", "GGGGS3-SD40-GGGGS-V5", 250, { expectedGene: "NR2F2" }] },
+  { key: "ct-asym", label: "NR2F2 C-terminal, automatic 250/150 block with one guide", args: ["ct", "nr2f2-ng016753.gb", "", "GGGGS3-SD40-GGGGS-V5", "", { expectedGene: "NR2F2", donorFormat: "auto", autoTrimArms: true, customGuides: ["CAGTTTTAACTGGCCGTATA"] }] },
   { key: "ct-builtin", label: "NR2F2 C-terminal SD40-V5 (built-in cassette)", args: ["ct", "nr2f2-ng016753.gb", "", "SD40-V5", 250, { expectedGene: "NR2F2" }] },
   { key: "nt", label: "N-terminal EGFP", args: ["nt", "synthetic-tagging.gb", "", "N:EGFP-Linker", 250, { expectedGene: "TAGME" }] },
   { key: "it", label: "internal SPOT tag", args: ["it", "synthetic-tagging.gb", "F50", "SPOT", 250, { expectedGene: "TAGME" }] },
@@ -118,7 +119,7 @@ CASES.forEach(({ key, label }) => {
   });
 });
 
-["ct", "ct-builtin", "nt"].forEach((key) => {
+["ct", "ct-asym", "ct-builtin", "nt"].forEach((key) => {
   test(`${key}: guide distances in the figure equal the engine's distance to the insertion point`, () => {
     const result = design(key);
     const svg = buildDesignSchemeSvg(result);

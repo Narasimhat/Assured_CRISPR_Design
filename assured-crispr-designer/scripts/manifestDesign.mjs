@@ -69,6 +69,13 @@ export function loadManifest(rawManifestPath) {
   // to block every offered guide rather than only its matched one.
   if (extra.co_delivery === true) options.coDeliveryBlocking = true;
 
+  // Terminal-tag donor format and arms (see src/donorFormat.js). `donor_format` is "auto", "ssodn",
+  // "block" or "aav"; with it set and no homology_arm_length, arms default by format instead of 400.
+  if (extra.donor_format) options.donorFormat = String(extra.donor_format).toLowerCase();
+  if (extra.homology_arm_5_length) options.arm5Length = Number(extra.homology_arm_5_length);
+  if (extra.homology_arm_3_length) options.arm3Length = Number(extra.homology_arm_3_length);
+  if (extra.auto_trim_arms === true) options.autoTrimArms = true;
+
   return {
     manifest,
     manifestPath,
@@ -85,7 +92,7 @@ export function runManifestDesign(loaded) {
     loaded.gbRaw,
     loaded.manifest.mutation || "",
     loaded.manifest.extra?.tag || "",
-    Number(loaded.manifest.extra?.homology_arm_length || 400),
+    Number(loaded.manifest.extra?.homology_arm_length || (loaded.manifest.extra?.donor_format ? 0 : 400)),
     loaded.options,
   );
 }

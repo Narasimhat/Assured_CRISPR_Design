@@ -36,6 +36,17 @@ This is the same document the app writes from **Download HTML report** — the t
 asserts the two are byte-for-byte identical. The script prints only the path it wrote, so it
 composes in a pipeline.
 
+Terminal-tag manifests can name the donor format and arms in `extra` (all optional):
+
+```json
+"extra": { "tag": "SD40-V5", "donor_format": "auto", "homology_arm_3_length": 150, "auto_trim_arms": true }
+```
+
+`donor_format` is `auto`, `ssodn`, `block` or `aav`. With `donor_format` set and no
+`homology_arm_length`, arms default by format (ssODN up to 60 nt, block 250 bp, AAV 500 bp); without
+these keys the manifest behaves as before (400 bp arms). `auto_trim_arms` shortens an arm that runs
+into a flagged stretch, never below 100 bp for a block.
+
 To also write the design scheme figure (the one the report embeds) as a standalone SVG for slides
 or a manuscript, add `--scheme-svg`; the script then prints the report path followed by the SVG path:
 

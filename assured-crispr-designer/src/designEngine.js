@@ -17,6 +17,7 @@ import {
   selectNearbyGuidesForModel,
 } from "./transcriptModel.js";
 import { MINIMUM_ALTERNATIVE_CUT_OFFSET, pickGuidePair } from "./guideSelection.js";
+import { buildDonorFormatReport, planDonorArms } from "./donorFormat.js";
 
 const CODON_TABLE = {
   TTT: "F", TTC: "F", TTA: "L", TTG: "L", CTT: "L", CTC: "L", CTA: "L", CTG: "L",
@@ -3315,9 +3316,16 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
   const preset = getInsertPreset(tag, "ct");
   if (!preset) return { err: `Tag "${tag}" is not available.` };
 
-  const armLength = parseInt(homologyArmLength, 10) || 250;
-  const homology5Start = Math.max(0, stopStart - armLength);
-  const homology3End = Math.min(seq.length, stopStart + 3 + armLength);
+  // Arms are planned per side: symmetric `homologyArmLength` unless donorFormat, arm5Length,
+  // arm3Length or autoTrimArms say otherwise (see donorFormat.js). With none of those the arms are
+  // what they always were.
+  const armPlan = planDonorArms({
+    insertBp: preset.seq.length, genome: seq, leftEdge: stopStart, rightEdge: stopStart + 3,
+    requestedArm: homologyArmLength, options,
+  });
+  const armLength = armPlan.arms.requestedFive;
+  const homology5Start = stopStart - armPlan.arms.five;
+  const homology3End = stopStart + 3 + armPlan.arms.three;
   const homology5 = seq.slice(homology5Start, stopStart);
   const homology3 = seq.slice(stopStart + 3, homology3End);
   const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, stopStart, { maxDistance: 30, desiredCount: 2 }) : null;
@@ -3416,6 +3424,7 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
     h3l: homology3.length,
     dl: donor.length,
     donor,
+    donorFormat: buildDonorFormatReport({ plan: armPlan, donor, insertBp: preset.seq.length, firstGuideStrand: guides[0]?.str }),
     donorAnnotations,
     proteinPreview: buildKnockinProteinPreview(gb, "ct", preset),
     insertValidation,
@@ -3542,11 +3551,15 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
   const preset = getInsertPreset(tag, "nt");
   if (!preset) return { err: `Unknown tag: ${tag}.` };
 
-  const armLength = parseInt(homologyArmLength, 10) || 250;
   const insertionSite = startCodonPos;
   const codingResume = startCodonPos + 3;
-  const homology5Start = Math.max(0, insertionSite - armLength);
-  const homology3End = Math.min(seq.length, codingResume + armLength);
+  const armPlan = planDonorArms({
+    insertBp: preset.seq.length, genome: seq, leftEdge: insertionSite, rightEdge: codingResume,
+    requestedArm: homologyArmLength, options,
+  });
+  const armLength = armPlan.arms.requestedFive;
+  const homology5Start = insertionSite - armPlan.arms.five;
+  const homology3End = codingResume + armPlan.arms.three;
   const homology5 = seq.slice(homology5Start, insertionSite);
   const homology3 = seq.slice(codingResume, homology3End);
   const customGuideSelection = options.customGuides?.length ? resolveCustomGuides(gb, options.customGuides, startCodonPos, { maxDistance: 30, desiredCount: 2 }) : null;
@@ -3634,6 +3647,7 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
     h3l: homology3.length,
     dl: donor.length,
     donor,
+    donorFormat: buildDonorFormatReport({ plan: armPlan, donor, insertBp: preset.seq.length, firstGuideStrand: guides[0]?.str }),
     donorAnnotations,
     proteinPreview: buildKnockinProteinPreview(gb, "nt", preset),
     insertValidation,

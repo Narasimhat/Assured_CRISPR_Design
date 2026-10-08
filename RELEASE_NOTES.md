@@ -40,6 +40,48 @@
   compare the untreated tagged protein with wild type before using it for degradation.
 - New tests: `test/spaced-sd40-v5.test.js`, and two NR2F2 cases in the regression fixtures.
 
+### Donor format and arm control for terminal tags
+
+- New `src/donorFormat.js` (pure functions) plans the donor for C- and N-terminal tags. Three formats:
+  ssODN (insert shorter than 120 bp; arms up to 60 nt, 30 nt minimum, at most 200 nt in total), dsDNA
+  donor block (arms 250 bp by default; 201-3000 bp in total) and cloned/AAV donor (arms 500 bp). The
+  numbers follow IDT's Alt-R HDR Donor Oligo and Donor Block guidance, except that the 500 bp insert
+  size where the default moves from a block to AAV is this tool's choice (reporter- and
+  selection-cassette-sized inserts); a block remains orderable to 3000 bp and can be selected.
+- 5' and 3' arms are now independent (`arm5Length`, `arm3Length`; the positional arm length stays the
+  symmetric request) and are clamped to the supplied reference, which is now reported instead of
+  silent. `autoTrimArms` shortens an arm, in 10 bp steps and never below the format minimum (100 bp
+  for blocks), when it runs into a flagged stretch or ends inside a single-base run, which IDT's
+  guidance suggests doing for complexity problems. A flagged stretch inside the minimum arm cannot be
+  trimmed away; the arm is then kept and the stretch is reported.
+- Synthesis pre-check of the finished donor: single-base runs of 12 nt or more, 50-nt windows below 20%
+  or above 80% GC, and perfect tandem repeats of 20 nt or more (period 2-8). It is a heuristic and is
+  labelled as one: IDT's complexity screen is proprietary and decides acceptance. It does not look for
+  inverted repeats, secondary structure or repeats between distant parts of the donor.
+- An ssODN is ordered as the strand complementary to the PAM-bearing strand of guide 1, the rule the
+  point-mutation ssODNs already use. A format that is only inferred from length (calls that name no
+  format) never changes what is ordered.
+- Result: `donorFormat` on C- and N-terminal designs (format, recommendation and reason, arms with
+  requested, trimmed and clamped state, length limits, synthesis issues with positions, notes, order
+  strand and sequence). Calls that name no format behave as before: symmetric arms, 250 bp when none is
+  given, donor sequence unchanged.
+- App: Donor format, 5' arm and 3' arm selectors and a trimming option for terminal-tag rows
+  (defaults: Auto, default arms, trimming on), and a Donor format card with the pre-check and, for an
+  ssODN, the sequence to order with a copy button. Report: a Donor format block, and a "Donor format
+  and synthesis" line in the readiness checks. The design scheme names the format and draws the arms
+  as planned. The order-row note carries format and arms; an ssODN row carries the strand to order.
+- CLI manifests: `extra.donor_format`, `extra.homology_arm_5_length`, `extra.homology_arm_3_length` and
+  `extra.auto_trim_arms`; with `donor_format` set and no `homology_arm_length`, arms default by format
+  instead of 400 bp. Manifests without these keys are unchanged (400 bp).
+- The pre-check is advisory. It does not change procurement readiness or the release verdict.
+- Not covered: point-mutation and internal-tag ssODNs keep their own fixed 36/91 nt windows; the arm
+  selectors and the Donor format card are not exercised by `node --test` (no DOM).
+- New tests: `test/donor-format.test.js` (25). The NR2F2 SD40-V5 block that was ordered by hand
+  (250 bp 5' arm, 213 bp cassette, 150 bp 3' arm, one guide) is reproduced byte for byte by an
+  automatic-format, trimmed design with that guide. Planted-stretch references give hand-derivable trim
+  lengths, and ten mutations (swapped arms, wrong limits and thresholds, inverted strand rule,
+  trimming step, boundary check, defaults) each fail at least one test.
+
 ### Design scheme figure: drawn from every design, in the app, the report and the CLI
 
 - New `src/designScheme.js` draws a publication-style schematic from a design result, as a pure

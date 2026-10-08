@@ -15,6 +15,7 @@ import { buildBatchOrderRows, buildSafeToken, formatBatchDesignLabel } from "./o
 import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
 import { formatBuildLabel } from "./buildInfo";
 import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg } from "./designScheme";
+import { DONOR_FORMATS, defaultArms, describeDonorFormat, recommendDonorFormat } from "./donorFormat";
 
 const COLORS = {
   bg: "#F5F7FB",
@@ -993,7 +994,10 @@ function createBatchRow(index) {
     requestedReporter: "",
     mutation: "",
     tag: APP_CONFIG.defaultTag,
-    homologyArm: "250",
+    homologyArm: "",
+    homologyArm3: "",
+    donorFormat: "auto",
+    autoTrimArms: true,
     customGuides: "",
     gbRaw: "",
     fileName: "",
@@ -1287,7 +1291,7 @@ function parseRequestLine(line, index, folderLibrary) {
       : projectType === "it"
         ? (cassetteKey || "SPOT")
         : APP_CONFIG.defaultTag,
-    homologyArm: projectType === "ct" || projectType === "nt" ? "250" : "250",
+    homologyArm: "",
     customGuides: "",
     gbRaw: fileEntry?.gbRaw || "",
     fileName: fileEntry?.fileName || "",
@@ -2153,6 +2157,102 @@ function DesignReadinessCard({ result }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+const ARM_CHOICES = [30, 40, 50, 60, 100, 150, 200, 250, 300, 500, 750, 1000];
+
+// Donor format and per-side arm controls for terminal-tag rows. "Default" follows the format picked
+// (or the one recommended for the insert size when the format is Auto).
+function DonorFormatControls({ row, onChange }) {
+  const insertBp = getCassetteSequenceLength(row.tag, row.projectType);
+  const recommended = recommendDonorFormat(insertBp);
+  const chosen = !row.donorFormat || row.donorFormat === "auto" ? recommended.format : row.donorFormat;
+  const defaults = defaultArms(chosen, insertBp);
+  // A value that came from an imported request (for example 400) is kept selectable.
+  const armOptionsFor = (current) => [...new Set([...ARM_CHOICES, ...(current && Number(current) > 0 ? [Number(current)] : [])])]
+    .sort((a, b) => a - b).map((value) => <option key={value} value={String(value)}>{value} bp</option>);
+  const labelStyle = { color: COLORS.muted, fontSize: 13, marginBottom: 6 };
+  return (
+    <div style={{ marginTop: 10 }}>
+      <Grid>
+        <label>
+          <div style={labelStyle}>Donor format</div>
+          <select value={row.donorFormat || "auto"} onChange={(event) => onChange("donorFormat", event.target.value)} style={SELECT_STYLE}>
+            <option value="auto">Auto: {DONOR_FORMATS[recommended.format].short}{insertBp ? ` for ${insertBp} bp` : ""}</option>
+            <option value="block">{DONOR_FORMATS.block.short}</option>
+            <option value="ssodn">{DONOR_FORMATS.ssodn.short}</option>
+            <option value="aav">{DONOR_FORMATS.aav.short}</option>
+          </select>
+        </label>
+        <label>
+          <div style={labelStyle}>5′ arm</div>
+          <select value={row.homologyArm || ""} onChange={(event) => onChange("homologyArm", event.target.value)} style={SELECT_STYLE}>
+            <option value="">Default ({defaults.five} bp)</option>
+            {armOptionsFor(row.homologyArm)}
+          </select>
+        </label>
+        <label>
+          <div style={labelStyle}>3′ arm</div>
+          <select value={row.homologyArm3 || ""} onChange={(event) => onChange("homologyArm3", event.target.value)} style={SELECT_STYLE}>
+            <option value="">{row.homologyArm ? "Same as 5′ arm" : `Default (${defaults.three} bp)`}</option>
+            {armOptionsFor(row.homologyArm3)}
+          </select>
+        </label>
+        <label style={{ display: "flex", alignItems: "flex-end", gap: 8, color: COLORS.muted, fontSize: 13, paddingBottom: 8 }}>
+          <input type="checkbox" checked={row.autoTrimArms !== false} onChange={(event) => onChange("autoTrimArms", event.target.checked)} />
+          Shorten an arm that runs into a hard-to-synthesize stretch
+        </label>
+      </Grid>
+      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>{recommended.reason}</div>
+    </div>
+  );
+}
+
+// Donor format, arms, length limits and the synthesis pre-check for the finished donor.
+function DonorFormatCard({ result }) {
+  const [note, setNote] = useState("");
+  const info = describeDonorFormat(result?.donorFormat);
+  if (!info) return null;
+  const warn = info.status === "warn";
+  const order = result.donorFormat.orderSequence;
+  const list = (items, color) => (items.length ? <ul style={{ margin: "4px 0 8px 18px", padding: 0, fontSize: 13, lineHeight: 1.5, color }}>{items.map((item) => <li key={item}>{item}</li>)}</ul> : null);
+  const copyOrder = async () => {
+    try {
+      await navigator.clipboard.writeText(order);
+      setNote("Sequence copied.");
+    } catch (copyError) {
+      setNote(`Copy failed: ${copyError.message}`);
+    }
+  };
+  return (
+    <div style={{ marginBottom: 14, padding: 12, border: `1px solid ${warn ? "#f5c26b" : "#d7dee7"}`, borderRadius: 12, background: warn ? "#fffaf0" : "#f8fafc" }}>
+      <div style={{ color: "#667085", fontSize: 12, fontWeight: 700, letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 8 }}>{info.heading}</div>
+      <table style={{ borderCollapse: "collapse", fontSize: 13, marginBottom: 8 }}>
+        <tbody>
+          {info.rows.map(([label, value]) => (
+            <tr key={label}>
+              <td style={{ padding: "3px 12px 3px 0", color: "#667085", whiteSpace: "nowrap", verticalAlign: "top" }}>{label}</td>
+              <td style={{ padding: "3px 0" }}>{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {list(info.problems, "#B42318")}
+      {list(info.notes, "#344054")}
+      <div style={{ fontSize: 13, color: "#344054" }}><b>Synthesis pre-check</b> <span style={{ color: "#667085" }}>({info.synthesisScope})</span></div>
+      {list(info.synthesis, warn ? "#B54708" : "#344054")}
+      {order && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#344054", marginBottom: 4 }}>
+            <b>Sequence to order ({result.donorFormat.orderStrand} strand, 5′-3′, {order.length} nt)</b>
+            <button type="button" onClick={copyOrder} style={{ ...FIELD_STYLE, width: "auto", cursor: "pointer", fontWeight: 700, padding: "4px 8px", fontSize: 12 }}>Copy</button>
+            {note && <span style={{ color: "#475467" }}>{note}</span>}
+          </div>
+          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-all", fontFamily: "Consolas, monospace", fontSize: 12, background: "#ffffff", border: "1px solid #d7dee7", borderRadius: 8, padding: 8, margin: 0 }}>{order}</pre>
+        </div>
+      )}
     </div>
   );
 }
@@ -3152,6 +3252,11 @@ export default function App() {
         }
         const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm, {
           customGuides: parseCustomGuideInput(row.customGuides),
+          // Terminal-tag donors: format (auto picks by insert size), per-side arms and trimming of
+          // an arm that runs into a hard-to-synthesize stretch. See donorFormat.js.
+          donorFormat: row.donorFormat || "auto",
+          arm3Length: row.homologyArm3 ? Number(row.homologyArm3) : undefined,
+          autoTrimArms: row.autoTrimArms !== false,
           deliveryMethod: row.deliveryMethod || "unknown",
           // Co-transfecting both guides with both donors changes what a correct design is:
           // every donor has to block every guide, or the surviving guide re-cuts the allele
@@ -3222,7 +3327,7 @@ export default function App() {
           projectType: definition.projectType,
           mutation: definition.projectType === "pm" ? definition.modification : definition.projectType === "it" ? internalSpec.site : "",
           tag: definition.projectType === "ct" || definition.projectType === "nt" ? definition.modification : definition.projectType === "it" ? internalSpec.tag : APP_CONFIG.defaultTag,
-          homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "250") : "250",
+          homologyArm: definition.projectType === "ct" || definition.projectType === "nt" ? (definition.homologyArm || "") : "",
           gbRaw: fileEntry.gbRaw,
           fileName: fileEntry.fileName,
         };
@@ -3739,8 +3844,8 @@ export default function App() {
                             {constructPayloads.map((option) => <option key={option.cassette} value={option.cassette}>{option.label} ({getCassetteSequenceLength(option.cassette, row.projectType)} bp)</option>)}
                           </select>
                         </label>
-                        <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Homology arm length</div><select value={row.homologyArm} onChange={(event) => updateBatchRow(index, "homologyArm", event.target.value)} style={SELECT_STYLE}><option value="250">250 bp</option><option value="500">500 bp</option><option value="750">750 bp</option></select></label>
                       </Grid>
+                      <DonorFormatControls row={row} onChange={(field, value) => updateBatchRow(index, field, value)} />
                       <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                         {row.projectType === "nt"
                           ? "N-terminal convention: fusion designs use reporter-linker or tag-linker. Cleavable designs use reporter-T2A or reporter-P2A."
@@ -4533,6 +4638,7 @@ export default function App() {
                   <>
                     <KnockinProteinPreviewCard preview={selectedEntry.result.proteinPreview} />
                     <InsertValidationCard validation={selectedEntry.result.insertValidation} />
+                    <DonorFormatCard result={selectedEntry.result} />
                     <AnnotatedDonor sequence={selectedEntry.result.donor} annotations={selectedEntry.result.donorAnnotations} />
                   </>
                 )}
