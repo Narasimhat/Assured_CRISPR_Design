@@ -255,3 +255,22 @@ test("file names are filesystem-safe", () => {
   assert.equal(buildDesignSchemeFilename({ gene: "a b/c:d", type: "pm" }), "a_b_c_d_pm_design_scheme.svg");
   assert.equal(buildDesignSchemeFilename({}), "design_scheme_design_scheme.svg");
 });
+
+test("point-mutation ssODNs are drawn with the blocking changes each one carries, including co-delivery", () => {
+  const design = (coDeliveryBlocking) => {
+    const result = runDesign("pm", fixture("apoe-r154s.gb"), "R176C", "", 250, { expectedGene: "APOE", deliveryMethod: "rnp", coDeliveryBlocking });
+    assert.equal(result.err, undefined, result.err);
+    return result;
+  };
+  const markers = (svg) => (svg.match(/<polygon/g) || []).length;
+  const carried = (result) => result.os.reduce((total, donor) => total + donor.silentMutations.length, 0);
+  const matched = design(false);
+  const together = design(true);
+  const svgMatched = buildDesignSchemeSvg(matched);
+  const svgTogether = buildDesignSchemeSvg(together);
+  // Matched ssODNs carry only their own guide's changes; co-delivery ssODNs carry every guide's.
+  assert.ok(carried(together) > carried(matched), "co-delivery donors carry more blocking changes");
+  assert.equal(markers(svgTogether) - markers(svgMatched), carried(together) - carried(matched));
+  assert.ok(svgTogether.includes("ssODN1 (matched to gRNA1; also blocks gRNA2)") && svgTogether.includes("ssODN2 (matched to gRNA2; also blocks gRNA1)"));
+  assert.ok(svgMatched.includes("ssODN1 (matched to gRNA1), ") && !svgMatched.includes("also blocks"));
+});
