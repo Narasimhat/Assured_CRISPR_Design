@@ -14,6 +14,7 @@ import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } f
 import { buildBatchOrderRows, buildSafeToken, formatBatchDesignLabel } from "./orderRows";
 import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
 import { formatBuildLabel } from "./buildInfo";
+import { buildQcDesignSpec } from "./qcExport";
 import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg, supportsDesignScheme } from "./designScheme";
 import { DONOR_FORMATS, defaultArms, describeDonorFormat, recommendDonorFormat } from "./donorFormat";
 
@@ -3386,6 +3387,24 @@ export default function App() {
     setCopyState("HTML report downloaded.");
   };
 
+  const downloadQcDesign = () => {
+    const result = selectedEntry?.result;
+    if (!result) return;
+    const spec = buildQcDesignSpec(result);
+    if (spec.err) {
+      setCopyState(`QC design file not created: ${spec.err}`);
+      return;
+    }
+    const blob = new Blob([JSON.stringify(spec, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${folderName || "crispr_design"}.qc-design.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setCopyState("QC design file downloaded. Load it in the Assured QC app to check traces against this design.");
+  };
+
   const downloadAllReports = () => {
     if (!batchSuccessfulResults.length) return;
     batchSuccessfulResults.forEach((entry, index) => {
@@ -4067,6 +4086,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
             <button type="button" disabled={!reportHtml} onClick={downloadReport} style={{ ...FIELD_STYLE, width: "auto", cursor: reportHtml ? "pointer" : "not-allowed", fontWeight: 700 }}>Download HTML report to browser Downloads</button>
+            <button type="button" disabled={!selectedEntry?.result} onClick={downloadQcDesign} style={{ ...FIELD_STYLE, width: "auto", cursor: selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}>Download QC design file (JSON) for trace analysis</button>
             <button type="button" disabled={batchSuccessfulResults.length < 2} onClick={downloadAllReports} style={{ ...FIELD_STYLE, width: "auto", cursor: batchSuccessfulResults.length >= 2 ? "pointer" : "not-allowed", fontWeight: 700 }}>Download all HTML reports to browser Downloads</button>
             <button type="button" disabled={!selectedEntry?.result} onClick={() => copyText(buildDesignSummary(selectedEntry.result), "Design summary")} style={{ ...FIELD_STYLE, width: "auto", cursor: selectedEntry?.result ? "pointer" : "not-allowed", fontWeight: 700 }}>Copy design summary</button>
             {copyState && <Badge color={COLORS.success}>{copyState}</Badge>}
