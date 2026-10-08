@@ -33,6 +33,14 @@ function buildPmDonorOrderName(result, donor, donorIndex) {
   return `${buildSafeToken(result.gene, "GENE")}_${result.wA}${result.an}${result.mA}_${donor.n || `ssODN${donorIndex + 1}`}`;
 }
 
+function buildDonorFormatOrderNote(format) {
+  if (!format) return "";
+  const arms = format.arms.five === format.arms.three ? `${format.arms.five} bp arms` : `${format.arms.five}/${format.arms.three} bp arms`;
+  const strand = format.orderStrand ? `, order the ${format.orderStrand} strand` : "";
+  const aav = format.format === "aav" ? ", homology cassette to clone" : "";
+  return ` (${format.short}, ${arms}${strand}${aav})`;
+}
+
 function buildInsertDonorOrderName(result) {
   const side = result.type === "ct" ? "CT" : "NT";
   return `${buildSafeToken(result.gene, "GENE")}_${buildSafeToken(result.tag, "TAG")}_${side}_donor`;
@@ -116,14 +124,15 @@ export function buildBatchOrderRows(entries) {
           ...common,
           itemType: "Donor",
           name: buildInsertDonorOrderName(result),
-          sequence: result.donor || "",
+          // An ssODN is ordered as one strand (see donorFormat.js); other formats as the donor as built.
+          sequence: result.donorFormat?.orderSequence || result.donor || "",
           spacer: "",
           pam: "",
           strand: "",
-          length: result.donor?.length || 0,
+          length: (result.donorFormat?.orderSequence || result.donor)?.length || 0,
           linkedGuide: "",
           recommended: orderRecommendation,
-          notes: `${result.type === "ct" ? "C-terminal" : "N-terminal"} HDR donor`,
+          notes: `${result.type === "ct" ? "C-terminal" : "N-terminal"} HDR donor${buildDonorFormatOrderNote(result.donorFormat)}`,
         }]
         : [];
     const primers = (result.ps || []).map((primer) => ({

@@ -133,7 +133,9 @@ function drawNote(c, x, y, value, o = {}) {
   return lines.length;
 }
 
+// A white backing keeps the dashed connectors from running through the title text.
 function rowTitle(c, y, value) {
+  c.rect(PL - 2, y - 6, String(value).length * 5.1 + 4, 12, { fill: "#ffffff" });
   c.text(PL, y, value, { size: 9.5 });
 }
 
@@ -273,7 +275,7 @@ function panelATag(c, ctx, geo, top) {
   [[anchor - h5, anchor], [anchor + 3, anchor + 3 + h3]].forEach(([a, b]) => c.line(X(a), refMid + 9, X(a === anchor + 3 ? anchor + il : a), donorMid - 9, { stroke: COLORS.connector, sw: 0.6, dash: "3 2" }));
   c.line(X(anchor), refMid + 9, X(anchor), donorMid - 9, { stroke: COLORS.connector, sw: 0.6, dash: "3 2" });
   c.line(X(anchor + 3 + h3), refMid + 9, X(anchor + il + h3), donorMid - 9, { stroke: COLORS.connector, sw: 0.6, dash: "3 2" });
-  rowTitle(c, donorMid - 28, `Donor (dsDNA), ${result.dl} bp: ${h5} | ${il} | ${h3}`);
+  rowTitle(c, donorMid - 28, `Donor (${result.donorFormat?.short || "dsDNA"}), ${result.dl} bp: ${h5} | ${il} | ${h3}`);
   arm(anchor - h5, anchor, `5\u2032 arm ${h5} bp`);
   let cursor = anchor;
   geo.insertParts.forEach((part) => {
@@ -632,7 +634,7 @@ export function buildDesignSchemeCaption(result) {
     const insert = geo.insertParts.filter((part) => !/^(start|stop)$/i.test(part.label)).map((part) => part.label);
     const aa = geo.insertParts.filter((part) => !/^(start|stop)$/i.test(part.label)).reduce((sum, part) => sum + Math.round((part.end - part.start) / 3), 0);
     sentences.push(`Design scheme for ${geo.isCt ? "C-terminal" : "N-terminal"} tagging of ${gene} (${result.tag || "tag"}) in [cell line].`);
-    sentences.push(`(a) Strategy. ${list(guideText)} ${guides.length > 1 ? "cut" : "cuts"} ${guides.length > 1 ? "near" : `${Math.abs(cut)} bp ${cut < 0 ? "5\u2032" : "3\u2032"} of`} the ${geo.isCt ? "stop" : "start"} codon. The ${result.dl}-bp dsDNA donor carries a ${geo.h5}-bp 5\u2032 and a ${geo.h3}-bp 3\u2032 homology arm flanking ${list(insert)} (${geo.il} bp, ${aa} aa added), which replaces the ${geo.isCt ? "stop" : "start"} codon.${blocking}`);
+    sentences.push(`(a) Strategy. ${list(guideText)} ${guides.length > 1 ? "cut" : "cuts"} ${guides.length > 1 ? "near" : `${Math.abs(cut)} bp ${cut < 0 ? "5\u2032" : "3\u2032"} of`} the ${geo.isCt ? "stop" : "start"} codon. The ${result.dl}-${result.donorFormat?.format === "ssodn" ? "nt ssODN" : "bp dsDNA"} donor carries a ${geo.h5}-${result.donorFormat?.format === "ssodn" ? "nt" : "bp"} 5\u2032 and a ${geo.h3}-${result.donorFormat?.format === "ssodn" ? "nt" : "bp"} 3\u2032 homology arm flanking ${list(insert)} (${geo.il} bp, ${aa} aa added), which replaces the ${geo.isCt ? "stop" : "start"} codon.${blocking}`);
     if (primers && primers.fwStart < geo.anchor && primers.revEnd > geo.anchor + 3) {
       const wt = primers.revEnd - primers.fwStart;
       sentences.push(`Screening primers outside both arms amplify ${wt} bp from the wild-type and ${wt + geo.shift} bp from the edited allele.`);

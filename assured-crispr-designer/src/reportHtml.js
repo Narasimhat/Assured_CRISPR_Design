@@ -13,6 +13,7 @@ import { summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerRead
 import { getDonorStrandBadge } from "./reportModel.js";
 import { DESIGN_TYPES } from "./designTypes.js";
 import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict.js";
+import { describeDonorFormat } from "./donorFormat.js";
 import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg, supportsDesignScheme } from "./designScheme.js";
 
 const CODON_TABLE = {
@@ -622,6 +623,13 @@ function buildKnockinQcSummaryHtml(result) {
   `;
 }
 
+function describeDonorFormatSummary(format) {
+  const arms = format.arms.five === format.arms.three ? `${format.arms.five} bp arms` : `${format.arms.five}/${format.arms.three} bp arms`;
+  const head = `${format.short}, ${arms}, ${format.totalLength} bp.`;
+  const problems = [...format.limits.problems, ...(format.synthesis.relevant ? format.synthesis.issues.map((item) => `${item.region}: ${item.detail}`) : [])];
+  return problems.length ? `${head} Review: ${problems.join("; ")}.` : `${head} No length limit or synthesis flag.`;
+}
+
 export function buildDesignReadinessChecks(result) {
   if (!result) return [];
   const referenceAvailable = Boolean(result.gb?.genomicSequence || result.gbRaw || result.gene);
@@ -752,6 +760,11 @@ export function buildDesignReadinessChecks(result) {
         label: "Guide/donor pairing",
         status: (result.gs || []).length <= 1 || result.coDeliverySafe ? "pass" : "warn",
         detail: result.guideDonorInstruction || "Use each guide only with its matched donor.",
+      }] : []),
+      ...(result.donorFormat ? [{
+        label: "Donor format and synthesis",
+        status: result.donorFormat.status,
+        detail: describeDonorFormatSummary(result.donorFormat),
       }] : []),
       {
         label: "Primer thermodynamics",
@@ -990,6 +1003,28 @@ export function buildDesignSchemeHtml(result) {
       </div>
       ${svg}
       ${caption ? `<p style="font-size:12px;line-height:1.5;color:#344054;margin:10px 0 0 0;"><b>Suggested figure legend (draft; complete the bracketed fields):</b> ${escapeSchemeHtml(caption)}</p>` : ""}
+    </div>
+  `;
+}
+
+// Donor format, arms and synthesis pre-check for terminal-tag designs (see donorFormat.js).
+export function buildDonorFormatHtml(result) {
+  const info = describeDonorFormat(result?.donorFormat);
+  if (!info) return "";
+  const warn = info.status === "warn";
+  const list = (items, color) => (items.length ? `<ul style="margin:4px 0 8px 18px;padding:0;font-size:12px;line-height:1.5;color:${color};">${items.map((item) => `<li>${escapeSchemeHtml(item)}</li>`).join("")}</ul>` : "");
+  const order = result.donorFormat.orderSequence
+    ? `<div style="font-size:12px;color:#344054;margin:8px 0 4px 0;"><b>Sequence to order (${escapeSchemeHtml(result.donorFormat.orderStrand)} strand, 5'-3', ${result.donorFormat.orderSequence.length} nt)</b></div><pre style="white-space:pre-wrap;word-break:break-all;font-family:Consolas,monospace;font-size:12px;background:#f8fafc;border:1px solid #d7dee7;border-radius:8px;padding:8px;margin:0 0 8px 0;">${escapeSchemeHtml(result.donorFormat.orderSequence)}</pre>`
+    : "";
+  return `
+    <div style="margin:0 0 14px 0;padding:12px;border:1px solid ${warn ? "#f5c26b" : "#d7dee7"};border-radius:12px;background:${warn ? "#fffaf0" : "#f8fafc"};">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:8px;">${escapeSchemeHtml(info.heading)}</div>
+      <table style="margin:0 0 8px 0;font-size:12px;">${info.rows.map(([label, value]) => `<tr><td style="padding:3px 10px 3px 0;color:#667085;white-space:nowrap;vertical-align:top;">${escapeSchemeHtml(label)}</td><td style="padding:3px 0;">${escapeSchemeHtml(value)}</td></tr>`).join("")}</table>
+      ${list(info.problems, "#B42318")}
+      ${list(info.notes, "#344054")}
+      <div style="font-size:12px;color:#344054;"><b>Synthesis pre-check</b> <span style="color:#667085;">(${escapeSchemeHtml(info.synthesisScope)})</span></div>
+      ${list(info.synthesis, warn ? "#B54708" : "#344054")}
+      ${order}
     </div>
   `;
 }
@@ -1270,7 +1305,7 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
       ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
       : result.type === "it"
         ? `${buildKnockinQcSummaryHtml(result)}${buildInternalProteinHtml(result)}${buildInsertValidationHtml(result.insertValidation)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, donorStatus(donor))).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
-      : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
+      : `${buildKnockinQcSummaryHtml(result)}${buildKnockinProteinHtml(result.proteinPreview)}${buildInsertValidationHtml(result.insertValidation)}${buildDonorFormatHtml(result)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   return `<!doctype html>
 <html>
