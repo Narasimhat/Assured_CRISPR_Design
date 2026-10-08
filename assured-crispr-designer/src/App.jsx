@@ -14,7 +14,7 @@ import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } f
 import { buildBatchOrderRows, buildSafeToken, formatBatchDesignLabel } from "./orderRows";
 import { APP_CONFIG, PROJECT_TYPES, SAMPLE_REQUEST_TEXT } from "./appConfig";
 import { formatBuildLabel } from "./buildInfo";
-import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg } from "./designScheme";
+import { buildDesignSchemeCaption, buildDesignSchemeFilename, buildDesignSchemeSvg, supportsDesignScheme } from "./designScheme";
 import { DONOR_FORMATS, defaultArms, describeDonorFormat, recommendDonorFormat } from "./donorFormat";
 
 const COLORS = {
@@ -4222,7 +4222,7 @@ export default function App() {
 
                 <DesignReadinessCard result={selectedEntry.result} />
                 <DesignSchemeCard result={selectedEntry.result} />
-                <LocusMapCard result={selectedEntry.result} />
+                {!supportsDesignScheme(selectedEntry.result) && <LocusMapCard result={selectedEntry.result} />}
 
                 <div style={{ fontSize: 18, fontWeight: 700, margin: "14px 0 8px 0" }}>4. {selectedEntry.result.type === "pm" ? "ssODN Donor Templates" : selectedEntry.result.type === "ko" ? "Knockout Design" : selectedEntry.result.type === "it" ? "Internal ssODN Donor Templates" : "Donor Design"}</div>
                 {selectedEntry.result.type === "pm" && (selectedEntry.result.os || []).map((donor) => <PmDonorPreview key={donor.n} donor={donor} releaseStatus={getDonorReleaseStatus(selectedEntry.result, donor.guideName)} />)}

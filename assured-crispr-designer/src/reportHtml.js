@@ -998,6 +998,31 @@ export function buildDonorFormatHtml(result) {
   `;
 }
 
+// Facts the plain-text summary used to be the only place to find, shown where they belong.
+function buildKnockoutFactsHtml(result) {
+  const rows = [];
+  if (result.exon) rows.push({ label: "Target exon", value: result.exon });
+  if (result.gs?.length >= 2 && Number.isFinite(result.gs[0]?.d) && Number.isFinite(result.gs[1]?.d)) rows.push({ label: "Pair spacing", value: `${Math.abs(result.gs[1].d - result.gs[0].d)} bp` });
+  const outcome = result.deletionOutcome;
+  if (outcome) {
+    rows.push({ label: "Expected deletion", value: `${outcome.deletionSize} bp (mod 3 = ${outcome.deletionMod3}; ${outcome.frameshiftPredicted ? "frameshift predicted" : "in-frame"})` });
+    if (outcome.spliceDonorRemoved) rows.push({ label: "Splice donor", value: `Removed: exon skipping is plausible; exon length ${outcome.exonLength} bp (mod 3 = ${outcome.exonSkippingMod3}).` });
+  }
+  if (result.strat) rows.push({ label: "Strategy", value: result.strat });
+  return buildKeyValueTableHtml(rows, 1);
+}
+
+function buildBlockingChangesHtml(result) {
+  if (!result.ss?.length) return "";
+  const guideName = (index) => result.gs?.[index - 1]?.n || `gRNA${index}`;
+  return `
+    <div style="margin:0 0 12px 0;">
+      <div style="color:#667085;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;margin-bottom:2px;">Guide-blocking changes in the donor</div>
+      <ul style="margin:2px 0 0 18px;padding:0;font-size:12.5px;line-height:1.5;color:#7F1D1D;">${result.ss.map((mutation) => `<li>${guideName(mutation.gi)}: ${mutation.lb} (${mutation.oc} -> ${mutation.nc}) | ${mutation.pur}</li>`).join("")}</ul>
+    </div>
+  `;
+}
+
 function buildLocusMapHtml(result) {
   const window = normalizeLocusWindow(result);
   if (!window) return "";
@@ -1269,17 +1294,16 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor, donorStatus(donor))).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
       : result.type === "ko"
-      ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>`
+      ? `<p style="font-size:13px;line-height:1.45;">${result.referenceOnly ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs below are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up." : "No donor is required for knockout design. Use the paired gRNAs below for deletion/NHEJ-based disruption."}</p>${buildKnockoutFactsHtml(result)}`
       : result.type === "it"
         ? `${buildInsertVerificationHtml(result)}${(result.os || []).map((donor) => buildInternalDonorHtml(donor, donorStatus(donor))).join("") || `<p style="font-size:13px;line-height:1.45;color:#B42318;">No internal ssODN donor could be rendered for this in-frame tag design.</p>`}`
-      : `${buildDonorFormatHtml(result)}${buildInsertVerificationHtml(result)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
+      : `${buildDonorFormatHtml(result)}${buildBlockingChangesHtml(result)}${buildInsertVerificationHtml(result)}${buildAnnotatedDonorHtml(result.donor || "", result.donorAnnotations || [])}`;
   const resolvedSectionTitle = result.type === "it" ? "Internal ssODN Donor Templates" : sectionTitle;
   // Section numbers follow what is present: the matched-records section only exists with matches.
   let nextSection = 5;
   const historicalNumber = hasHistoricalMatches ? nextSection++ : null;
   const readinessNumber = nextSection++;
   const reviewNumber = nextSection++;
-  const additionalNumber = nextSection++;
   const alternativePrimers = primerCandidateRows.length
     ? `<details class="fold"><summary>Alternative primer pairs (${primerCandidateRows.length})</summary><div class="body"><table>${tableHtml([["Rank", "Forward", "Fw Tm", "Fw GC", "Fw Clamp", "Reverse", "Rev Tm", "Rev GC", "Rev Clamp", "Amplicon"]], true)}${tableHtml(primerCandidateRows)}</table></div></details>`
     : "";
@@ -1294,7 +1318,12 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const reviewNote = omittedReviewItems
     ? `<p class="sub">${omittedReviewItems} item${omittedReviewItems === 1 ? " is" : "s are"} already shown above under Release status or Design Readiness and ${omittedReviewItems === 1 ? "is" : "are"} not repeated.</p>`
     : "";
-  const primerMeta = [result.amp ? `Expected amplicon: ${result.amp}` : "Expected amplicon: n/a", result.primerStrategy ? `Primer strategy: ${result.primerStrategy}` : ""].filter(Boolean).join(" &middot; ");
+  const primerQuality = getPrimerQualitySummary(result);
+  const primerMeta = [
+    result.amp ? `Expected amplicon: ${result.amp}` : "Expected amplicon: n/a",
+    result.primerStrategy ? `Primer strategy: ${result.primerStrategy}` : "",
+    primerQuality ? `Primer QC: ${primerQuality.confidence} confidence, pair penalty ${primerQuality.penalty}, Tm delta ${primerQuality.tmDelta} C` : "",
+  ].filter(Boolean).join(" &middot; ");
   return `<!doctype html>
 <html>
 <head>
@@ -1350,12 +1379,10 @@ details.fold>.body{padding:8px 12px 10px 12px}
   ${hasHistoricalMatches ? `<h2>${historicalNumber}. Matched Historical Records</h2>${buildHistoricalRowsHtml(historicalContext.topMatches)}` : ""}
   <h2>${readinessNumber}. Design Readiness</h2>
   ${readinessBlock}
-  ${locusMapBlock ? `<details class="fold"><summary>Target region map</summary><div class="body">${locusMapBlock}</div></details>` : ""}
+  ${locusMapBlock && !designSchemeBlock ? `<details class="fold"><summary>Target region map</summary><div class="body">${locusMapBlock}</div></details>` : ""}
   <h2>${reviewNumber}. Review Checkpoints</h2>
   ${reviewNote}
   ${buildReviewListHtml(remainingReviewItems)}
-  <h2>${additionalNumber}. Additional Info</h2>
-  <details class="fold"><summary>Plain-text summary for the lab notebook</summary><div class="body"><p>${buildDesignSummary(result).replace(/\n/g, "<br/>")}</p></div></details>
 </div>
 </body>
 </html>`;

@@ -69,7 +69,7 @@ Object.keys(CASES).forEach((key) => {
 
   test(`${key}: nothing is listed again under Review Checkpoints that readiness or the release status already print`, () => {
     const { html } = build(key);
-    const review = html.slice(html.indexOf("Review Checkpoints"), html.indexOf("Additional Info"));
+    const review = html.slice(html.indexOf("Review Checkpoints"), html.indexOf("</body>"));
     const readiness = html.slice(html.indexOf("Design Readiness"), html.indexOf("Review Checkpoints"));
     const details = [...readiness.matchAll(/<td style="color:[^"]*;font-size:[\d.]+px;">([^<]+)<\/td>/g)].map((match) => match[1]);
     assert.ok(details.length > 0);
@@ -95,11 +95,11 @@ test("a matching insert is printed once; a mismatch prints expected and designed
   assert.ok(broken.includes(insert) && broken.includes(`${insert.slice(0, -3)}CCC`));
 });
 
-test("derived detail sits in closed folds: alternative primers, coding frame, target map, summary, legend", () => {
+test("derived detail sits in closed folds: alternative primers, coding frame and insert translation, figure legend", () => {
   const { html } = build("ct");
   const folds = [...html.matchAll(/<details class="fold"([^>]*)><summary>([^<]*)<\/summary>/g)];
   const titles = folds.map((match) => match[2]);
-  ["Alternative primer pairs", "Coding frame, insert sequence and translation", "Target region map", "Plain-text summary for the lab notebook", "Suggested figure legend"]
+  ["Alternative primer pairs", "Coding frame, insert sequence and translation", "Suggested figure legend"]
     .forEach((title) => assert.ok(titles.some((text) => text.startsWith(title)), `missing fold: ${title}`));
   assert.ok(folds.every((match) => !match[1].includes("open")), "folds start closed");
   const alt = html.indexOf("Alternative primer pairs");
@@ -130,4 +130,36 @@ test("with matched historical records the following sections renumber", () => {
   const numbers = [...html.matchAll(/<h2>(\d+)\./g)].map((match) => Number(match[1]));
   assert.deepEqual(numbers, numbers.map((_, index) => index + 1));
   assert.ok(html.includes("5. Matched Historical Records") && html.includes("6. Design Readiness"));
+});
+
+test("Additional Info and the target region map are gone when the design scheme is drawn", () => {
+  Object.keys(CASES).forEach((key) => {
+    const { html } = build(key);
+    assert.ok(!html.includes("Additional Info") && !html.includes("Plain-text summary"), `${key}: plain-text summary should be gone`);
+    assert.ok(!html.includes("Target region map") && !html.includes("Target Region Map"), `${key}: the map duplicates the scheme`);
+  });
+});
+
+test("the target region map is the fallback when the scheme cannot be drawn", () => {
+  const { html } = build("ct", (design) => ({ ...design, gs: design.gs.map((guide) => ({ ...guide, cut: undefined })) }));
+  assert.ok(!html.includes(">Design Scheme<"));
+  assert.ok(html.includes("<summary>Target region map</summary>"), "the map should take the scheme's place");
+});
+
+test("what only the summary used to say now sits in its own section", () => {
+  const ct = build("ct");
+  assert.ok(ct.html.includes("Guide-blocking changes in the donor") && /Seed pos \d+\/\d+/.test(ct.html), "blocking changes with seed position");
+  assert.ok(/Primer QC: \w+ confidence, pair penalty [\d.]+, Tm delta [\d.]+ C/.test(ct.html), "primer QC line");
+  const ko = build("ko");
+  assert.ok(ko.html.includes("Expected deletion") && ko.html.includes(`${ko.result.deletionOutcome.deletionSize} bp`) && ko.html.includes("Strategy"), "knockout outcome and strategy");
+  assert.ok(ko.html.indexOf("Expected deletion") < ko.html.indexOf("Design Readiness"), "under the knockout section, not at the end");
+});
+
+test("the scheme axis states the position in the uploaded reference", () => {
+  const ct = build("ct");
+  assert.ok(ct.html.includes(`= 0 = position ${ct.result.sp} of the uploaded reference`));
+  const pm = build("pm");
+  assert.ok(pm.html.includes(`edited base = position ${pm.result.gp + 1} of the uploaded reference`));
+  const it = build("it");
+  assert.ok(it.html.includes(`insertion between positions ${it.result.gp} and ${it.result.gp + 1}`));
 });
