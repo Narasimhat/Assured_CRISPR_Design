@@ -40,6 +40,40 @@
   compare the untreated tagged protein with wild type before using it for degradation.
 - New tests: `test/spaced-sd40-v5.test.js`, and two NR2F2 cases in the regression fixtures.
 
+### Report layout: shorter, one copy of each thing, detail one click away
+
+- The HTML report no longer repeats itself. The knock-in QC checklist that duplicated Design Readiness
+  is gone; the insert DNA and amino-acid strings, printed twice when expected and designed were
+  identical, are printed once (and both, in full, when they differ, with the mismatch badge); review
+  checkpoints already printed word for word under Release status or Design Readiness are not listed a
+  third time, with a one-line note saying so.
+- Order: release status, a four-cell snapshot strip (the donor cell now names the format and arms), the
+  design scheme, then Gene Information, gRNA Sequences, Recommended Primers, Donor Design, Design
+  Readiness, Review Checkpoints. Section numbers follow what is present.
+- Layout: one centred column (980 px), thin-ruled tables with a light header, label/value pairs in a
+  four-column table instead of a card each, primers in one table instead of two cards with nested
+  cards, readiness as one row per check with items to review first and passes last, and a print
+  stylesheet. Page structure uses tables and blocks only, no card grids.
+- Folded by default (HTML `details`, no script): alternative primer pairs, coding frame and insert
+  sequence and translation, the suggested figure legend, and, for point-mutation and internal-tag
+  ssODNs, the opposite (reference-only) strand and the coding frame view. The strand to order stays visible. Folds are closed in print, so print or save a copy
+  with them opened if the detail is needed on paper.
+- Two sections are dissolved. The target region map restated what the design scheme draws to scale
+  (guides, cut sites, donor, primers, gene model), so it is shown only when the scheme cannot be drawn;
+  the scheme's axis now states the position in the uploaded reference (insertion point, edited base or
+  cut), the one thing the map added. Additional Info was a plain-text copy of other sections; the three
+  facts that existed only there now sit where they belong: the guide-blocking changes with seed
+  position (C- and N-terminal tags), the primer QC line (confidence, pair penalty, Tm delta) under the
+  primer table, and the expected deletion, splice-donor note and strategy under Knockout Design. The
+  app's on-screen results page also hides its region map when the scheme is drawn.
+- Everything else that was folded or de-duplicated is still in the document, and the engine, the
+  app's results and the order exports are unchanged.
+- New tests: `test/report-layout.test.js` (30) checks section order and numbering, one copy of the
+  insert sequence and the mismatch case, readiness ordering and one row per check, no repetition under
+  Review Checkpoints, closed folds, the folded reference strand, and renumbering with historical
+  matches. Seven mutations (QC list back, unsorted readiness, no de-duplication, mismatch hidden, open
+  folds, scheme after the sections, reference strand not folded) each fail a test.
+
 ### Donor format and arm control for terminal tags
 
 - New `src/donorFormat.js` (pure functions) plans the donor for C- and N-terminal tags. Three formats:

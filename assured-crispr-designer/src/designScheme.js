@@ -329,7 +329,7 @@ function panelATag(c, ctx, geo, top) {
     ctx.pcr = { wt, edited: wt + shift };
   }
   y += 6;
-  y += drawAxis(c, ctx, y, vmin, vmaxEdit, anchor, `bp from the insertion point (first base of the replaced ${isCt ? "stop" : "start"} codon = 0)`);
+  y += drawAxis(c, ctx, y, vmin, vmaxEdit, anchor, `bp from the insertion point (first base of the replaced ${isCt ? "stop" : "start"} codon = 0 = position ${anchor + 1} of the uploaded reference)`);
   return y;
 }
 
@@ -397,7 +397,7 @@ function panelASsodn(c, ctx, top) {
     y += drawPcr(c, ctx, y, [{ a: primers.fwStart, b: primers.revEnd + insertLength, color: COLORS.pcrWt, label: isIt ? `wild type ${wt} bp; edited allele ${wt + insertLength} bp` : `amplicon, ${wt} bp (sequence the edit site)` }]);
   }
   y += 6;
-  y += drawAxis(c, ctx, y, vmin, vmaxView, anchor, `bp from the ${isIt ? "insertion site" : "edited base"} (reference coordinates)`);
+  y += drawAxis(c, ctx, y, vmin, vmaxView, anchor, `bp from the ${isIt ? "insertion site" : "edited base"} (reference coordinates; ${isIt ? `insertion between positions ${anchor} and ${anchor + 1}` : `edited base = position ${anchor + 1}`} of the uploaded reference)`);
   return y;
 }
 
@@ -437,7 +437,7 @@ function panelAKo(c, ctx, top) {
     ]);
   }
   y += 6;
-  y += drawAxis(c, ctx, y, vmin, vmax, delLo, "bp from the left-most cut (reference coordinates)");
+  y += drawAxis(c, ctx, y, vmin, vmax, delLo, `bp from the left-most cut (reference coordinates; cut between positions ${delLo} and ${delLo + 1} of the uploaded reference)`);
   return y;
 }
 
