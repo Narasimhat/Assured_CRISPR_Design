@@ -10,6 +10,7 @@
   amplicon sizes. The Sanger-trace QC app builds its expected alleles from this file alone.
 - Works for knockouts (deletion between the cuts), point mutations, internal tags, and C- or N-terminal tags with
   ssODNs or donor blocks. Up to three guides are exported.
+- Knockout and deletion designs also carry an optional `coding` block (the gene region, starting at `coding.offset` in the uploaded reference, and the coding exons as 0-based half-open pairs), so the QC app can call a knockout on the protein (nonsense-mediated decay, truncation, splice sites) without a second GenBank upload. Left out when the record has no complete CDS or the region exceeds 300 kb.
 - No design output changes. New tests: `test/qc-export.test.js`.
 
 ### Second ssODN strand when the two guides are on opposite strands

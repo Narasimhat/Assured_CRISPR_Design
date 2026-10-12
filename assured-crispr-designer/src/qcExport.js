@@ -7,6 +7,9 @@
 //
 // Coordinates are 0-based indices into reference.sequence (a window of the uploaded reference starting at
 // reference.offset). A cut index c means the cut lies between bases c-1 and c on the + strand.
+//
+// The optional `coding` block carries the gene region (coding.sequence, starting at coding.offset in the same uploaded reference) and the coding exons as
+// [start, end) pairs inside it, for the QC app's functional knockout assessment.
 
 export const QC_SPEC_SCHEMA = "assured-qc-design/1";
 
@@ -88,6 +91,24 @@ function collectMarkers(genome, placement, silent, intendedPositions) {
   return markers;
 }
 
+// The gene region and its coding exons, so the QC app can judge a knockout on the protein (nonsense-mediated decay, truncation, splice sites) without a second GenBank upload.
+// Same coordinate system as the reference window: 0-based, half-open indices into coding.sequence, which is a stretch of the uploaded reference starting at coding.offset.
+// The design engine takes the uploaded record as the coding strand, so the strand is "+". Omitted when the record has no complete CDS or the region is very large.
+function buildCodingBlock(result, genome, windowStart, windowEnd, maxRegion) {
+  const gb = result.gb || {};
+  const segments = (gb.cdsSegments || []).map((pair) => [Number(pair[0]), Number(pair[1])]).filter(([s, e]) => Number.isInteger(s) && Number.isInteger(e) && e > s).sort((a, b) => a[0] - b[0]);
+  if (!segments.length) return null;
+  const total = segments.reduce((sum, [s, e]) => sum + (e - s), 0);
+  if (total % 3 !== 0) return null;
+  const from = Math.min(segments[0][0], windowStart); const to = Math.max(segments[segments.length - 1][1], windowEnd);
+  if (to - from > maxRegion) return null;
+  return {
+    strand: "+", gene: gb.gene || result.gene || "", transcript: gb.transcriptId || "", proteinLength: Number.isInteger(gb.proteinLength) ? gb.proteinLength : null,
+    offset: from, sequence: genome.slice(from, to), segments: segments.map(([s, e]) => [s - from, e - from]),
+    convention: "0-based half-open indices into sequence, which starts at offset in the uploaded reference; segments are the coding exons on the + (coding) strand",
+  };
+}
+
 export function buildQcDesignSpec(result, options = {}) {
   const pad = options.windowPad ?? 300;
   if (!result || result.err) return { err: "No design result to export." };
@@ -156,6 +177,7 @@ export function buildQcDesignSpec(result, options = {}) {
   let windowStart = Math.max(0, Math.min(...spans) - pad);
   let windowEnd = Math.min(genome.length, Math.max(...spans) + pad);
   if (windowEnd - windowStart > (options.maxWindow ?? 5000)) return { err: "The design spans more of the reference than the QC window allows." };
+  const coding = buildCodingBlock(result, genome, windowStart, windowEnd, options.maxCodingRegion ?? 300000);
   const shift = (value) => (value === null || value === undefined ? value : value - windowStart);
   const forward = placedPrimers.filter((primer) => primer.strand === "+");
   const reverse = placedPrimers.filter((primer) => primer.strand === "-");
@@ -172,6 +194,7 @@ export function buildQcDesignSpec(result, options = {}) {
     schema: QC_SPEC_SCHEMA,
     design: { type, editKind, gene: result.gene, label: intendedDescription, tag: result.tag || "", codingStrand: "+" },
     reference: { sequence: genome.slice(windowStart, windowEnd), offset: windowStart, convention: "0-based index into sequence; the + strand of the uploaded reference" },
+    ...(coding ? { coding } : {}),
     guides: guides.map((guide) => ({ ...guide, cut: shift(guide.cut), protospacerStart: shift(guide.protospacerStart), protospacerEnd: shift(guide.protospacerEnd) })),
     donors: donors.map((donor) => ({ ...donor, refStart: shift(donor.refStart), refEnd: shift(donor.refEnd), insertStart: shift(donor.insertStart), carriesMarkers: donor.carriesMarkers?.map(shift) })),
     markers: markerList.map((marker) => ({ ...marker, pos: shift(marker.pos) })),

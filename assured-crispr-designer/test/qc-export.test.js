@@ -104,3 +104,24 @@ test("nothing to export without a design", () => {
   assert.ok(buildQcDesignSpec({ err: "x" }).err);
   assert.ok(buildQcDesignSpec({ type: "ct", gene: "X", gb: {} }).err);
 });
+
+test("the hand-off carries the gene region and coding exons for the QC app's functional knockout assessment", () => {
+  for (const key of Object.keys(CASES)) {
+    const { result, spec } = exportCase(key);
+    assert.ok(spec.coding, `${key}: coding block present`);
+    const block = spec.coding; assert.equal(block.strand, "+");
+    // the reference window sits inside the block at the stated offsets
+    const from = spec.reference.offset - block.offset; assert.ok(from >= 0, `${key}: window starts inside the block`);
+    assert.equal(block.sequence.slice(from, from + spec.reference.sequence.length), spec.reference.sequence, `${key}: window equals the block at the offsets`);
+    // the segments reproduce the engine's own coding sequence
+    const cds = block.segments.map(([s, e]) => block.sequence.slice(s, e)).join("");
+    assert.equal(cds, result.gb.cdsSequence, `${key}: coding exons reproduce the CDS`); assert.equal(cds.length % 3, 0);
+    block.segments.forEach(([s, e], i) => { assert.ok(e > s && s >= 0 && e <= block.sequence.length); if (i) assert.ok(s >= block.segments[i - 1][1]); });
+    assert.equal(block.gene, result.gb.gene || result.gene);
+  }
+});
+
+test("a region larger than the limit is left out instead of exported truncated", () => {
+  const { result } = exportCase("tagme_ko");
+  assert.equal(buildQcDesignSpec(result, { maxCodingRegion: 50 }).coding, undefined);
+});
