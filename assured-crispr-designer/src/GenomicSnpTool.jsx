@@ -1,3 +1,4 @@
+import { buildGenomicSequenceCsv } from './genomicSequenceExport.js';
 import { buildDesignSchemeSvg, buildDesignSchemeFilename } from './designScheme.js';
 import { useState } from 'react';
 import { designGenomicSnp, readGenomicReferenceMetadata, buildGenomicSnpReport } from './genomicSnp.js';
@@ -58,6 +59,18 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
 
 export function GenomicSnpReport({ result, onEdit, onOtherReports }) {
   const [exportError,setExportError]=useState('');
+  const [selection,setSelection]=useState({result,names:result.candidates.map(c=>c.name)});
+  const selectedNames=selection.result===result ? selection.names : result.candidates.map(c=>c.name);
+  const [review,setReview]=useState({result:null,acknowledged:false,note:''});
+  const acknowledged=review.result===result && review.acknowledged;
+  const note=review.result===result ? review.note : '';
+  function exportSequences(proceed) {
+    try {
+      const csv=buildGenomicSequenceCsv(result,{selectedNames,acknowledged:proceed && acknowledged,note,reviewedAt:new Date().toISOString()});
+      download(fileStem+(proceed?'_reviewed_sequences.csv':'_draft_sequences.csv'),csv,'text/csv;charset=utf-8');
+      setExportError('');
+    } catch(error){setExportError(error.message);}
+  }
   const html=buildGenomicSnpReport(result);
   const scheme=buildDesignSchemeSvg(result);
   async function downloadPng() {
@@ -85,6 +98,20 @@ export function GenomicSnpReport({ result, onEdit, onOtherReports }) {
       <button onClick={onEdit}>Edit genomic SNP request</button>
       <button onClick={onOtherReports}>Show other project reports</button>
     </div>
+    <section aria-label="Sequence export" style={{background:'#fff',color:'#111827',padding:18,borderRadius:12,marginBottom:16}}>
+      <h3>Download sequences</h3>
+      <p>Design status: <strong>{result.status}</strong>. You can proceed after reviewing the limitations. Exporting does not change the scientific status.</p>
+      <ul>{result.blockers.map((text,i)=><li key={i}>{text}</li>)}</ul>
+      <details><summary>All review limitations</summary><ul>{result.warnings.map((text,i)=><li key={i}>{text}</li>)}</ul></details>
+      <p>Select guide/donor pairs. Each guide is exported with its matched ssODN; these are alternatives, not a pool. The primary PCR primer pair is included.</p>
+      {result.candidates.map(c=><label key={c.name} style={{display:'block',marginBottom:6}}><input type="checkbox" checked={selectedNames.includes(c.name)} onChange={e=>{setSelection({result,names:e.target.checked?[...selectedNames,c.name]:selectedNames.filter(n=>n!==c.name)});setReview({result,acknowledged:false,note});}}/> {c.name} + matched ssODN — {c.protection.tier} protection</label>)}
+      <label style={{display:'block',margin:'12px 0'}}>Review note (optional)<input style={{display:'block',width:'100%',color:'#111827',background:'#fff'}} value={note} onChange={e=>setReview({result,acknowledged:false,note:e.target.value})}/></label>
+      <label style={{display:'block',margin:'12px 0'}}><input type="checkbox" checked={acknowledged} onChange={e=>setReview({result,acknowledged:e.target.checked,note})}/> I reviewed the selected pairs and limitations and choose to proceed despite the current design status.</label>
+      <div className="snp-actions">
+        <button disabled={!selectedNames.length} onClick={()=>exportSequences(false)}>Download draft sequences CSV</button>
+        <button disabled={!selectedNames.length || !acknowledged} onClick={()=>exportSequences(true)}>Proceed after review — download sequences CSV</button>
+      </div>
+    </section>
     {exportError && <p role="alert">{exportError}</p>}
     <iframe title="ASSURED final design report" srcDoc={html} sandbox="allow-downloads" style={{width:'100%',height:'78vh',minHeight:650,border:'1px solid #d0d5dd',borderRadius:12,background:'white'}} />
   </section>;
