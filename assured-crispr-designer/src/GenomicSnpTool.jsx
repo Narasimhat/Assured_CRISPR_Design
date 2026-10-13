@@ -1,3 +1,4 @@
+import { BLOCKING_POLICIES } from './genomicBlocking.js';
 import { buildGenomicSequenceCsv } from './genomicSequenceExport.js';
 import { buildDesignSchemeSvg, buildDesignSchemeFilename } from './designScheme.js';
 import { useState } from 'react';
@@ -12,7 +13,7 @@ function download(name, text, type) {
 
 export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   const [raw,setRaw]=useState('');
-  const [input,setInput]=useState({gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
+  const [input,setInput]=useState({blockingPolicy:'none',maxBlockingChanges:2,gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
   const [result,setResult]=useState(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
@@ -40,6 +41,8 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
       <label>Genomic reference (GenBank)<input type="file" accept=".gb,.gbk,.genbank" onChange={upload} /></label>
       <p>Reference stays in your browser. An Ensembl Location annotation fills the assembly, chromosome and reference start automatically. Forward genomic references only.</p>
       <div className="snp-grid">
+        <label>Additional blocking changes<select aria-label="Additional blocking changes" value={input.blockingPolicy} onChange={e=>update('blockingPolicy',e.target.value)}>{Object.entries(BLOCKING_POLICIES).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+        {input.blockingPolicy!=='none' && <label>Maximum additional changes per donor<select aria-label="Maximum additional changes per donor" value={input.maxBlockingChanges} onChange={e=>update('maxBlockingChanges',Number(e.target.value))}>{[1,2,3].map(n=><option key={n} value={n}>{n}</option>)}</select></label>}
         {field('Gene or locus','gene')}{field('Cell line (optional)','cellLine')}
         {field('Genome assembly','assembly')}{field('Chromosome','chromosome')}
         {field('Reference start (1-based genomic coordinate)','referenceStart','number')}
@@ -49,8 +52,9 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
         <label>Guide delivery<select value={input.deliveryMethod} onChange={e=>update('deliveryMethod',e.target.value)}><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression</option></select></label>
       </div>
       <label className="snp-check"><input type="checkbox" checked={input.forwardConfirmed} onChange={e=>update('forwardConfirmed',e.target.checked)}/>The reference sequence is in forward genomic orientation.</label>
-      <p>No additional blocking substitutions will be added. Every donor is checked for exactly the requested single-base change.</p>
-      <button type="submit" disabled={!raw || busy}>Generate genomic SNP design</button>
+      <p>{input.blockingPolicy==='none'?'No additional blocking substitutions will be added. Every donor is checked for exactly the requested single-base change.':'Compare the requested-edit-only allele with permitted PAM/seed blocking alternatives. Coding changes must remain synonymous relative to the requested allele. Noncoding changes are not silent.'}</p>
+      <p>Splice assessment is a local junction and GT/AG motif screen, not a splice-strength prediction. Additional intronic changes remain subject to review.</p>
+    <button type="submit" disabled={!raw || busy}>Generate genomic SNP design</button>
     </form>
     {error && <p role="alert" className="snp-alert">{error}</p>}
     {result && <button type="button" onClick={()=>onGenerate?.(result)}>Show final report</button>}

@@ -78,8 +78,8 @@ fills the reference mapping automatically; conflicting coordinates and reference
 mismatches are rejected. A CDS is optional. Reverse-oriented input records are rejected.
 
 This mode reuses the guide, ssODN, primer and CFD functions, but validates the exact
-nucleotide substitution rather than requiring an amino-acid change. It introduces no
-additional blocking mutations. Results and downloadable HTML/JSON are always **BLOCKED**
+nucleotide substitution rather than requiring an amino-acid change. It defaults to no
+additional blocking mutations; explicit policies allow compared alternatives. Results and downloadable HTML/JSON are always **BLOCKED**
 or **REVIEW REQUIRED**, never ordering approval. Guides lacking strong repaired-allele
 protection, splice effects, parental genotype and genome-wide specificity need review.
 These results have their own downloads; they are not included in the protein-workspace
@@ -161,3 +161,8 @@ For broader sharing and commercialization, prefer a hosted deployment over local
 - add auth and saved projects later if you move toward SaaS
 
 Genomic SNP results open in the Report tab and use the shared ASSURED HTML report renderer: gene information, guides, primers, annotated WT/donor strands, readiness, target map, and review checkpoints. Nucleotide validation replaces protein assertions for this mode; RNA outcomes remain unvalidated.
+
+### Genomic SNP blocking policies
+The Genomic SNP form defaults to requested-edit only. Optional synonymous coding or synonymous-plus-noncoding policies compare requested-only, PAM-blocking and PAM/seed-blocking alternatives, with a 1-3-change cap. Native codon and CFD logic is reused, scored against the requested-edit allele. Annotated junction dinucleotides are excluded from extra changes. Reports and CSV exports list every added nucleotide. The recommendation is provisional and concerns re-cutting, not biological release.
+
+Splice screening distinguishes WT-to-requested-edit from requested-edit-to-final-donor. It reports annotated junction dinucleotide changes, a conservative 20-bp boundary proximity flag, and local GT/AG motif gains/losses. These are transparent heuristics, not splice-strength probabilities or predictions of RNA isoforms. SpliceAI is not integrated; no motif flag means no local flag, not safety. Its deployment requirements and model licence are documented at https://github.com/Illumina/SpliceAI. Missing CDS annotation prevents automatic additional-change proposals. Existing protein-edit and tagging workflows retain their original policies.

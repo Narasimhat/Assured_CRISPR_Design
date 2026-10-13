@@ -7,13 +7,15 @@ export function buildGenomicSequenceCsv(result, { selectedNames = [], acknowledg
     const text = String(value ?? '');
     return '"' + (/^[=+@-]/.test(text) ? "'" + text : text).replace(/"/g,'""') + '"';
   };
-  const header = ['Name','Type','Sequence 5-prime to 3-prime','Length nt','Matched pair','PAM (not part of spacer)','Strand','Protection','Residual CFD','Design status','Review acknowledgement','Review note','Review time UTC','Target','Warnings'];
+  const header = ['Name','Type','Sequence 5-prime to 3-prime','Length nt','Matched pair','PAM (not part of spacer)','Strand','Protection','Residual CFD','Design status','Review acknowledgement','Review note','Review time UTC','Target','Blocking policy','Additional donor changes','Splice screen','Warnings'];
   const target = `${result.input.assembly} chr${result.input.chromosome}:${result.input.position} ${result.input.ref}>${result.input.alt}`;
   const warnings = [...result.blockers,...result.warnings,'Alternative pairs; do not pool. Guide spacers use DNA notation; vendor chemistry and format must be chosen separately.'].join(' | ');
   const rows=[];
   const add=(name,type,seq,pair,pam,strand,protection='',cfd='')=>{
     if(!/^[ACGT]+$/.test(seq || ''))throw Error(`Invalid sequence for ${name}`);
-    rows.push([name,type,seq,seq.length,pair,pam,strand,protection,cfd,result.status,acknowledged?'User acknowledged limitations; proceeding after review':'Draft; not reviewed',note,acknowledged?reviewedAt:'',target,warnings]);
+    rows.push([name,type,seq,seq.length,pair,pam,strand,protection,cfd,result.status,acknowledged?'User acknowledged limitations; proceeding after review':'Draft; not reviewed',note,acknowledged?reviewedAt:'',target,result.input.blockingPolicy || 'none',
+      (result.candidates.find(c=>c.name===pair)?.blockingChanges || []).map(m=>`${result.input.referenceStart+m.gp} ${result.gb.genomicSequence[m.gp]}>${m.nb} (${m.mt==='silent'?'synonymous coding':'noncoding'})`).join('; '),
+      result.candidates.find(c=>c.name===pair)?.spliceAssessment?.risk || 'unassessed',warnings]);
   };
   for(const c of selected){
     if(!c.nucleotideValidation?.valid)throw Error(`Donor validation failed for ${c.name}`);

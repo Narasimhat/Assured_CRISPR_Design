@@ -1,3 +1,4 @@
+import { BLOCKING_POLICIES, buildBlockingComparison } from './genomicBlocking.js';
 import { buildReportHtml } from './reportHtml.js';
 import { parseGB, mkODN, assessGuideAgainstPointMutationDonor, assessGuideSequence, designCenteredPrimerPairs, buildPrimerRecord, summarizePrimerPairQuality } from './designEngine.js';
 import { normalizeGenBankToTranscriptModel, findSpCas9Guides } from './transcriptModel.js';
@@ -12,6 +13,10 @@ export function readGenomicReferenceMetadata(raw) {
 /** Exact single-nucleotide substitution; no extra blocking edits, codon conversion or inferred assembly. */
 export function designGenomicSnp(raw, input) {
   try {
+    const policy=input.blockingPolicy || 'none';
+    if(!BLOCKING_POLICIES[policy])throw Error('Unknown blocking-change policy.');
+    const maxChanges=Number(input.maxBlockingChanges ?? 2);
+    if(!Number.isInteger(maxChanges) || maxChanges<1 || maxChanges>3)throw Error('Choose 1, 2 or 3 additional blocking changes.');
     const record = parseGB(raw);
     if (!record.seq || !/^[ACGTN]+$/.test(record.seq)) throw Error('Upload a GenBank reference with an A/C/G/T/N genomic sequence.');
     const meta = readGenomicReferenceMetadata(raw);
@@ -42,7 +47,10 @@ export function designGenomicSnp(raw, input) {
       const differences = [...wt].flatMap((b,i) => b !== donor.genomicDonor[i] ? [donor.donorStart+i] : []);
       if (differences.length !== 1 || differences[0] !== gp || donor.genomicDonor[gp-donor.donorStart] !== alt) throw Error('Donor validation failed: the final allele does not contain exactly the requested substitution.');
       if (donor.od !== (guide.str === '+' ? rc(donor.genomicDonor) : donor.genomicDonor)) throw Error('Donor strand validation failed.');
-      return { name:`gRNA${index+1}`, ...guide, interval:{ start:start+guide.ps,end:start+guide.ps+22 }, qc:assessGuideSequence(guide.sp,input.deliveryMethod || 'rnp'), donor, protection:assessGuideAgainstPointMutationDonor(guide,donor), nucleotideValidation:{ valid:true, differences:1, additionalChanges:0 } };
+      const comparison=buildBlockingComparison(model,guide,gp,alt,policy,maxChanges);
+      const chosen=comparison.selected;
+      const additionalChanges=chosen.changes.length;
+      return { name:`gRNA${index+1}`, ...guide, interval:{ start:start+guide.ps,end:start+guide.ps+22 }, qc:assessGuideSequence(guide.sp,input.deliveryMethod || 'rnp'), donor:chosen.donor, protection:chosen.protection, blockingChanges:chosen.changes, comparison, spliceAssessment:chosen.splice, nucleotideValidation:{ valid:true, differences:1+additionalChanges, additionalChanges } };
     });
     const primers = designCenteredPrimerPairs(record.seq,gp,{ minAmp:400,maxAmp:700,desiredAmp:500 }).slice(0,3).map((p,index)=>({ rank:index+1,ampliconLength:p.amp,forward:buildPrimerRecord('Fw',p.fw.seq),reverse:buildPrimerRecord('Rev',p.rev.seq),quality:p.quality || summarizePrimerPairQuality(p.fw.seq,p.rev.seq) }));
     const boundaries = (model.exons || []).flatMap(exon => [
@@ -54,13 +62,14 @@ export function designGenomicSnp(raw, input) {
       ...(!normalized ? ['No usable CDS annotation. Coding and splice context have not been established.'] : []),
       ...(!meta ? ['Genomic mapping is user-supplied; no Location annotation was available to verify it.'] : []),
       'Genome-wide guide and primer specificity are not checked.',
-      'No additional blocking substitutions were added. Review each guide against its matched repaired allele.',
+      candidates.some(c=>c.blockingChanges.length) ? 'Permitted blocking substitutions were added. Noncoding changes are not silent. Splice effects remain unassessed; review the allele comparison.' : 'No additional blocking substitutions were added. Review each guide against its matched repaired allele.',
+      'Local splice screening compares WT to requested edit, then requested edit to final donor; it is not a splice-strength prediction.',
       'Splicing and protein outcomes are not predicted. An unchanged annotated CDS does not validate mature RNA or protein.',
       'Alternative guides and donors are separate candidates; do not pool them.',
       ...(!input.cellLine ? ['Cell line and parental genotype are unspecified.'] : ['Parental sequence must be confirmed; specifying a cell line is not WGS validation.']),
     ];
-    const blockers = !candidates.length ? ['No SpCas9 NGG guides passed the native sequence filters within 30 bp.'] : candidates.every(c=>c.protection.tier!=='strong') ? ['No candidate has strong predicted re-cutting protection from the requested edit alone.'] : [];
-    return { type:'genomic-snv',status:blockers.length?'BLOCKED':'REVIEW REQUIRED',blockers,warnings,input:{ ...input,ref,alt,position,referenceStart:start },gb:{genomicSequence:record.seq,exons:model.exons,cdsSegments:model.cdsSegments,transcriptId:model.transcriptId},reference:{ length:record.seq.length,metadata:meta,issues },context:{ before:record.seq.slice(Math.max(0,gp-20),gp),ref,alt,after:record.seq.slice(gp+1,gp+21),nearestExonBoundary:boundaries[0] || null },candidates,primers };
+    const blockers = !candidates.length ? ['No SpCas9 NGG guides passed the native sequence filters within 30 bp.'] : candidates.every(c=>c.protection.tier!=='strong') ? [policy==='none'?'No candidate has strong predicted re-cutting protection from the requested edit alone.':'No candidate has strong predicted re-cutting protection under the selected blocking policy.'] : [];
+    return { type:'genomic-snv',status:blockers.length?'BLOCKED':'REVIEW REQUIRED',blockers,warnings,input:{ ...input,blockingPolicy:policy,maxBlockingChanges:maxChanges,ref,alt,position,referenceStart:start },gb:{genomicSequence:record.seq,exons:model.exons,cdsSegments:model.cdsSegments,transcriptId:model.transcriptId},reference:{ length:record.seq.length,metadata:meta,issues },context:{ before:record.seq.slice(Math.max(0,gp-20),gp),ref,alt,after:record.seq.slice(gp+1,gp+21),nearestExonBoundary:boundaries[0] || null },candidates,primers };
   } catch (error) { return { err:error.message }; }
 }
 
@@ -81,5 +90,5 @@ export function buildGenomicSnpReport(r) {
     primerStrategy:'Genomic PCR; RNA validation must separately establish splice effects.',
     guideSequenceQc:safe.candidates.map(c=>({...c.qc,guideName:c.name})),
   };
-  return buildReportHtml({...safe.input,projectType:'genomic-snv',notes:'Exact genomic substitution. Guides are listed by cut distance. Residual CFD estimates activity against the repaired allele, not genome-wide specificity or editing probability.'},result,safe.input.fileName,null,safe.warnings.map(text=>({level:'warning',text})));
+  return buildReportHtml({...safe.input,projectType:'genomic-snv',notes:`${BLOCKING_POLICIES[r.input.blockingPolicy || 'none']}. Guides are listed by cut distance. Residual CFD estimates activity against the repaired allele, not genome-wide specificity or editing probability.`},result,safe.input.fileName,null,safe.warnings.map(text=>({level:'warning',text})));
 }

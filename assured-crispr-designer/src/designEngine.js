@@ -557,7 +557,7 @@ export function normalizeMaxBlockingChanges(value) {
  * Each change is synonymous on its own. Two in the same codon are not necessarily
  * synonymous together, and stacking made that reachable for the first time.
  */
-function keepsCodonsSynonymous(model, chosen, candidate) {
+export function keepsCodonsSynonymous(model, chosen, candidate) {
   const all = [...chosen, candidate].filter((entry) => entry && entry.mt === "silent");
   if (all.length < 2) return true;
   const byCodon = new Map();
@@ -581,7 +581,7 @@ function keepsCodonsSynonymous(model, chosen, candidate) {
   return true;
 }
 
-function findBlockingSet(model, guide, blockedPositions = new Set(), options = {}) {
+export function findBlockingSet(model, guide, blockedPositions = new Set(), options = {}) {
   const maxChanges = Number.isFinite(options.maxChanges) ? options.maxChanges : MAX_BLOCKING_CHANGES;
   const candidates = collectSilentCandidates(model, guide, blockedPositions, options);
   if (!candidates.length) return [];

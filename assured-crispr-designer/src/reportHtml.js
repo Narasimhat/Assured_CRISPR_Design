@@ -394,7 +394,7 @@ function buildPmStrandCardHtml(strand, releaseStatus = "ready") {
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_GUIDE_COLORS.pam};">PAM</span>
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_EDIT_COLORS.desired};">Desired edit</span>
-        ${strand.silentIndexes?.length ? `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#7F1D1D;background:${PM_EDIT_COLORS.silent};">Silent mutation</span>` : ""}
+        ${strand.silentIndexes?.length ? `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#7F1D1D;background:${PM_EDIT_COLORS.silent};">${strand.blockingLabel || "Silent mutation"}</span>` : ""}
       </div>
       ${buildPmAnnotatedSequenceHtml("WT", strand.wt, strand.diffIndexes, "wt", strand.regions, strand.guide, strand.desiredIndexes, strand.silentIndexes)}
       ${buildPmAnnotatedSequenceHtml("Donor", strand.donor, strand.diffIndexes, "donor", strand.regions, strand.guide, strand.desiredIndexes, strand.silentIndexes)}
@@ -411,7 +411,7 @@ function renderStrandCards(strands, renderCard) {
 
 function buildPmDonorHtml(donor, releaseStatus = "ready") {
   const comparison = donor.nucleotideValidation ? null : buildPmDonorComparison(donor);
-  const strands = buildPmStrandModels(donor).map(strand => donor.nucleotideValidation ? {...strand,note:strand.note.replace("Recommended to order.", "Candidate strand for review.")} : strand);
+  const strands = buildPmStrandModels(donor).map(strand => donor.nucleotideValidation ? {...strand,blockingLabel:"Additional blocking change",note:strand.note.replace("Recommended to order.", "Candidate strand for review.")} : strand);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const proteinValidation = donor.proteinValidation?.valid
     ? `Pass: final donor encodes ${donor.proteinValidation.observedAa} at residue ${donor.proteinValidation.targetAaNumber} with no unintended coding changes.`
@@ -420,9 +420,9 @@ function buildPmDonorHtml(donor, releaseStatus = "ready") {
   return `
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
-    <p style="font-size:12px;color:${(donor.nucleotideValidation?.valid || donor.proteinValidation?.valid) ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Final donor nucleotide assertion:" : "Final donor protein assertion:"}</strong> ${donor.nucleotideValidation ? "Pass: exactly the requested substitution; no additional changes. Splicing and protein outcomes are not validated." : proteinValidation}</p>
+    <p style="font-size:12px;color:${(donor.nucleotideValidation?.valid || donor.proteinValidation?.valid) ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Final donor nucleotide assertion:" : "Final donor protein assertion:"}</strong> ${donor.nucleotideValidation ? `Pass: requested substitution plus ${donor.nucleotideValidation.additionalChanges || 0} documented blocking changes. Splicing and protein outcomes are not validated.` : proteinValidation}</p>
     ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Protection against the matched guide:" : "Protection against all offered guides:"}</strong><br/>${crossGuideSummary}</p>` : ""}
-    ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
+    ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Additional blocking changes (noncoding is not silent):" : "Silent mutation:"}</strong><br/>${silentSummary}</p>` : ""}
     ${renderStrandCards(strands, (strand) => buildPmStrandCardHtml(strand, releaseStatus))}
     ${comparison ? `<details class="fold"><summary>Coding frame view (WT and donor codons and amino acids)</summary><div class="body">
       ${buildAlignedRowHtml("WT codons", { prefix: comparison.wt.prefix, tokens: comparison.wt.codons, suffix: comparison.wt.suffix }, comparison.diffCodonIndexes, "wt")}
@@ -608,7 +608,7 @@ export function buildDesignReadinessChecks(result) {
   if (!result) return [];
   if (result.type === "genomic-snv") return [
     {label:"Reference allele",status:"pass",detail:`${result.input.assembly} chr${result.input.chromosome}:${result.input.position} ${result.input.ref}→${result.input.alt}; reference base verified.`},
-    {label:"Exact nucleotide change",status:result.os.length ? "pass" : "warn",detail:"Each emitted donor contains exactly one requested substitution and no additional blocking changes."},
+    {label:"Exact nucleotide change",status:result.os.length ? "pass" : "warn",detail:"Each emitted donor contains the requested substitution and only its documented, policy-permitted blocking changes."},
     {label:"Re-cutting protection",status:"warn",detail:result.blockers.join(' ') || "Review matched guide/donor protection before ordering."},
     ...result.candidates.map(c=>({label:`${c.name} sequence QC`,status:c.qc.warnings.length ? "warn" : "pass",detail:c.qc.warnings.join(' ') || "No local guide-sequence warnings; specificity untested."})),
     ...result.primers.map(p=>({label:`Primer pair ${p.rank} QC`,status:[...(p.forward.qc?.warnings||[]),...(p.reverse.qc?.warnings||[]),...(p.quality?.warnings||[])].length ? "warn" : "pass",detail:[...(p.forward.qc?.warnings||[]),...(p.reverse.qc?.warnings||[]),...(p.quality?.warnings||[])].join(' ') || "No local primer QC warnings; specificity untested."})),
@@ -1202,7 +1202,7 @@ function buildInternalDonorHtml(donor, releaseStatus = "ready") {
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
           <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
           <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#92400E;background:${PM_GUIDE_COLORS.pam};">PAM</span>
-          ${strand.silentIndexes?.length ? `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#7F1D1D;background:${PM_EDIT_COLORS.silent};">Silent mutation</span>` : ""}
+          ${strand.silentIndexes?.length ? `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#7F1D1D;background:${PM_EDIT_COLORS.silent};">${strand.blockingLabel || "Silent mutation"}</span>` : ""}
           ${[...new Map((strand.annotations || []).map((item) => [`${item.badgeLabel || item.label}|${item.color}`, item])).values()].map((item) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${item.color};background:${item.color}14;border:1px solid ${item.color}33;">${item.badgeLabel || item.label}</span>`).join("")}
         </div>
         ${buildInternalSequenceHtml("WT context", strand.wt, strand.wtGuideSiteIndexes, strand.wtGuidePamIndexes, [], [], "wt")}
@@ -1293,6 +1293,17 @@ function buildReleaseVerdictHtml(result) {
       ${sections}
     </div>
   `;
+}
+
+function buildGenomicBlockingComparisonHtml(result) {
+  const at=p=>result.input.referenceStart+p;
+  const screen=s=>!s?'unassessed':`${s.risk}; ${s.junctionChanges.length} junction changes, ${s.nearby.length} proximity flags, ${s.motifChanges.length} GT/AG motif changes${s.motifChanges.length ? ' ('+s.motifChanges.map(m=>at(m.gp)+': '+m.before+' to '+m.after).join('; ')+')' : ''}. Splice-strength prediction: unassessed.`;
+  return `<h2>Blocking alternatives and splice screen</h2><p>Policy: ${result.input.blockingPolicy || 'none'}. Synonymous coding changes preserve amino acids relative to the requested-edit allele; noncoding changes are not silent.</p><p>Compare the intended effect (WT to requested edit) separately from added effects (requested edit to final donor). This is a local sequence screen, not a prediction of exon skipping, intron retention or cryptic-site use.</p>${result.candidates.map(c=>{
+    const comp=c.comparison;
+    if(!comp)return '';
+    const intended=comp.requestedSplice;
+    return `<h3>${c.name}</h3><p>${comp.recommendation}</p><p><strong>Requested edit vs WT:</strong> ${screen(intended)} ${intended.junctionChanges.map(j=>`${j.kind} ${at(j.start)}: ${j.before} to ${j.after}`).join('; ')}</p><table>${tableHtml([['Alternative','Added changes (1-based genomic)','Protection / residual CFD','Added splice-screen signals','Selected']],true)}${tableHtml(comp.variants.map(v=>[v.id,v.changes.map(m=>`${at(m.gp)} ${result.gb.genomicSequence[m.gp]}>${m.nb} (${m.mt==='silent'?'synonymous coding':'noncoding'})`).join('; ')||'None',`${v.protection.tier} / ${Number.isFinite(v.protection.cfd)?v.protection.cfd.toFixed(4):'unscored'}`,screen(v.splice),v.id===comp.selected.id?'Yes':'No']))}</table>`;
+  }).join('')}<p>Local screening uses annotated junction dinucleotides, a conservative 20-bp proximity flag and GT/AG motif changes. No local flags does not establish splice safety. Branch points, enhancers, silencers and alternative transcripts remain unassessed.</p>`;
 }
 
 export function buildReportHtml(meta, result, fileName, historicalContext, reviewItems, brunelloLibrary = null) {
@@ -1389,6 +1400,7 @@ details.fold>.body{padding:8px 12px 10px 12px}
   ${releaseVerdictBlock}
   ${coDeliveryBlock}
   ${snapshotBlock}
+  ${result.type === "genomic-snv" ? buildGenomicBlockingComparisonHtml(result) : ""}
   ${designSchemeBlock}
   <h2>1. Gene Information</h2>
   ${buildKeyValueTableHtml(geneInfoItems, 2)}
