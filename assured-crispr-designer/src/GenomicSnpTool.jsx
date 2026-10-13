@@ -1,3 +1,4 @@
+import { buildDesignSchemeSvg, buildDesignSchemeFilename } from './designScheme.js';
 import { useState } from 'react';
 import { designGenomicSnp, readGenomicReferenceMetadata, buildGenomicSnpReport } from './genomicSnp.js';
 import './genomicSnp.css';
@@ -56,16 +57,35 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
 }
 
 export function GenomicSnpReport({ result, onEdit, onOtherReports }) {
+  const [exportError,setExportError]=useState('');
   const html=buildGenomicSnpReport(result);
+  const scheme=buildDesignSchemeSvg(result);
+  async function downloadPng() {
+    setExportError('');
+    const url=URL.createObjectURL(new Blob([scheme],{type:'image/svg+xml'}));
+    try {
+      const image=new Image();
+      await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url;});
+      const canvas=document.createElement('canvas');canvas.width=image.width*2;canvas.height=image.height*2;
+      const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0,canvas.width,canvas.height);
+      const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+      if(!blob)throw Error('PNG export failed');
+      download(buildDesignSchemeFilename(result).replace(/\.svg$/,'.png'),blob,'image/png');
+    } catch {setExportError('Could not export PNG. Download SVG instead.');}
+    finally {URL.revokeObjectURL(url);}
+  }
   const fileStem=String(result.input.gene || 'locus').replace(/[^a-zA-Z0-9_-]/g,'_')+`_${result.input.position}_${result.input.ref}${result.input.alt}`;
   return <section aria-label="Genomic SNP final report">
     <h2>2. Final Report</h2>
     <div className="snp-actions" style={{marginBottom:16}}>
       <button onClick={()=>download(fileStem+'_report.html',html,'text/html')}>Download HTML report to browser Downloads</button>
       <button onClick={()=>download(fileStem+'_design.json',JSON.stringify(result,null,2),'application/json')}>Download genomic SNP JSON</button>
+      {scheme && <button onClick={()=>download(buildDesignSchemeFilename(result),scheme,'image/svg+xml')}>Download design scheme SVG</button>}
+      {scheme && <button onClick={downloadPng}>Download design scheme PNG</button>}
       <button onClick={onEdit}>Edit genomic SNP request</button>
       <button onClick={onOtherReports}>Show other project reports</button>
     </div>
-    <iframe title="ASSURED final design report" srcDoc={html} sandbox="" style={{width:'100%',height:'78vh',minHeight:650,border:'1px solid #d0d5dd',borderRadius:12,background:'white'}} />
+    {exportError && <p role="alert">{exportError}</p>}
+    <iframe title="ASSURED final design report" srcDoc={html} sandbox="allow-downloads" style={{width:'100%',height:'78vh',minHeight:650,border:'1px solid #d0d5dd',borderRadius:12,background:'white'}} />
   </section>;
 }

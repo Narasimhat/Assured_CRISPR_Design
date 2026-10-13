@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {buildDesignSchemeSvg,buildDesignSchemeCaption,supportsDesignScheme} from '../src/designScheme.js';
 import { designGenomicSnp, readGenomicReferenceMetadata, buildGenomicSnpReport } from '../src/genomicSnp.js';
 
 // Deterministic synthetic reference, no patient or project data and deliberately no CDS.
@@ -43,7 +44,7 @@ test('no nearby PAM is reported as blocked, never as a successful order',()=>{
 test('report preserves release state, nucleotide identity and escaped user labels',()=>{
  const r=designGenomicSnp(make(),{...input,gene:'<script>bad</script>'});const html=buildGenomicSnpReport(r);
  assert.ok(html.includes(r.status));assert.ok(html.includes('1591'));assert.ok(!html.includes('<script>bad'));
- for(const section of ['1. Gene Information','2. gRNA Sequences','3. Recommended Primers','4. ssODN Donor Templates','Design Readiness','Target region map','Review Checkpoints','Final donor nucleotide assertion:']) assert.ok(html.includes(section),section);
+ for(const section of ['1. Gene Information','2. gRNA Sequences','3. Recommended Primers','4. ssODN Donor Templates','Design Readiness','Design Scheme','Review Checkpoints','Final donor nucleotide assertion:']) assert.ok(html.includes(section),section);
  assert.ok(html.includes('WT and donor templates are listed together'));
  assert.ok(!html.includes('Final donor protein assertion:'));
  assert.ok(!html.includes('Coding frame view'));
@@ -58,4 +59,20 @@ test('a CDS reference blocker is not downgraded to a warning in nucleotide mode'
  const seq=raw.split('ORIGIN')[1].split('//')[0].replace(/[^a-z]/gi,'').toUpperCase();
  const r=designGenomicSnp(raw,{...input,gene:'WRONG_GENE',referenceStart:1,position:150,ref:seq[149],alt:seq[149]==='A'?'G':'A'});
  assert.ok(r.err);assert.match(r.err,/WRONG_GENE|gene/i);
+});
+
+test('genomic scheme uses actual alleles, coordinates, donor strands and protection',()=>{
+ const r=designGenomicSnp(make(),input);
+ assert.ok(supportsDesignScheme(r));
+ const svg=buildDesignSchemeSvg(r);
+ assert.ok(svg.startsWith('<svg'));assert.ok(svg.includes('1591'));
+ assert.ok(!/NaN|undefined/.test(svg));
+ assert.ok(svg.includes('no blocking changes'));
+ assert.ok(svg.includes('supplied - strand'));assert.ok(svg.includes('supplied + strand'));
+ assert.ok(svg.includes('36 nt'));assert.ok(svg.includes('91 nt'));
+ assert.ok(svg.includes(r.status));assert.ok(!svg.includes('prevent re-cutting'));
+ assert.ok(buildDesignSchemeCaption(r).includes('unvalidated'));
+ assert.ok(buildGenomicSnpReport(r).includes('Download SVG'));
+ const noGuides=designGenomicSnp(make('AT'.repeat(600)),{...input,ref:'A',alt:'G'});
+ assert.equal(buildDesignSchemeSvg(noGuides),'');
 });

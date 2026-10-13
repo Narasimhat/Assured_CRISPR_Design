@@ -580,7 +580,86 @@ const TYPE_LABEL = {
 };
 const TAG_TYPES = ["ct", "nt"];
 
+// Genomic substitutions use real genomic coordinates and nucleotide checks, never a protein-edit surrogate.
+function genomicScheme(result, options = {}) {
+  const {input, candidates, gb} = result;
+  const genome = gb.genomicSequence;
+  const edit = input.position - input.referenceStart;
+  const guides = candidates.filter(g => finite(g.cut));
+  const c = createCanvas(1100);
+  const left = 160, right = 790;
+  const palette = ['#009E73','#767f89','#CC79A7','#0072B2'];
+  const lo = Math.max(0,Math.min(edit-22,...guides.map(g=>g.ps))-3);
+  const hi = Math.min(genome.length,Math.max(edit+20,...guides.map(g=>g.ps+23))+3);
+  const X = p => left + (p-lo)/(hi-lo)*(right-left);
+  const gx = p => fmtBp(input.referenceStart+p);
+  const title = `${input.gene || 'Locus'} — ${input.assembly} chr${String(input.chromosome).replace(/^chr/i,'')}:${input.position} ${input.ref}>${input.alt}`;
+  c.text(20,22,title,{size:18,weight:'bold'});
+  c.text(20,49,`${result.status} — alternative guide/donor pairs; use separately`,{size:13,fill:COLORS.alarm});
+  c.text(20,80,'a  Target sequence, exon boundary, guides and PAMs',{size:16,weight:'bold'});
+  const boundary=result.context?.nearestExonBoundary;
+  if(boundary)c.text(160,101,`${boundary.label}, ${boundary.edge}: edit offset ${boundary.distance>0?'+':''}${boundary.distance} bp`,{size:11,fill:COLORS.muted});
+  const geneTrack = (scale, lower, upper, y) => {
+    c.line(scale(lower),y,scale(upper),y,{stroke:'#5b6770',sw:2});
+    (gb.exons || []).filter(e=>e.end>lower && e.start<upper).forEach(e=>{
+      const a=Math.max(lower,e.start), b=Math.min(upper,e.end);
+      c.rect(scale(a),y-10,scale(b)-scale(a),20,{fill:'#8fa3b8'});
+      if(scale(b)-scale(a)>70)c.text(scale(a)+4,y,e.label || `Exon ${e.exonNumber || ''}`,{size:11,fill:'#fff'});
+      for(const edge of [e.start,e.end])if(edge>lower && edge<upper)c.line(scale(edge),y-18,scale(edge),y+18,{stroke:'#5b6770',dash:'3 3'});
+    });
+  };
+  geneTrack(X,lo,hi,125);
+  c.text(810,120,'Exons shaded; introns shown as lines',{size:10,fill:COLORS.muted});
+  for(let p=Math.ceil((lo+input.referenceStart)/10)*10-input.referenceStart;p<hi;p+=10){c.text(X(p+.5),155,gx(p),{size:10,anchor:'middle',fill:COLORS.muted});c.line(X(p+.5),163,X(p+.5),170,{stroke:COLORS.muted});}
+  const cell=(right-left)/(hi-lo);
+  for(let p=lo;p<hi;p++)c.text(X(p+.5),190,genome[p],{size:Math.min(12,cell*.85),family:MONO,anchor:'middle'});
+  c.rect(X(edit),175,cell,29,{stroke:COLORS.alarm,sw:2});
+  c.text(X(edit+.5),222,input.alt,{size:13,weight:'bold',anchor:'middle',fill:COLORS.alarm});
+  let y=262;
+  guides.forEach((g,i)=>{
+    const color=palette[i%palette.length],site=guideSite(g);
+    c.text(20,y,g.name,{size:13,weight:'bold',fill:color});
+    c.rect(X(site.protStart),y-8,X(site.protEnd)-X(site.protStart),16,{fill:color});
+    c.rect(X(site.pamStart),y-8,X(site.pamEnd)-X(site.pamStart),16,{fill:COLORS.ink});
+    c.line(X(g.cut),y-16,X(g.cut),y+16,{sw:2});
+    const pamGenome=g.donor.genomicDonor.slice(site.pamStart-g.donor.donorStart,site.pamEnd-g.donor.donorStart);
+    const editedPam=g.str==='-' ? revcomp(pamGenome) : pamGenome;
+    c.text(810,y-6,`PAM ${g.pam} → ${editedPam}; ${g.str} strand`,{size:11});
+    c.text(810,y+10,`${g.protection.tier}; CFD ${finite(g.protection.cfd)?g.protection.cfd.toFixed(4):'unscored'}; cut ${g.d>0?'+':''}${g.d} bp`,{size:10,fill:COLORS.muted});
+    y+=44;
+  });
+  c.text(20,y+2,'Orange: requested edit     Black: PAM / cut tick     CFD: predicted residual activity against the edited allele',{size:11,fill:COLORS.muted});
+  y+=54;
+  c.text(20,y,'b  Matched ssODNs — forward genomic view',{size:16,weight:'bold'});
+  const dLo=Math.max(0,Math.min(edit-10,...guides.map(g=>g.donor.donorStart))-3);
+  const dHi=Math.min(genome.length,Math.max(edit+10,...guides.map(g=>g.donor.donorEnd))+3);
+  const D=p=>left+(p-dLo)/(dHi-dLo)*(right-left);
+  geneTrack(D,dLo,dHi,y+38);
+  y+=90;
+  guides.forEach((g,i)=>{
+    const d=g.donor,color=palette[i%palette.length];
+    c.text(20,y,g.name+' donor',{size:12,weight:'bold',fill:color});
+    c.rect(D(d.donorStart),y-10,D(d.donorEnd)-D(d.donorStart),20,{fill:color,op:.25,stroke:color,sw:2});
+    c.line(D(edit+.5),y-15,D(edit+.5),y+15,{stroke:COLORS.alarm,sw:3});
+    c.line(D(g.cut),y-18,D(g.cut),y+18,{sw:2});
+    const extras=[...d.genomicDonor].flatMap((base,j)=>base!==genome[d.donorStart+j] && d.donorStart+j!==edit ? [d.donorStart+j] : []);
+    extras.forEach(p=>c.line(D(p+.5),y-15,D(p+.5),y+15,{stroke:'#0072B2',sw:3}));
+    c.text((D(d.donorStart)+D(g.cut))/2,y-24,`${g.cut-d.donorStart} nt`,{size:11,anchor:'middle'});
+    c.text((D(g.cut)+D(d.donorEnd))/2,y-24,`${d.donorEnd-g.cut} nt`,{size:11,anchor:'middle'});
+    c.text(810,y-5,`${d.od.length} nt; supplied ${g.str==='+'?'-':'+'} strand`,{size:11});
+    c.text(810,y+12,extras.length?`${extras.length} additional changes (blue)`:'Requested edit only; no blocking changes',{size:10,fill:COLORS.muted});
+    y+=70;
+  });
+  c.line(left,y-20,right,y-20,{sw:1});
+  const step=niceStep(dHi-dLo,5);
+  for(let p=Math.ceil((dLo+input.referenceStart)/step)*step-input.referenceStart;p<dHi;p+=step){c.line(D(p),y-20,D(p),y-15);c.text(D(p),y,gx(p),{size:10,anchor:'middle'});}
+  c.text((left+right)/2,y+25,`${input.assembly} chr${String(input.chromosome).replace(/^chr/i,'')} — 1-based genomic coordinates, forward strand`,{size:12,anchor:'middle'});
+  c.text(20,y+53,'Arms are measured from the cut. Splicing outcomes and genome-wide specificity are not validated.',{size:12,fill:COLORS.muted});
+  return c.build(y+75,options.responsive,title);
+}
+
 export function supportsDesignScheme(result) {
+  if (result?.type === 'genomic-snv') return Boolean(!result.err && result.gb?.genomicSequence && result.input && result.candidates?.some(g=>finite(g.cut)));
   return Boolean(result && !result.err && TYPE_LABEL[result.type] && result.gb && String(result.gb.genomicSequence || "").length
     && Array.isArray(result.gs) && result.gs.some((guide) => finite(guide.cut)));
 }
@@ -594,6 +673,7 @@ function schemeTitle(result) {
 export function buildDesignSchemeSvg(result, options = {}) {
   if (!supportsDesignScheme(result)) return "";
   try {
+    if (result.type === 'genomic-snv') return genomicScheme(result,options);
     const ctx = { result, ...collectContext(result) };
     const canvas = createCanvas(WIDTH);
     const title = schemeTitle(result);
@@ -620,6 +700,7 @@ export function buildDesignSchemeSvg(result, options = {}) {
 
 export function buildDesignSchemeFilename(result) {
   const token = (value) => String(value || "").replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  if (result?.type === 'genomic-snv') return `${token(result.input.gene) || 'locus'}_${result.input.position}_${result.input.ref}-${result.input.alt}_design_scheme.svg`;
   return `${token(result?.gene) || "design"}_${token(result?.type) || "scheme"}_design_scheme.svg`;
 }
 
@@ -628,6 +709,7 @@ const list = (items) => (items.length <= 1 ? items.join("") : `${items.slice(0, 
 // Draft figure legend assembled from the design. Bracketed text is for the author to complete.
 export function buildDesignSchemeCaption(result) {
   if (!supportsDesignScheme(result)) return "";
+  if (result.type === 'genomic-snv') return `Genomic substitution at ${result.input.assembly} chr${result.input.chromosome}:${result.input.position} ${result.input.ref}>${result.input.alt}. Panel a shows the reference sequence, annotated exon boundaries, alternative guides, PAMs and cuts. PAMs and residual CFD refer to each matched edited allele. Panel b shows each donor in forward genomic orientation; supplied strand is labelled separately. Only changes present in the computed donors are drawn. Splicing outcomes and genome-wide specificity remain unvalidated. Status: ${result.status}.`;
   const guides = (result.gs || []).filter((guide) => finite(guide.cut));
   const guideText = guides.map((guide, index) => `gRNA${index + 1} (${guide.sp}, ${guide.pm} PAM, ${guide.str} strand, GC ${guide.gc}%)`);
   const primers = findPrimerSites(result, String(result.gb.genomicSequence).toUpperCase());
