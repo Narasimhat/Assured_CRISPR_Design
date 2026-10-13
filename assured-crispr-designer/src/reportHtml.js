@@ -388,7 +388,7 @@ function buildPmStrandCardHtml(strand, releaseStatus = "ready") {
         <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.fg};background:${badge.bg};">${badge.label}</span>
       </div>
-      <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${releaseStatus === "ready" ? strand.note : strand.note.replace("Recommended to order.", "Candidate strand for review.")}</p>
+      <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${strand.note}</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         ${strand.regions.map((region) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${region.color};">${region.label} (${region.end - region.start} nt)</span>`).join("")}
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
@@ -411,7 +411,7 @@ function renderStrandCards(strands, renderCard) {
 
 function buildPmDonorHtml(donor, releaseStatus = "ready") {
   const comparison = donor.nucleotideValidation ? null : buildPmDonorComparison(donor);
-  const strands = buildPmStrandModels(donor);
+  const strands = buildPmStrandModels(donor).map(strand => donor.nucleotideValidation ? {...strand,note:strand.note.replace("Recommended to order.", "Candidate strand for review.")} : strand);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const proteinValidation = donor.proteinValidation?.valid
     ? `Pass: final donor encodes ${donor.proteinValidation.observedAa} at residue ${donor.proteinValidation.targetAaNumber} with no unintended coding changes.`
