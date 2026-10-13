@@ -104,12 +104,12 @@ export function GenomicSnpReport({ result, onEdit, onOtherReports }) {
       <ul>{result.blockers.map((text,i)=><li key={i}>{text}</li>)}</ul>
       <details><summary>All review limitations</summary><ul>{result.warnings.map((text,i)=><li key={i}>{text}</li>)}</ul></details>
       <p>Select guide/donor pairs. Each guide is exported with its matched ssODN; these are alternatives, not a pool. The primary PCR primer pair is included.</p>
-      {result.candidates.map(c=><label key={c.name} style={{display:'block',marginBottom:6}}><input type="checkbox" checked={selectedNames.includes(c.name)} onChange={e=>{setSelection({result,names:e.target.checked?[...selectedNames,c.name]:selectedNames.filter(n=>n!==c.name)});setReview({result,acknowledged:false,note});}}/> {c.name} + matched ssODN — {c.protection.tier} protection</label>)}
+      {result.candidates.map(c=><label key={c.name} style={{display:'block',marginBottom:6}}><input type="checkbox" checked={selectedNames.includes(c.name)} onChange={e=>{setSelection({result,names:e.target.checked?[...selectedNames,c.name]:selectedNames.filter(n=>n!==c.name)});setReview({result,acknowledged:false,note});}}/> {c.name} + matched ssODN  -  {c.protection.tier} protection</label>)}
       <label style={{display:'block',margin:'12px 0'}}>Review note (optional)<input style={{display:'block',width:'100%',color:'#111827',background:'#fff'}} value={note} onChange={e=>setReview({result,acknowledged:false,note:e.target.value})}/></label>
       <label style={{display:'block',margin:'12px 0'}}><input type="checkbox" checked={acknowledged} onChange={e=>setReview({result,acknowledged:e.target.checked,note})}/> I reviewed the selected pairs and limitations and choose to proceed despite the current design status.</label>
       <div className="snp-actions">
         <button disabled={!selectedNames.length} onClick={()=>exportSequences(false)}>Download draft sequences CSV</button>
-        <button disabled={!selectedNames.length || !acknowledged} onClick={()=>exportSequences(true)}>Proceed after review — download sequences CSV</button>
+        <button disabled={!selectedNames.length || !acknowledged} onClick={()=>exportSequences(true)}>Proceed after review  -  download sequences CSV</button>
       </div>
     </section>
     {exportError && <p role="alert">{exportError}</p>}
