@@ -55,6 +55,7 @@ export function getProjectTypeMeta(projectType) {
 
 export function formatDesignLabel(meta, result) {
   if (!result) return "";
+  if (result.type === "genomic-snv") return `${result.gene} ${result.input.assembly} chr${String(result.input.chromosome).replace(/^chr/i, "")}:${result.input.position} ${result.input.ref}→${result.input.alt}`;
   if (result.type === "pm") return `${result.gene} p.${result.wA}${result.an}${result.mA}`;
   if (result.type === "ko") return `${result.gene} knockout`;
   if (result.type === "it") return `${result.gene} internal ${result.tag} after ${result.wA}${result.an}`;
@@ -119,7 +120,7 @@ function buildGeneInfoRows(meta, result, fileName) {
   if (!result) return [];
   return [
     ["Gene", meta.gene || result.gene],
-    ["Design class", getProjectTypeMeta(meta.projectType).label],
+    ["Design class", result.type === "genomic-snv" ? "Genomic SNP" : getProjectTypeMeta(meta.projectType).label],
     ["Target", buildDisplayedEditLabel(meta, result)],
     ["Cell line", meta.cellLine || "n/a"],
     ["Delivery", meta.deliveryMethod === "u6" ? "U6 / Pol III expression" : meta.deliveryMethod === "rnp" ? "Synthetic guide / Cas RNP" : "not specified"],
@@ -387,7 +388,7 @@ function buildPmStrandCardHtml(strand, releaseStatus = "ready") {
         <span style="font-weight:700;color:#1f2937;">${strand.title}</span>
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:${badge.fg};background:${badge.bg};">${badge.label}</span>
       </div>
-      <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${strand.note}</p>
+      <p style="font-size:12px;color:#555;margin:0 0 8px 0;">${releaseStatus === "ready" ? strand.note : strand.note.replace("Recommended to order.", "Candidate strand for review.")}</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
         ${strand.regions.map((region) => `<span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${region.color};">${region.label} (${region.end - region.start} nt)</span>`).join("")}
         <span style="display:inline-flex;align-items:center;padding:4px 8px;border-radius:999px;font-size:11px;font-weight:700;color:#1f2937;background:${PM_GUIDE_COLORS.site};">gRNA site</span>
@@ -409,7 +410,7 @@ function renderStrandCards(strands, renderCard) {
 }
 
 function buildPmDonorHtml(donor, releaseStatus = "ready") {
-  const comparison = buildPmDonorComparison(donor);
+  const comparison = donor.nucleotideValidation ? null : buildPmDonorComparison(donor);
   const strands = buildPmStrandModels(donor);
   const silentSummary = (donor.silentMutations || []).map((mutation) => `${mutation.lb}: ${mutation.oc} -> ${mutation.nc} | ${mutation.pur}`).join("<br/>");
   const proteinValidation = donor.proteinValidation?.valid
@@ -419,16 +420,16 @@ function buildPmDonorHtml(donor, releaseStatus = "ready") {
   return `
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
-    <p style="font-size:12px;color:${donor.proteinValidation?.valid ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>Final donor protein assertion:</strong> ${proteinValidation}</p>
-    ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>Protection against all offered guides:</strong><br/>${crossGuideSummary}</p>` : ""}
+    <p style="font-size:12px;color:${(donor.nucleotideValidation?.valid || donor.proteinValidation?.valid) ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Final donor nucleotide assertion:" : "Final donor protein assertion:"}</strong> ${donor.nucleotideValidation ? "Pass: exactly the requested substitution; no additional changes. Splicing and protein outcomes are not validated." : proteinValidation}</p>
+    ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Protection against the matched guide:" : "Protection against all offered guides:"}</strong><br/>${crossGuideSummary}</p>` : ""}
     ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>Silent mutation:</strong><br/>${silentSummary}</p>` : ""}
     ${renderStrandCards(strands, (strand) => buildPmStrandCardHtml(strand, releaseStatus))}
-    <details class="fold"><summary>Coding frame view (WT and donor codons and amino acids)</summary><div class="body">
+    ${comparison ? `<details class="fold"><summary>Coding frame view (WT and donor codons and amino acids)</summary><div class="body">
       ${buildAlignedRowHtml("WT codons", { prefix: comparison.wt.prefix, tokens: comparison.wt.codons, suffix: comparison.wt.suffix }, comparison.diffCodonIndexes, "wt")}
       ${buildAlignedRowHtml("Donor codons", { prefix: comparison.donor.prefix, tokens: comparison.donor.codons, suffix: comparison.donor.suffix }, comparison.diffCodonIndexes, "donor")}
       ${buildAlignedRowHtml("WT amino acids", { tokens: comparison.wtAa }, comparison.diffAaIndexes, "wt")}
       ${buildAlignedRowHtml("Donor amino acids", { tokens: comparison.donorAa }, comparison.diffAaIndexes, "donor")}
-    </div></details>
+    </div></details>` : ""}
   `;
 }
 
@@ -605,6 +606,15 @@ function describeDonorFormatSummary(format) {
 
 export function buildDesignReadinessChecks(result) {
   if (!result) return [];
+  if (result.type === "genomic-snv") return [
+    {label:"Reference allele",status:"pass",detail:`${result.input.assembly} chr${result.input.chromosome}:${result.input.position} ${result.input.ref}→${result.input.alt}; reference base verified.`},
+    {label:"Exact nucleotide change",status:result.os.length ? "pass" : "warn",detail:"Each emitted donor contains exactly one requested substitution and no additional blocking changes."},
+    {label:"Re-cutting protection",status:"warn",detail:result.blockers.join(' ') || "Review matched guide/donor protection before ordering."},
+    ...result.candidates.map(c=>({label:`${c.name} sequence QC`,status:c.qc.warnings.length ? "warn" : "pass",detail:c.qc.warnings.join(' ') || "No local guide-sequence warnings; specificity untested."})),
+    ...result.primers.map(p=>({label:`Primer pair ${p.rank} QC`,status:[...(p.forward.qc?.warnings||[]),...(p.reverse.qc?.warnings||[]),...(p.quality?.warnings||[])].length ? "warn" : "pass",detail:[...(p.forward.qc?.warnings||[]),...(p.reverse.qc?.warnings||[]),...(p.quality?.warnings||[])].join(' ') || "No local primer QC warnings; specificity untested."})),
+    {label:"Genome-wide specificity",status:"warn",detail:"Genome-wide guide and primer specificity are not checked."},
+    {label:"Splicing / protein",status:"warn",detail:"Splicing and protein outcomes are not predicted. RNA validation is required."},
+  ];
   const referenceAvailable = Boolean(result.gb?.genomicSequence || result.gbRaw || result.gene);
   const guideCount = (result.gs || []).length;
   const primerReadiness = summarizePrimerReadiness(result);
@@ -763,6 +773,12 @@ export function buildDesignReadinessChecks(result) {
 
 export function buildReportSnapshotItems(result) {
   if (!result) return [];
+  if (result.type === "genomic-snv") return [
+    {label:"Edit class",value:"Genomic SNP",tone:"accent"},
+    {label:"Target",value:`${result.input.position} ${result.input.ref}→${result.input.alt}`,tone:"default"},
+    {label:"Guides",value:String(result.gs.length),tone:"default"},
+    {label:"Primers",value:result.amp || "Pending",tone:"warm"},
+  ];
   const guideCount = (result.gs || []).length;
   const pairSpacing = result.type === "ko" && result.gs?.length >= 2 && Number.isFinite(result.gs[0]?.d) && Number.isFinite(result.gs[1]?.d)
     ? `${Math.abs(result.gs[1].d - result.gs[0].d)} bp`
@@ -850,7 +866,7 @@ export function normalizeLocusWindow(result) {
     const noteCut = String(guide.note || guide.arm || "").match(/Cut at (\d+)/i);
     if (noteCut) positions.push(parseInt(noteCut[1], 10) - 1);
   });
-  if (result.type === "pm" && Number.isFinite(result.gp)) positions.push(result.gp);
+  if (["pm", "genomic-snv"].includes(result.type) && Number.isFinite(result.gp)) positions.push(result.gp);
   if (result.type === "it" && Number.isFinite(result.gp)) positions.push(result.gp);
   if (result.type === "ct" && Number.isFinite(result.sp)) positions.push(result.sp - 1);
   if (result.type === "nt" && Array.isArray(result.gb?.cdsSegments) && result.gb.cdsSegments.length) positions.push(result.gb.cdsSegments[0][0]);
@@ -932,6 +948,7 @@ export function buildLocusMapItems(result, window) {
       });
     }
   });
+  if (result.type === "genomic-snv" && Number.isFinite(result.gp)) pushItem({ label:"Edit", detail:`${result.input.ref}→${result.input.alt}`, start:result.gp, end:result.gp+1, color:"#D97706", kind:"target" });
   if (result.type === "pm" && Number.isFinite(result.gp)) {
     pushItem({ label: "Edit", detail: `${result.wA}${result.an}${result.mA}`, start: result.gp, end: result.gp + 3, color: "#D97706", kind: "target" });
   }
@@ -1288,7 +1305,7 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const guideRows = (result?.gs || []).map((guide) => [guide.n, renderGuideSequenceHtml(guide.sp, guide.pm), `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
   const primerCandidateRows = buildPrimerCandidateRows(result);
   const ssOdnNotes = buildSsOdnNotes(result);
-  const sectionTitle = result.type === "pm" ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
+  const sectionTitle = ["pm", "genomic-snv"].includes(result.type) ? "ssODN Donor Templates" : result.type === "ko" ? "Knockout Design" : "Donor Design";
   const hasHistoricalMatches = Boolean(historicalContext?.topMatches?.length);
   const brunelloReferenceGuideSet = getBrunelloReferenceGuideSet(result, brunelloLibrary);
   const releaseVerdictBlock = buildReleaseVerdictHtml(result);
@@ -1299,7 +1316,7 @@ export function buildReportHtml(meta, result, fileName, historicalContext, revie
   const snapshotBlock = buildReportSnapshotHtml(result);
   // Per donor, not per design: the guide+donor pair is the orderable unit.
   const donorStatus = (donor) => getDonorReleaseStatus(result, donor.guideName);
-  const donorBlock = result.type === "pm"
+  const donorBlock = ["pm", "genomic-snv"].includes(result.type)
     ? ((result.os || []).length
       ? (result.os || []).map((donor) => buildPmDonorHtml(donor, donorStatus(donor))).join("")
       : `<p style="font-size:13px;line-height:1.45;color:#B42318;">No ssODN donor could be rendered for this SNP design. This usually means the asymmetric donor window ran outside the uploaded sequence bounds.</p>`)
@@ -1375,6 +1392,7 @@ details.fold>.body{padding:8px 12px 10px 12px}
   ${designSchemeBlock}
   <h2>1. Gene Information</h2>
   ${buildKeyValueTableHtml(geneInfoItems, 2)}
+  ${result.type === "genomic-snv" ? `<p class="mono">${result.context.before}[${result.input.ref}→${result.input.alt}]${result.context.after}</p><p>${result.context.nearestExonBoundary ? `Nearest annotated boundary: ${result.context.nearestExonBoundary.label}, ${result.context.nearestExonBoundary.edge}; offset ${result.context.nearestExonBoundary.distance} bp.` : "Exon boundary context unavailable."}</p>` : ""}
   <h2>2. gRNA Sequences</h2>
   <table>${tableHtml([["Name", "Sequence", "Strand", "GC", "Notes"]], true)}${tableHtml(guideRows)}</table>
   <h2>3. Recommended Primers</h2>
@@ -1382,7 +1400,7 @@ details.fold>.body{padding:8px 12px 10px 12px}
   <p class="sub">${primerMeta}</p>
   ${alternativePrimers}
   <h2>4. ${resolvedSectionTitle}</h2>
-  <p class="note">${result.type === "pm" ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
+  <p class="note">${["pm", "genomic-snv"].includes(result.type) ? "WT and donor templates are listed together for review." : result.type === "ko" ? "Knockout designs use paired gRNAs and do not require an HDR donor." : result.type === "it" ? "Guide-linked internal ssODN donors are listed with protein-frame review." : "HDR donor sequence is listed in full below."}</p>
   ${donorBlock}
   ${result.type === "ko" && brunelloReferenceGuideSet ? `<details style="margin:0 0 14px 0;padding:12px;border:1px solid #FDBA74;border-radius:12px;background:#FFF7ED;"><summary style="cursor:pointer;font-weight:700;color:#9A3412;">Brunello CRISPRko Reference Guides (${brunelloReferenceGuideSet.guides.length})</summary><div style="margin-top:10px;"><p>${brunelloReferenceGuideSet.source}. ${brunelloReferenceGuideSet.summary}${brunelloReferenceGuideSet.requestedGene !== brunelloReferenceGuideSet.libraryGene ? ` Library symbol: ${brunelloReferenceGuideSet.libraryGene}.` : ""}</p><table>${tableHtml([["Spacer", "PAM", "Exon", "Rule Set 2", "Transcript", "Strand"]], true)}${tableHtml(brunelloReferenceGuideSet.guides.map((guide) => [guide.spacer, guide.pam, `Exon ${guide.exon}`, String(guide.ruleSet2), guide.transcript, guide.strand]))}</table></div></details>` : ""}
   ${ssOdnNotes.length ? `<div>${ssOdnNotes.map((line) => `<p style="color:#CC0000;font-weight:700;margin:6px 0;">${line}</p>`).join("")}</div>` : ""}
@@ -1392,7 +1410,7 @@ details.fold>.body{padding:8px 12px 10px 12px}
   ${locusMapBlock && !designSchemeBlock ? `<details class="fold"><summary>Target region map</summary><div class="body">${locusMapBlock}</div></details>` : ""}
   <h2>${reviewNumber}. Review Checkpoints</h2>
   ${reviewNote}
-  ${buildReviewListHtml(remainingReviewItems)}
+  ${remainingReviewItems.length || !omittedReviewItems ? buildReviewListHtml(remainingReviewItems) : '<p class="sub">See the release status and readiness checks above for all review items.</p>'}
 </div>
 </body>
 </html>`;

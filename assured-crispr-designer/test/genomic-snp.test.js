@@ -43,6 +43,14 @@ test('no nearby PAM is reported as blocked, never as a successful order',()=>{
 test('report preserves release state, nucleotide identity and escaped user labels',()=>{
  const r=designGenomicSnp(make(),{...input,gene:'<script>bad</script>'});const html=buildGenomicSnpReport(r);
  assert.ok(html.includes(r.status));assert.ok(html.includes('1591'));assert.ok(!html.includes('<script>bad'));
+ for(const section of ['1. Gene Information','2. gRNA Sequences','3. Recommended Primers','4. ssODN Donor Templates','Design Readiness','Target region map','Review Checkpoints','Final donor nucleotide assertion:']) assert.ok(html.includes(section),section);
+ assert.ok(html.includes('WT and donor templates are listed together'));
+ assert.ok(!html.includes('Final donor protein assertion:'));
+ assert.ok(!html.includes('Coding frame view'));
+ assert.ok(!html.includes('undefined'));
+ assert.ok(!html.includes('Recommended to order.'));
+ assert.ok(!html.includes('No automated warnings were triggered'));
+ assert.ok(!html.includes('Protection against all offered guides:'));
  assert.ok(html.includes('No additional blocking substitutions'));assert.ok(html.includes('Splicing and protein outcomes are not predicted'));
 });
 test('a CDS reference blocker is not downgraded to a warning in nucleotide mode',()=>{

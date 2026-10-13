@@ -42,7 +42,9 @@ export const RELEASE_VERDICT_STYLES = Object.freeze({
  * badge missed by treating "not blocked" as a green light.
  */
 export function getReleaseVerdict(result) {
-  const readiness = summarizeProcurementReadiness(result);
+  const readiness = result?.type === "genomic-snv"
+    ? { status: result.blockers?.length ? "blocked" : "review", blockers: result.blockers, warnings: result.warnings }
+    : summarizeProcurementReadiness(result);
   const status = RELEASE_VERDICT_STYLES[readiness.status] ? readiness.status : "review";
   const tone = RELEASE_VERDICT_STYLES[status];
   return {

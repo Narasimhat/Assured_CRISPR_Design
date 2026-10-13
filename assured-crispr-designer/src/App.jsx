@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import GenomicSnpTool from "./GenomicSnpTool.jsx";
+import GenomicSnpTool, { GenomicSnpReport } from "./GenomicSnpTool.jsx";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessChecks,
@@ -2545,6 +2545,8 @@ export default function App() {
   const [workspaceFolders, setWorkspaceFolders] = useState([]);
   const [selectedWorkspaceFolders, setSelectedWorkspaceFolders] = useState([]);
   const [showWorkspaceTools, setShowWorkspaceTools] = useState(false);
+  const [genomicReport, setGenomicReport] = useState(null);
+  const [showGenomicReport, setShowGenomicReport] = useState(false);
   const [activeTab, setActiveTab] = useState("workspace");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [primerTool, setPrimerTool] = useState(() => createPrimerToolState());
@@ -3296,6 +3298,7 @@ export default function App() {
     }));
     setBatchResults(nextResults);
     if (nextResults.some((entry) => entry.status === "success")) {
+      setShowGenomicReport(false);
       setActiveTab("report");
     } else {
       setBatchError("No batch designs were generated successfully.");
@@ -3635,7 +3638,7 @@ export default function App() {
           </TopLevelTabButton>
         </div>
 
-        <div hidden={activeTab !== "genomic-snp"}><GenomicSnpTool /></div>
+        <div hidden={activeTab !== "genomic-snp"}><GenomicSnpTool onInvalidate={() => {setGenomicReport(null);setShowGenomicReport(false);}} onGenerate={result => {setGenomicReport(result);setShowGenomicReport(true);setActiveTab("report");}} /></div>
 
         {activeTab === "workspace" && (
         <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
@@ -4060,7 +4063,10 @@ export default function App() {
         </div>
         )}
 
-        {activeTab === "report" && (
+        {activeTab === "report" && showGenomicReport && genomicReport && (
+          <GenomicSnpReport result={genomicReport} onEdit={() => setActiveTab("genomic-snp")} onOtherReports={() => setShowGenomicReport(false)} />
+        )}
+        {activeTab === "report" && !showGenomicReport && (
         <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(240,228,204,0.12), rgba(16,34,52,0.90))", border: `1px solid ${COLORS.borderSoft}` }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>

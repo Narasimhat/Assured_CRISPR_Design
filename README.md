@@ -159,3 +159,5 @@ For broader sharing and commercialization, prefer a hosted deployment over local
 - GitHub Pages for quick internal/demo sharing
 - Vercel or Netlify for a cleaner production-facing URL
 - add auth and saved projects later if you move toward SaaS
+
+Genomic SNP results open in the Report tab and use the shared ASSURED HTML report renderer: gene information, guides, primers, annotated WT/donor strands, readiness, target map, and review checkpoints. Nucleotide validation replaces protein assertions for this mode; RNA outcomes remain unvalidated.

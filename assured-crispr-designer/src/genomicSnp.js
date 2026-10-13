@@ -1,3 +1,4 @@
+import { buildReportHtml } from './reportHtml.js';
 import { parseGB, mkODN, assessGuideAgainstPointMutationDonor, assessGuideSequence, designCenteredPrimerPairs, buildPrimerRecord, summarizePrimerPairQuality } from './designEngine.js';
 import { normalizeGenBankToTranscriptModel, findSpCas9Guides } from './transcriptModel.js';
 
@@ -59,13 +60,26 @@ export function designGenomicSnp(raw, input) {
       ...(!input.cellLine ? ['Cell line and parental genotype are unspecified.'] : ['Parental sequence must be confirmed; specifying a cell line is not WGS validation.']),
     ];
     const blockers = !candidates.length ? ['No SpCas9 NGG guides passed the native sequence filters within 30 bp.'] : candidates.every(c=>c.protection.tier!=='strong') ? ['No candidate has strong predicted re-cutting protection from the requested edit alone.'] : [];
-    return { type:'genomic-snv',status:blockers.length?'BLOCKED':'REVIEW REQUIRED',blockers,warnings,input:{ ...input,ref,alt,position,referenceStart:start },reference:{ length:record.seq.length,metadata:meta,issues },context:{ before:record.seq.slice(Math.max(0,gp-20),gp),ref,alt,after:record.seq.slice(gp+1,gp+21),nearestExonBoundary:boundaries[0] || null },candidates,primers };
+    return { type:'genomic-snv',status:blockers.length?'BLOCKED':'REVIEW REQUIRED',blockers,warnings,input:{ ...input,ref,alt,position,referenceStart:start },gb:{genomicSequence:record.seq,exons:model.exons,cdsSegments:model.cdsSegments,transcriptId:model.transcriptId},reference:{ length:record.seq.length,metadata:meta,issues },context:{ before:record.seq.slice(Math.max(0,gp-20),gp),ref,alt,after:record.seq.slice(gp+1,gp+21),nearestExonBoundary:boundaries[0] || null },candidates,primers };
   } catch (error) { return { err:error.message }; }
 }
 
 const escape = (s) => String(s ?? '').replace(/[&<>"']/g,c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 export function buildGenomicSnpReport(r) {
   if (!r || r.err) throw Error('A validated nucleotide design is required for a report.');
-  const row=(cells)=>`<tr>${cells.map(v=>`<td>${escape(v)}</td>`).join('')}</tr>`;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>Genomic SNP design</title><style>body{font:16px system-ui;margin:40px;color:#152b40}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border:1px solid #cbd5e1;padding:10px;text-align:left}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f1f5f9;padding:16px}p,li{line-height:1.6}.status{padding:20px;background:#fff0d6}</style></head><body><h1>${escape(r.input.gene)} genomic SNP</h1><p>${escape(r.input.assembly)} chr${escape(chromosome(r.input.chromosome))}:${r.input.position} ${escape(r.input.ref)}→${escape(r.input.alt)}</p><p>Reference: ${escape(r.input.fileName || 'GenBank')} · Cell line: ${escape(r.input.cellLine || 'unspecified')}</p><div class="status"><b>${escape(r.status)}</b><ul>${[...r.blockers,...r.warnings].map(w=>`<li>${escape(w)}</li>`).join('')}</ul></div><pre>${escape(r.context.before)}[${escape(r.input.ref)}&gt;${escape(r.input.alt)}]${escape(r.context.after)}</pre><h2>Guide candidates</h2><p>Listed by cut distance, not genome-wide specificity. CFD is predicted residual activity against the edited allele, not an editing probability.</p><table><tr><th>Guide</th><th>Spacer 5′→3′</th><th>PAM</th><th>Strand</th><th>GC %</th><th>Cut offset (bp)</th><th>Protection</th><th>Residual CFD</th></tr>${r.candidates.map(c=>row([c.name,c.sp,c.pam,c.str,c.gc,c.d,c.protection.tier,c.protection.cfd])).join('')}</table><h2>Matched draft donors</h2>${r.candidates.map(c=>`<h3>${escape(c.name)}</h3><p>Target + PAM: chr${escape(chromosome(r.input.chromosome))}:${c.interval.start}–${c.interval.end}. 127 nt, 5′→3′; exactly one verified nucleotide substitution and no additional blocking changes.</p><pre>${escape(c.donor.od)}</pre><p>${escape(c.protection.reason)}</p>`).join('')}<h2>Genomic validation primers</h2><p>WT and edited amplicons have equal length. Primer QC is not genome-wide specificity. RNA validation must separately establish splice effects.</p><table><tr><th>Rank</th><th>Forward 5′→3′</th><th>Reverse 5′→3′</th><th>Amplicon bp</th><th>QC warnings</th></tr>${r.primers.map(p=>row([p.rank,p.forward.s,p.reverse.s,p.ampliconLength,[...(p.forward.qc?.warnings||[]),...(p.reverse.qc?.warnings||[]),...(p.quality?.warnings||[])].join('; ')])).join('')}</table></body></html>`;
+  // Adapt nucleotide results to the shared report model; never pretend this is a protein edit.
+  const clean = value => typeof value === 'string' ? escape(value) : Array.isArray(value) ? value.map(clean) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([k,v])=>[k,clean(v)])) : value;
+  const safe = clean(r);
+  const result = {
+    ...safe, gene:safe.input.gene || 'Locus', gp:r.input.position-r.input.referenceStart,
+    deliveryMethod:r.input.deliveryMethod,
+    gs:safe.candidates.map(c=>({...c,n:c.name,pm:c.pam,note:`chr${safe.input.chromosome}:${c.interval.start}–${c.interval.end}; cut offset ${c.d} bp; ${c.protection.tier} protection; residual CFD ${c.protection.cfd?.toFixed(4) ?? 'unscored'}`})),
+    os:safe.candidates.map(c=>({...c.donor,n:`ssODN matched to ${c.name}`,guideName:c.name,guideStrand:c.str,nucleotideValidation:c.nucleotideValidation,guideProtection:[{guideName:c.name,...c.protection}]})),
+    ps:safe.primers.length ? [safe.primers[0].forward,safe.primers[0].reverse] : [],
+    primerCandidates:safe.primers,
+    amp:safe.primers.length ? `${safe.primers[0].ampliconLength} bp (WT and edited)` : '',
+    primerStrategy:'Genomic PCR; RNA validation must separately establish splice effects.',
+    guideSequenceQc:safe.candidates.map(c=>({...c.qc,guideName:c.name})),
+  };
+  return buildReportHtml({...safe.input,projectType:'genomic-snv',notes:'Exact genomic substitution. Guides are listed by cut distance. Residual CFD estimates activity against the repaired allele, not genome-wide specificity or editing probability.'},result,safe.input.fileName,null,safe.warnings.map(text=>({level:'warning',text})));
 }
