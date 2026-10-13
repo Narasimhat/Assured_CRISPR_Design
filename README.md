@@ -68,6 +68,23 @@ error, not a risk - and it is unavailable under co-delivery.
 - The design engine returns a terse internal result shape with no schema. Reports, exports and the CLI consume it by convention, so a change to that shape is not caught by validation.
 - The 26 archived 2026_GE designs have not been re-derived against the current engine. The audit's claims *about this application* are executable; its per-project findings are not.
 
+## Genomic SNP mode
+
+Use the **Genomic SNP** tab for exact single-base edits, including intronic and
+splice-site substitutions. Upload a forward-oriented genomic GenBank reference,
+then enter assembly, chromosome, reference start, edit position (all coordinates
+1-based), and forward-strand reference/alternate bases. Ensembl `Location:` metadata
+fills the reference mapping automatically; conflicting coordinates and reference-base
+mismatches are rejected. A CDS is optional. Reverse-oriented input records are rejected.
+
+This mode reuses the guide, ssODN, primer and CFD functions, but validates the exact
+nucleotide substitution rather than requiring an amino-acid change. It introduces no
+additional blocking mutations. Results and downloadable HTML/JSON are always **BLOCKED**
+or **REVIEW REQUIRED**, never ordering approval. Guides lacking strong repaired-allele
+protection, splice effects, parental genotype and genome-wide specificity need review.
+These results have their own downloads; they are not included in the protein-workspace
+batch ordering or Assured QC exports.
+
 ## Local development
 
 ```bash

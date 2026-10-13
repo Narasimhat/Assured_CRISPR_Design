@@ -261,7 +261,7 @@ function assessOrientedGuideSite(guide, rawSite) {
   return { tier, protected: true, donorPam, mismatches, cfd, reason: `${parts.join(" plus ")} with PAM ${donorPam}${qualifier}.` };
 }
 
-function assessGuideAgainstPointMutationDonor(guide, donor) {
+export function assessGuideAgainstPointMutationDonor(guide, donor) {
   const start = guide.ps;
   const end = guide.ps + 23;
   if (!donor?.genomicDonor || start < donor.donorStart || end > donor.donorEnd) {
@@ -705,7 +705,7 @@ export function validatePointMutationPayload(model, donorStart, payload, targetA
   };
 }
 
-function mkODN(model, guide, mutationPositions, mutationBases, silentMutations = [], validationTarget = null) {
+export function mkODN(model, guide, mutationPositions, mutationBases, silentMutations = [], validationTarget = null) {
   const seq = getGenomicSequence(model);
   let donorStart;
   let donorEnd;

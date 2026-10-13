@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import GenomicSnpTool from "./GenomicSnpTool.jsx";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessChecks,
@@ -3626,10 +3627,15 @@ export default function App() {
           <TopLevelTabButton active={activeTab === "primers"} onClick={() => setActiveTab("primers")} tone="accent">
             Primer Tool
           </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "genomic-snp"} onClick={() => setActiveTab("genomic-snp")} tone="accent">
+            Genomic SNP
+          </TopLevelTabButton>
           <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
             Exports
           </TopLevelTabButton>
         </div>
+
+        <div hidden={activeTab !== "genomic-snp"}><GenomicSnpTool /></div>
 
         {activeTab === "workspace" && (
         <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
