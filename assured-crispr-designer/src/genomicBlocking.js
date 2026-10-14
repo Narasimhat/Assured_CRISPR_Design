@@ -4,7 +4,17 @@ export const BLOCKING_POLICIES = Object.freeze({
   none: 'Requested edit only',
   synonymous: 'Allow synonymous coding changes',
   noncoding: 'Allow synonymous and additional noncoding changes',
+  pair: 'Two guides, co-transfected: shared blocking changes on both ssODNs',
+  independent: 'Two guides, delivered separately: each ssODN blocks its own guide',
 });
+
+/** The two-guide policies (see pairBlocking.js): always two guides and two ssODNs; co-transfection shares the blocking set, otherwise each ssODN blocks its own guide. */
+export const isTwoGuidePolicy = (policy) => policy === 'pair' || policy === 'independent';
+
+/** The form's two checkboxes as a policy: blocking changes off -> exact edit only; on -> shared set (co-transfection) or per-guide sets. */
+export function blockingPolicyFor({ addBlocking = true, coDelivery = true } = {}) {
+  return addBlocking === false ? 'none' : coDelivery === false ? 'independent' : 'pair';
+}
 
 // These are explicit screening heuristics, not splice-site strength predictions.
 export function spliceJunctions(model) {

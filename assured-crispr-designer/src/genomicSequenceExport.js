@@ -9,7 +9,7 @@ export function buildGenomicSequenceCsv(result, { selectedNames = [], acknowledg
   };
   const header = ['Name','Type','Sequence 5-prime to 3-prime','Length nt','Matched pair','PAM (not part of spacer)','Strand','Protection','Residual CFD','Design status','Review acknowledgement','Review note','Review time UTC','Target','Blocking policy','Additional donor changes','Splice screen','Warnings'];
   const target = `${result.input.assembly} chr${result.input.chromosome}:${result.input.position} ${result.input.ref}>${result.input.alt}`;
-  const warnings = [...result.blockers,...result.warnings,'Alternative pairs; do not pool. Guide spacers use DNA notation; vendor chemistry and format must be chosen separately.'].join(' | ');
+  const warnings = [...result.blockers,...result.warnings,(result.blocking?.feasible && result.blocking.coDelivery ? 'Co-delivery: both guides and both ssODNs go into the same electroporation; each ssODN carries the same blocking changes.' : 'Alternative pairs; do not pool.') + ' Guide spacers use DNA notation; vendor chemistry and format must be chosen separately.'].join(' | ');
   const rows=[];
   const add=(name,type,seq,pair,pam,strand,protection='',cfd='')=>{
     if(!/^[ACGT]+$/.test(seq || ''))throw Error(`Invalid sequence for ${name}`);
