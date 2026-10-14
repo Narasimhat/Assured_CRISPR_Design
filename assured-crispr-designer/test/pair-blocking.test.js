@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { designGenomicSnp, buildGenomicSnpReport } from '../src/genomicSnp.js';
 import { buildGenomicSequenceCsv } from '../src/genomicSequenceExport.js';
-import { BLOCKING_POLICIES, isTwoGuidePolicy } from '../src/genomicBlocking.js';
+import { BLOCKING_POLICIES, isTwoGuidePolicy, blockingPolicyFor } from '../src/genomicBlocking.js';
 import { CFD_PROTECTION_THRESHOLDS } from '../src/designEngine.js';
 import {
   SPLICE_WINDOWS, SPLICE_CHECK_THRESHOLDS, classifyPosition, guideRole, createdSpliceDinucleotides,
@@ -89,6 +89,18 @@ test('the default and the per-guide policies are unchanged; an unknown policy is
   assert.match(designGenomicSnp(raw, at(INTRONIC, { blockingPolicy: 'bogus' })).err, /Unknown blocking-change policy/);
   const per = designGenomicSnp(raw, at(INTRONIC, { blockingPolicy: 'noncoding' }));
   assert.equal(per.err, undefined); assert.equal(per.blocking, undefined); assert.ok(per.candidates.every((c) => c.comparison));
+});
+
+test('the form checkboxes map to a policy; blocking off gives the exact edit with every candidate guide', () => {
+  assert.equal(blockingPolicyFor({ addBlocking: true, coDelivery: true }), 'pair');
+  assert.equal(blockingPolicyFor({ addBlocking: true, coDelivery: false }), 'independent');
+  assert.equal(blockingPolicyFor({ addBlocking: false, coDelivery: true }), 'none');
+  assert.equal(blockingPolicyFor({ addBlocking: false, coDelivery: false }), 'none');
+  assert.equal(blockingPolicyFor(), 'pair'); assert.equal(blockingPolicyFor({}), 'pair');
+  const off = designGenomicSnp(raw, at(INTRONIC, { blockingPolicy: blockingPolicyFor({ addBlocking: false, coDelivery: true }) }));
+  assert.equal(off.err, undefined); assert.equal(off.blocking, undefined);
+  assert.ok(off.candidates.length > 2);
+  for (const c of off.candidates) assert.equal(c.nucleotideValidation.differences, 1, 'only the requested base is changed');
 });
 
 function diffAt(c) {

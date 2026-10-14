@@ -1,3 +1,4 @@
+import { blockingPolicyFor } from './genomicBlocking.js';
 import { applySpliceCheck, buildSpliceCheckRequest } from './pairBlocking.js';
 import { buildGenomicSequenceCsv } from './genomicSequenceExport.js';
 import { buildDesignSchemeSvg, buildDesignSchemeFilename } from './designScheme.js';
@@ -13,7 +14,7 @@ function download(name, text, type) {
 
 export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   const [raw,setRaw]=useState('');
-  const [input,setInput]=useState({coDelivery:true,gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
+  const [input,setInput]=useState({addBlocking:true,coDelivery:true,gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
   const [result,setResult]=useState(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
@@ -38,7 +39,7 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   }
   function generate(event) {
     event.preventDefault();setError('');
-    const design=designGenomicSnp(raw,{...input,blockingPolicy:input.coDelivery?'pair':'independent'});
+    const design=designGenomicSnp(raw,{...input,blockingPolicy:blockingPolicyFor(input)});
     if(design.err){setResult(null);setError(design.err);}else {setResult(design);onGenerate?.(design);}
   }
   const field=(label,key,type='text')=><label>{label}<input type={type} value={input[key]} onChange={e=>update(key,e.target.value)} required={['assembly','chromosome','referenceStart','position'].includes(key)} min={type==='number'?1:undefined} step={type==='number'?1:undefined}/></label>;
@@ -58,8 +59,9 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
         <label>Guide delivery<select value={input.deliveryMethod} onChange={e=>update('deliveryMethod',e.target.value)}><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression</option></select></label>
       </div>
       <label className="snp-check"><input type="checkbox" checked={input.forwardConfirmed} onChange={e=>update('forwardConfirmed',e.target.checked)}/>The reference sequence is in forward genomic orientation.</label>
-      <label className="snp-check"><input type="checkbox" checked={input.coDelivery} onChange={e=>update('coDelivery',e.target.checked)}/><span><strong>Co-transfect both guides and both ssODNs</strong><br/>On (default): two guides, and each ssODN carries the blocking changes for both. Off: each guide gets its own ssODN carrying only its own blocking changes; deliver one pair at a time.</span></label>
-      <p>Two guides and two ssODNs are always designed. Blocking changes are added only where the repaired allele would be re-cut. They stay outside the splice-site windows of annotated exons, and inside coding sequence they are silent. Every donor is checked against the reference.</p>
+      <label className="snp-check"><input type="checkbox" checked={input.addBlocking} onChange={e=>update('addBlocking',e.target.checked)}/><span><strong>Add PAM/seed blocking changes</strong><br/>On (default): two guides and two ssODNs, with silent changes that stop the guides re-cutting the repaired allele. Off: only the requested base is changed; every candidate guide is listed with its matched ssODN and graded for re-cutting.</span></label>
+      <label className="snp-check" style={{opacity:input.addBlocking?1:0.5}}><input type="checkbox" disabled={!input.addBlocking} checked={input.coDelivery} onChange={e=>update('coDelivery',e.target.checked)}/><span><strong>Co-transfect both guides and both ssODNs</strong><br/>On (default): each ssODN carries the blocking changes for both guides. Off: each guide gets its own ssODN carrying only its own blocking changes; deliver one pair at a time.</span></label>
+      <p>{input.addBlocking?'Blocking changes are added only where the repaired allele would be re-cut. They stay outside the splice-site windows of annotated exons, and inside coding sequence they are silent. Every donor is checked against the reference.':'No additional blocking substitutions will be added. Every donor is checked for exactly the requested single-base change.'}</p>
       <p>Splice assessment is a local junction and GT/AG motif screen, not a splice-strength prediction. Additional intronic changes remain subject to review.</p>
     <button type="submit" disabled={!raw || busy}>Generate genomic SNP design</button>
     </form>

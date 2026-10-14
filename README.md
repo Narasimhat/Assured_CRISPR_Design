@@ -170,12 +170,13 @@ Splice screening distinguishes WT-to-requested-edit from requested-edit-to-final
 
 ### Two guides and two ssODNs (co-transfection or separate delivery)
 
-As in the protein SNP knock-in tool, the form always designs **two guides and two ssODNs**. One checkbox sets how they are delivered:
+As in the protein SNP knock-in tool, the form designs **two guides and two ssODNs** with blocking changes. Two checkboxes set this:
 
-| Checkbox | What the tool does |
-| --- | --- |
-| **Co-transfect both guides and both ssODNs** (on by default; policy `pair`) | One blocking set that both guides need (CFD <= 0.023, the engine's own cut point), carried by both ssODNs, so neither guide can cut the repaired allele whichever ssODN performs the repair. |
-| Off (policy `independent`) | Each guide gets the smallest blocking set of its own, and each ssODN carries only the set for its own guide. Deliver one guide and ssODN pair at a time; do not pool the pairs. |
+| Checkboxes | Policy | What the tool does |
+| --- | --- | --- |
+| **Add PAM/seed blocking changes** on and **Co-transfect both guides and both ssODNs** on (defaults) | `pair` | One blocking set that both guides need (CFD <= 0.023, the engine's own cut point), carried by both ssODNs, so neither guide can cut the repaired allele whichever ssODN performs the repair. |
+| Blocking changes on, co-transfection off | `independent` | Each guide gets the smallest blocking set of its own, and each ssODN carries only the set for its own guide. Deliver one guide and ssODN pair at a time; do not pool the pairs. |
+| Blocking changes off | `none` | Only the requested base is changed. Every candidate guide is listed with its matched ssODN and graded for re-cutting, as before. The co-transfection checkbox is disabled. |
 
 Blocking changes are added only where the requested edit leaves a guide able to re-cut. They must not affect splicing, which the tool enforces by position:
 never inside a splice-site window of an annotated exon (donor: last 3 exon bases and intron +1..+6; acceptor: intron -40..-1 and first 3 exon bases);
