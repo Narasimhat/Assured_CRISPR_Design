@@ -12,8 +12,10 @@
 // Splicing outcomes are still unvalidated: the optional SpliceAI check (scripts/splice_check.py) can be attached to the design.
 import { scoreResidualActivity, CFD_PROTECTION_THRESHOLDS, normalizeMaxBlockingChanges, mkODN, assessGuideAgainstPointMutationDonor } from './designEngine.js';
 import { screenSpliceChanges } from './genomicBlocking.js';
+import { SPLICE_WINDOWS, exonList, classifyPosition } from './spliceZones.js';
 
-export const SPLICE_WINDOWS = Object.freeze({ donorExonBases: 3, donorIntronBases: 6, acceptorIntronBases: 40, acceptorExonBases: 3, exonMargin: 4, crypticReach: 60 });
+export { SPLICE_WINDOWS, classifyPosition };
+
 export const MAX_GUIDE_CUT_DISTANCE = 15;   // bp from the edit; HDR falls off beyond about 10
 export const MIN_PAIR_CUT_SEPARATION = 10;  // the engine's own spacing for a second guide; closer cuts can excise the bases between them
 export const SPLICE_CHECK_THRESHOLDS = Object.freeze({ pass: 0.05, review: 0.2 }); // SpliceAI delta score cut-offs for the effect of the blocking changes (SpliceAI itself uses 0.2 / 0.5 / 0.8 for calls)
@@ -24,38 +26,11 @@ const AA = 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG';
 const CODON = (() => { const t = {}; let n = 0; for (const a of 'TCAG') for (const b of 'TCAG') for (const c of 'TCAG') t[a + b + c] = AA[n++]; return t; })();
 const aaOf = (codon) => CODON[codon] || 'X';
 
-function exonList(model) {
-  const exons = (model && Array.isArray(model.exons) ? model.exons : []).filter((e) => Number.isFinite(e.start) && Number.isFinite(e.end));
-  if (exons.length) return exons.map((e) => ({ start: e.start, end: e.end, label: e.label || `Exon ${e.exonNumber || ''}`.trim() })).sort((a, b) => a.start - b.start);
-  return ((model && model.cdsSegments) || []).map(([start, end], i) => ({ start, end, label: `CDS segment ${i + 1}` }));
-}
-
 function codingMap(model) {
   const segs = (model && model.cdsSegments) || [];
   if (!segs.length || model.strand === -1) return null;
   const positions = []; for (const [s, e] of segs) for (let p = s; p < e; p += 1) positions.push(p);
   return { positions, index: new Map(positions.map((p, i) => [p, i])) };
-}
-
-/** Where a genomic index lies relative to the annotated exons: zone is one of donor-critical, acceptor-critical, exon-edge, exon-interior, intron-deep, unknown. */
-export function classifyPosition(model, p) {
-  const exons = exonList(model); const W = SPLICE_WINDOWS;
-  if (!exons.length) return { zone: 'unknown', text: 'no exon annotation in the reference' };
-  for (const ex of exons) {
-    if (p >= ex.start && p < ex.end) {
-      const toStart = p - ex.start, toEnd = ex.end - 1 - p;
-      if (toEnd < W.donorExonBases) return { zone: 'donor-critical', exon: ex.label, text: `last ${toEnd + 1} base${toEnd ? 's' : ''} of ${ex.label} (donor site)` };
-      if (toStart < W.acceptorExonBases) return { zone: 'acceptor-critical', exon: ex.label, text: `first ${toStart + 1} base${toStart ? 's' : ''} of ${ex.label} (acceptor site)` };
-      if (toStart < W.exonMargin || toEnd < W.exonMargin) return { zone: 'exon-edge', exon: ex.label, text: `${Math.min(toStart, toEnd)} bp from an end of ${ex.label}` };
-      return { zone: 'exon-interior', exon: ex.label, text: `${ex.label}, ${Math.min(toStart, toEnd) + 1} bp from the nearest end`, distance: Math.min(toStart, toEnd) };
-    }
-  }
-  const prev = [...exons].reverse().find((e) => e.end <= p); const next = exons.find((e) => e.start > p);
-  const dDonor = prev ? p - prev.end + 1 : Infinity, dAcc = next ? next.start - p : Infinity;
-  if (dDonor <= W.donorIntronBases) return { zone: 'donor-critical', exon: prev.label, text: `intron +${dDonor} after ${prev.label} (donor site)`, offset: `+${dDonor}` };
-  if (dAcc <= W.acceptorIntronBases) return { zone: 'acceptor-critical', exon: next.label, text: `intron -${dAcc} before ${next.label} (acceptor site, branch point and pyrimidine tract)`, offset: `-${dAcc}` };
-  const near = dDonor <= dAcc ? `+${dDonor} after ${prev.label}` : `-${dAcc} before ${next.label}`;
-  return { zone: 'intron-deep', text: `intron ${near}`, offset: dDonor <= dAcc ? `+${dDonor}` : `-${dAcc}`, distance: Math.min(dDonor, dAcc) };
 }
 
 function codonWith(ctx, seq, muts, codonIndex) {

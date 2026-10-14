@@ -16,7 +16,8 @@ import {
   normalizeRawSequenceToTranscriptModel,
   selectNearbyGuidesForModel,
 } from "./transcriptModel.js";
-import { MINIMUM_ALTERNATIVE_CUT_OFFSET, pickGuidePair } from "./guideSelection.js";
+import { MINIMUM_ALTERNATIVE_CUT_OFFSET, pickGuidePair, pickPartnerGuide } from "./guideSelection.js";
+import { classifyPosition, inSpliceWindow } from "./spliceZones.js";
 import { buildDonorFormatReport, planDonorArms } from "./donorFormat.js";
 import { describeGuideUse } from "./guideUse.js";
 
@@ -633,6 +634,55 @@ export function findBlockingSet(model, guide, blockedPositions = new Set(), opti
     blockingTier: grade.tier,
     blockingReason: describeBlockingSet(grade, chosen),
   }));
+}
+
+/**
+ * The blocking set for a point mutation: coding silent changes first, exactly as before.
+ *
+ * Only when those cannot make the guide strongly blocked, retry with changes outside the coding sequence (intron or UTR) as well, never inside a splice-site window
+ * of an annotated exon, and keep the retry only if it grades better. A guide whose PAM or seed lies in the intron next to the edited exon can then be blocked
+ * without touching splicing. `allowNonCodingBlockers: false` restores the coding-only behaviour.
+ */
+function findPointMutationBlockingSet(model, guide, blockedPositions, options = {}) {
+  const maxChanges = options.maxChanges;
+  const coding = findBlockingSet(model, guide, blockedPositions, { maxChanges });
+  if (options.allowNonCodingBlockers === false) return coding;
+  const grade = (set) => gradeBlockingSet(set, { model, guide });
+  const base = grade(coding);
+  if (base.tier === "strong") return coding;
+  // Coding bases stay allowed (silent, as before) except inside a splice-site window; bases outside the CDS only in the intron, away from the windows. UTR bases inside
+  // an exon are not changed: they are neither silent nor out of reach of exonic splicing signals.
+  const insideCds = (position) => (model.cdsSegments || []).some(([start, end]) => position >= start && position < end);
+  const widened = findBlockingSet(model, guide, blockedPositions, { maxChanges, allowNonCoding: true,
+    isPositionAllowed: (position) => (insideCds(position) ? !inSpliceWindow(model, position) : classifyPosition(model, position).zone === "intron-deep") });
+  if (!widened.length) return coding;
+  const next = grade(widened);
+  const better = PROTECTION_RANK[next.tier] < PROTECTION_RANK[base.tier]
+    || (next.tier === base.tier && Number.isFinite(next.cfd) && Number.isFinite(base.cfd) && next.cfd < base.cfd - 1e-9);
+  return better ? widened : coding;
+}
+
+/**
+ * Two guides whenever two exist within 30 bp. Selection stops at the first distance window that has a guide, which returns one guide when the window's guides
+ * cut closer than the minimum offset. Keep that guide as the lead and look in the wider windows for a partner at least that far from its cut, ranked by
+ * how well the partner can be blocked (the same strategy the design will use).
+ */
+function completeGuidePair(model, targetPos, selection, blockingOptions) {
+  if (!selection || selection.guides.length !== 1) return selection;
+  const lead = selection.guides[0];
+  for (const window of [20, 30]) {
+    if (window <= selection.window) continue;
+    const candidates = findSpCas9Guides(model, reverseComplement, targetPos, window)
+      .slice().sort((left, right) => Math.abs(left.d) - Math.abs(right.d));
+    const entries = candidates.map((guide, index) => {
+      const set = findPointMutationBlockingSet(model, guide, new Set(blockingOptions.reserved), blockingOptions);
+      return { guide, index, rank: PROTECTION_RANK[gradeBlockingSet(set, { model, guide }).tier] ?? PROTECTION_RANK.none };
+    });
+    const partner = pickPartnerGuide(lead, entries, { minimumCutOffset: MINIMUM_ALTERNATIVE_CUT_OFFSET });
+    if (!partner) continue;
+    return { ...selection, guides: [lead, partner], partnerFallback: { leadWindow: selection.window, partnerWindow: window, partnerCutDistance: Math.abs(partner.d) } };
+  }
+  return selection;
 }
 
 function describeBlockingSet(grade, mutations) {
@@ -1750,6 +1800,18 @@ export function summarizeProcurementReadiness(result) {
   }
 
   if (result.type === "pm") {
+    if (result.partnerFallback && result.partnerFallback.partnerCutDistance > 10) {
+      warnings.push(`The second guide cuts ${result.partnerFallback.partnerCutDistance} bp from the mutation site (the first is within 10 bp). HDR falls off with cut-to-edit distance, so expect its ssODN to convert less.`);
+    }
+    if (result.partnerSkipped) {
+      warnings.push("Only one guide is offered: a second guide was found, but its blocking changes could not be combined with the first guide's without changing the protein.");
+    }
+    // Blocking changes outside the coding sequence are not silent. They avoid the splice-site windows, but splicing is not predicted, so they stay a review item.
+    const noncoding = (result.ss || []).filter((entry) => entry.mt === "noncoding");
+    if (noncoding.length) {
+      const positions = [...new Set(noncoding.map((entry) => `${entry.oc}>${entry.nc} at reference index ${entry.gp + 1}`))].join("; ");
+      warnings.push(`Blocking change${noncoding.length === 1 ? "" : "s"} outside the coding sequence (intron; not silent): ${positions}. Placed outside the splice-site windows, but splice effects are not predicted; confirm with a splice predictor.`);
+    }
     if (!(result.os || []).length) blockers.push("No validated ssODN donor is available.");
     if ((result.os || []).some((donor) => !donor.proteinValidation?.valid)) blockers.push("A donor fails the final assembled-protein assertion.");
   }
@@ -2974,7 +3036,20 @@ function buildKnockinProteinPreview(model, orientation, preset) {
   };
 }
 
+/**
+ * A point-mutation design. Under co-delivery every donor carries the blocking changes of both guides, and two sets that are each silent can touch one codon and change the
+ * protein together, which the donor check refuses. When that happens to a pair whose second guide was added by completeGuidePair, the lone guide is offered instead of no design.
+ */
 export function designPM(gb, mutationString, options = {}) {
+  const result = designPMCore(gb, mutationString, options);
+  if (result?.err && /No donor preserved the intended/.test(result.err) && options.ensureGuidePair !== false && !options.customGuides?.length) {
+    const single = designPMCore(gb, mutationString, { ...options, ensureGuidePair: false });
+    return single?.err ? result : { ...single, partnerSkipped: true };
+  }
+  return result;
+}
+
+function designPMCore(gb, mutationString, options = {}) {
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
   const seq = getGenomicSequence(gb);
@@ -3021,7 +3096,10 @@ export function designPM(gb, mutationString, options = {}) {
       // costs more than a few bases of extra cut-to-edit distance inside the same window.
       : selectInsertGuidesWithFallback(gb, codonInfo.g, { preferBlockable: true }));
   if (!guideSelection) return { err: "No gRNAs found with cut sites within 30 bp of the mutation site." };
-  const { guides: rawSelectedGuides, window: guideWindow, tier: guideTier } = guideSelection;
+  // A lone guide gets a partner from the wider windows (the lab designs two guides), unless that is switched off.
+  const pairedSelection = customGuideSelection || options.ensureGuidePair === false ? guideSelection
+    : completeGuidePair(gb, codonInfo.g, guideSelection, { maxChanges: maxBlockingChanges, allowNonCodingBlockers: options.allowNonCodingBlockers, reserved: [...codonInfo.genomicPositions] });
+  const { guides: rawSelectedGuides, window: guideWindow, tier: guideTier } = pairedSelection;
   const minimumAlternativeCutOffset = 10;
   const selectedGuides = customGuideSelection
     ? rawSelectedGuides
@@ -3045,6 +3123,7 @@ export function designPM(gb, mutationString, options = {}) {
     ps: [],
     guideWindow,
     guideTier,
+    ...(pairedSelection.partnerFallback ? { partnerFallback: pairedSelection.partnerFallback } : {}),
     guideDistinctness: {
       minimumCutOffset: minimumAlternativeCutOffset,
       removedRedundantGuideCount,
@@ -3060,7 +3139,7 @@ export function designPM(gb, mutationString, options = {}) {
   // PAM does not reliably stop re-cutting - the engine's own warning said so while it
   // emitted exactly that.
   const blockingByGuide = selectedGuides.map((guide) => {
-    const blockingSet = findBlockingSet(gb, guide, blockedPositions, { maxChanges: maxBlockingChanges });
+    const blockingSet = findPointMutationBlockingSet(gb, guide, blockedPositions, { maxChanges: maxBlockingChanges, allowNonCodingBlockers: options.allowNonCodingBlockers });
     // Positions are always reserved now: several changes per guide means two individually
     // silent changes can otherwise land in one codon and combine into a coding change.
     blockingSet.forEach((entry) => blockedPositions.add(entry.gp));
