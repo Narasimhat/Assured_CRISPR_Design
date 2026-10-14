@@ -421,7 +421,7 @@ function buildPmDonorHtml(donor, releaseStatus = "ready") {
     <h3 style="color:#2E75B6;margin:18px 0 8px 0;">${donor.n} (${donor.sl})</h3>
     <p style="font-size:12px;color:#555;margin:0 0 10px 0;">Linked guide: ${donor.guideName}</p>
     <p style="font-size:12px;color:${(donor.nucleotideValidation?.valid || donor.proteinValidation?.valid) ? "#047857" : "#B42318"};margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Final donor nucleotide assertion:" : "Final donor protein assertion:"}</strong> ${donor.nucleotideValidation ? `Pass: requested substitution plus ${donor.nucleotideValidation.additionalChanges || 0} documented blocking changes. Splicing and protein outcomes are not validated.` : proteinValidation}</p>
-    ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Protection against the matched guide:" : "Protection against all offered guides:"}</strong><br/>${crossGuideSummary}</p>` : ""}
+    ${crossGuideSummary ? `<p style="font-size:12px;color:#344054;margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? ((donor.guideProtection || []).length > 1 ? "Protection against both guides:" : "Protection against the matched guide:") : "Protection against all offered guides:"}</strong><br/>${crossGuideSummary}</p>` : ""}
     ${silentSummary ? `<p style="font-size:12px;color:#7F1D1D;margin:0 0 10px 0;"><strong>${donor.nucleotideValidation ? "Additional blocking changes (noncoding is not silent):" : "Silent mutation:"}</strong><br/>${silentSummary}</p>` : ""}
     ${renderStrandCards(strands, (strand) => buildPmStrandCardHtml(strand, releaseStatus))}
     ${comparison ? `<details class="fold"><summary>Coding frame view (WT and donor codons and amino acids)</summary><div class="body">
@@ -1400,7 +1400,7 @@ details.fold>.body{padding:8px 12px 10px 12px}
   ${releaseVerdictBlock}
   ${coDeliveryBlock}
   ${snapshotBlock}
-  ${result.type === "genomic-snv" ? buildGenomicBlockingComparisonHtml(result) : ""}
+  ${result.type === "genomic-snv" ? (result.extraSectionHtml || buildGenomicBlockingComparisonHtml(result)) : ""}
   ${designSchemeBlock}
   <h2>1. Gene Information</h2>
   ${buildKeyValueTableHtml(geneInfoItems, 2)}

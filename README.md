@@ -166,3 +166,27 @@ Genomic SNP results open in the Report tab and use the shared ASSURED HTML repor
 The Genomic SNP form defaults to requested-edit only. Optional synonymous coding or synonymous-plus-noncoding policies compare requested-only, PAM-blocking and PAM/seed-blocking alternatives, with a 1-3-change cap. Native codon and CFD logic is reused, scored against the requested-edit allele. Annotated junction dinucleotides are excluded from extra changes. Reports and CSV exports list every added nucleotide. The recommendation is provisional and concerns re-cutting, not biological release.
 
 Splice screening distinguishes WT-to-requested-edit from requested-edit-to-final-donor. It reports annotated junction dinucleotide changes, a conservative 20-bp boundary proximity flag, and local GT/AG motif gains/losses. These are transparent heuristics, not splice-strength probabilities or predictions of RNA isoforms. SpliceAI is not integrated; no motif flag means no local flag, not safety. Its deployment requirements and model licence are documented at https://github.com/Illumina/SpliceAI. Missing CDS annotation prevents automatic additional-change proposals. Existing protein-edit and tagging workflows retain their original policies.
+
+
+### Two-guide blocking policies (shared changes)
+
+The *synonymous* and *noncoding* policies above work per guide: each ssODN protects only its own guide. When two guides are used together
+the partner guide can still re-cut the repaired allele. Two further options in the same selector design for the pair:
+
+| Option | What the tool does |
+| --- | --- |
+| **Two guides: shared blocking changes on both ssODNs** (`pair`) | Chooses a two-guide pair and the smallest set (at most the selected maximum, 1-3) of extra substitutions in the PAMs or seeds that makes both guides strongly protected on the repaired allele (CFD <= 0.023, the engine's own cut point). Both ssODNs carry the same changes, and each donor is checked against the reference: it may differ only at the requested base and the listed changes. |
+| **Two guides: shared blocking changes, splice-screened, with recommendation** (`pair-check`) | As above, plus a positional splice screen and a recommendation: use the blocking changes, review them, or use the exact edit. |
+
+Where a shared change may go: never inside a splice-site window of an annotated exon (donor: last 3 exon bases and intron +1..+6; acceptor:
+intron -40..-1 and first 3 exon bases); inside an exon only if it is synonymous given the requested edit and at least 4 bp from both exon ends;
+deeper in the intron anywhere, preferring changes that do not create a new GT or AG within 60 bp of an exon. Among feasible pairs the tool
+prefers fewer exonic changes, cuts at least 10 bp apart, fewer changes, fewer guide-sequence warnings and nearer cuts; other feasible pairs are
+listed in the report. The report and the sequence CSV list only the two guides of the pair.
+
+The screen is positional and rule-based. It is **not** a splice-site predictor, and a pass does not validate splicing. For a prediction,
+download the *splice-check request* from the result panel and run `assured-crispr-designer/scripts/splice_check.py` (SpliceAI; needs Python 3.10/3.11,
+numpy < 2, tensorflow-cpu 2.15 and `spliceai`, and runs on your computer). It scores the wild type, the edit and the edit with the blocking changes
+and writes a result file; attach that file in the app to update the recommendation. The largest score change caused by the blocking changes on the
+edited allele is judged: <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against them (the tool's own thresholds). Limits:
+forward-strand references only; genome-wide specificity is not checked; RNA outcomes still need validation in the edited clones.

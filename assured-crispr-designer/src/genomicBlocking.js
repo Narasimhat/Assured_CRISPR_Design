@@ -4,7 +4,12 @@ export const BLOCKING_POLICIES = Object.freeze({
   none: 'Requested edit only',
   synonymous: 'Allow synonymous coding changes',
   noncoding: 'Allow synonymous and additional noncoding changes',
+  pair: 'Two guides: shared blocking changes on both ssODNs',
+  'pair-check': 'Two guides: shared blocking changes, splice-screened, with recommendation',
 });
+
+/** The pair policies design one guide pair and one blocking set carried by both ssODNs (see pairBlocking.js). */
+export const isPairPolicy = (policy) => policy === 'pair' || policy === 'pair-check';
 
 // These are explicit screening heuristics, not splice-site strength predictions.
 export function spliceJunctions(model) {

@@ -1,0 +1,334 @@
+// Two-guide blocking (PAM / seed) changes shared by both ssODNs, a rule-based splice screen and an optional splice-predictor check for genomic SNP designs.
+//
+// The Genomic SNP mode installs one requested substitution. When the substitution does not stop the guides re-cutting the repaired allele,
+// this module can add up to MAX_BLOCKING_CHANGES further substitutions that do, shared by the ssODNs of a two-guide pair, and screen them.
+// Every choice is made with the engine's own residual-activity score (CFD) and checked against the reference.
+//
+// Where a change may go (the screen is positional and rule-based; it is NOT a splice-site predictor):
+//  - never inside a splice-site window of an annotated exon: donor = last 3 exon bases and intron +1..+6, acceptor = intron -40..-1 and
+//    first 3 exon bases (SPLICE_WINDOWS; these are this tool's cut points, stated as such);
+//  - inside an exon only if it is synonymous in the coding sequence and at least 4 bases from both exon ends;
+//  - otherwise (deeper intron) any base, preferring changes that do not create a new GT or AG within 60 bp of an exon.
+// Splicing outcomes are still unvalidated: the optional SpliceAI check (scripts/splice_check.py) can be attached to the design.
+import { scoreResidualActivity, CFD_PROTECTION_THRESHOLDS, normalizeMaxBlockingChanges, mkODN, assessGuideAgainstPointMutationDonor } from './designEngine.js';
+import { screenSpliceChanges } from './genomicBlocking.js';
+
+export const SPLICE_WINDOWS = Object.freeze({ donorExonBases: 3, donorIntronBases: 6, acceptorIntronBases: 40, acceptorExonBases: 3, exonMargin: 4, crypticReach: 60 });
+export const MAX_GUIDE_CUT_DISTANCE = 15;   // bp from the edit; HDR falls off beyond about 10
+export const MIN_PAIR_CUT_SEPARATION = 10;  // the engine's own spacing for a second guide; closer cuts can excise the bases between them
+export const SPLICE_CHECK_THRESHOLDS = Object.freeze({ pass: 0.05, review: 0.2 }); // SpliceAI delta score cut-offs for the effect of the blocking changes (SpliceAI itself uses 0.2 / 0.5 / 0.8 for calls)
+
+const COMP = { A: 'T', C: 'G', G: 'C', T: 'A', N: 'N' };
+const rc = (s) => String(s).split('').reverse().map((b) => COMP[b] || 'N').join('');
+const AA = 'FFLLSSSSYY**CC*WLLLLPPPPHHQQRRRRIIIMTTTTNNKKSSRRVVVVAAAADDEEGGGG';
+const CODON = (() => { const t = {}; let n = 0; for (const a of 'TCAG') for (const b of 'TCAG') for (const c of 'TCAG') t[a + b + c] = AA[n++]; return t; })();
+const aaOf = (codon) => CODON[codon] || 'X';
+
+function exonList(model) {
+  const exons = (model && Array.isArray(model.exons) ? model.exons : []).filter((e) => Number.isFinite(e.start) && Number.isFinite(e.end));
+  if (exons.length) return exons.map((e) => ({ start: e.start, end: e.end, label: e.label || `Exon ${e.exonNumber || ''}`.trim() })).sort((a, b) => a.start - b.start);
+  return ((model && model.cdsSegments) || []).map(([start, end], i) => ({ start, end, label: `CDS segment ${i + 1}` }));
+}
+
+function codingMap(model) {
+  const segs = (model && model.cdsSegments) || [];
+  if (!segs.length || model.strand === -1) return null;
+  const positions = []; for (const [s, e] of segs) for (let p = s; p < e; p += 1) positions.push(p);
+  return { positions, index: new Map(positions.map((p, i) => [p, i])) };
+}
+
+/** Where a genomic index lies relative to the annotated exons: zone is one of donor-critical, acceptor-critical, exon-edge, exon-interior, intron-deep, unknown. */
+export function classifyPosition(model, p) {
+  const exons = exonList(model); const W = SPLICE_WINDOWS;
+  if (!exons.length) return { zone: 'unknown', text: 'no exon annotation in the reference' };
+  for (const ex of exons) {
+    if (p >= ex.start && p < ex.end) {
+      const toStart = p - ex.start, toEnd = ex.end - 1 - p;
+      if (toEnd < W.donorExonBases) return { zone: 'donor-critical', exon: ex.label, text: `last ${toEnd + 1} base${toEnd ? 's' : ''} of ${ex.label} (donor site)` };
+      if (toStart < W.acceptorExonBases) return { zone: 'acceptor-critical', exon: ex.label, text: `first ${toStart + 1} base${toStart ? 's' : ''} of ${ex.label} (acceptor site)` };
+      if (toStart < W.exonMargin || toEnd < W.exonMargin) return { zone: 'exon-edge', exon: ex.label, text: `${Math.min(toStart, toEnd)} bp from an end of ${ex.label}` };
+      return { zone: 'exon-interior', exon: ex.label, text: `${ex.label}, ${Math.min(toStart, toEnd) + 1} bp from the nearest end`, distance: Math.min(toStart, toEnd) };
+    }
+  }
+  const prev = [...exons].reverse().find((e) => e.end <= p); const next = exons.find((e) => e.start > p);
+  const dDonor = prev ? p - prev.end + 1 : Infinity, dAcc = next ? next.start - p : Infinity;
+  if (dDonor <= W.donorIntronBases) return { zone: 'donor-critical', exon: prev.label, text: `intron +${dDonor} after ${prev.label} (donor site)`, offset: `+${dDonor}` };
+  if (dAcc <= W.acceptorIntronBases) return { zone: 'acceptor-critical', exon: next.label, text: `intron -${dAcc} before ${next.label} (acceptor site, branch point and pyrimidine tract)`, offset: `-${dAcc}` };
+  const near = dDonor <= dAcc ? `+${dDonor} after ${prev.label}` : `-${dAcc} before ${next.label}`;
+  return { zone: 'intron-deep', text: `intron ${near}`, offset: dDonor <= dAcc ? `+${dDonor}` : `-${dAcc}`, distance: Math.min(dDonor, dAcc) };
+}
+
+function codonWith(ctx, seq, muts, codonIndex) {
+  const bases = [0, 1, 2].map((k) => { const p = ctx.positions[codonIndex * 3 + k]; return muts.has(p) ? muts.get(p) : seq[p]; });
+  return bases.join('');
+}
+
+/** True if every codon touched by `set` keeps the amino acid it has with the requested edit alone. */
+function synonymousGivenEdit(ctx, seq, edit, set) {
+  if (!ctx) return false;
+  const withEdit = new Map([[edit.gp, edit.nb]]); const withAll = new Map(withEdit); set.forEach((c) => withAll.set(c.gp, c.nb));
+  const codons = new Set(set.map((c) => ctx.index.has(c.gp) ? Math.floor(ctx.index.get(c.gp) / 3) : -1));
+  if (codons.has(-1)) return false;
+  for (const ci of codons) { if (ci * 3 + 2 >= ctx.positions.length) return false; if (aaOf(codonWith(ctx, seq, withEdit, ci)) !== aaOf(codonWith(ctx, seq, withAll, ci))) return false; }
+  return true;
+}
+
+const SPLICE_DINUC = new Set(['GT', 'AG']);
+/** GT or AG dinucleotides that the set creates within SPLICE_WINDOWS.crypticReach bp of an annotated exon. */
+export function createdSpliceDinucleotides(model, seq, set) {
+  const exons = exonList(model); if (!exons.length) return [];
+  const edited = seq.split(''); set.forEach((c) => { edited[c.gp] = c.nb; });
+  const near = (p) => exons.some((e) => p >= e.start - SPLICE_WINDOWS.crypticReach && p < e.end + SPLICE_WINDOWS.crypticReach);
+  const out = [];
+  for (const start of new Set(set.flatMap((c) => [c.gp - 1, c.gp]))) {
+    if (start < 0 || start + 1 >= seq.length || !near(start)) continue;
+    const before = seq[start] + seq[start + 1], after = edited[start] + edited[start + 1];
+    if (SPLICE_DINUC.has(after) && !SPLICE_DINUC.has(before)) out.push({ gp: start, dinucleotide: after });
+  }
+  return out;
+}
+
+/** The role of a genomic index for a guide: PAM base or a protospacer position (1 = PAM-distal, 20 = PAM-proximal). */
+export function guideRole(guide, p) {
+  const off = p - guide.ps; if (off < 0 || off >= 23) return null;
+  if (guide.str === '+') return off >= 20 ? { kind: 'pam', index: off - 20 } : { kind: 'spacer', index: off + 1 };
+  return off < 3 ? { kind: 'pam', index: 2 - off } : { kind: 'spacer', index: 20 - (off - 3) };
+}
+
+function enumerateCandidates(model, seq, guides, edit, ctx) {
+  const sites = new Set(); guides.forEach((g) => { for (let p = g.ps; p < g.ps + 23; p += 1) sites.add(p); }); sites.delete(edit.gp);
+  const out = [];
+  for (const p of sites) {
+    if (!'ACGT'.includes(seq[p])) continue;
+    const cls = classifyPosition(model, p);
+    if (!['intron-deep', 'unknown', 'exon-interior'].includes(cls.zone)) continue;
+    if (cls.zone === 'exon-interior' && !(ctx && ctx.index.has(p))) continue; // an exon base outside the CDS is not changed
+    for (const nb of 'ACGT') {
+      if (nb === seq[p]) continue;
+      const c = { gp: p, nb, ref: seq[p], cls };
+      if (cls.zone === 'exon-interior' && !synonymousGivenEdit(ctx, seq, edit, [c])) continue;
+      out.push(c);
+    }
+  }
+  return out;
+}
+
+const cfdOf = (model, guide, muts) => { const s = scoreResidualActivity(model, guide, muts); return s && Number.isFinite(s.score) ? s.score : null; };
+
+/**
+ * Smallest set of extra substitutions that makes every guide of `guides` strongly protected on the repaired allele (CFD <= 0.023, the engine's cut point).
+ * Returns { feasible, changes, cfdBefore, cfdAfter, alternatives, considered, reason }.
+ */
+export function planBlockingSet({ model, guides, gp, alt, maxChanges }) {
+  const seq = String(model.genomicSequence || ''); const edit = { gp, nb: alt }; const ctx = codingMap(model);
+  const cap = normalizeMaxBlockingChanges(maxChanges); const strong = CFD_PROTECTION_THRESHOLDS.strong;
+  const cfds = (set) => guides.map((g) => cfdOf(model, g, [edit, ...set]));
+  const isStrong = (cf) => cf.every((c) => c !== null && c <= strong);
+  const before = cfds([]);
+  const done = (set, cf) => ({ set, cf });
+  if (isStrong(before)) return { feasible: true, changes: [], cfdBefore: before, cfdAfter: before, alternatives: [], considered: 0 };
+  const cands = enumerateCandidates(model, seq, guides, edit, ctx);
+  const rankOf = (e) => { const created = createdSpliceDinucleotides(model, seq, e.set).length; const exonic = e.set.filter((c) => c.cls.zone === 'exon-interior').length; const reach = Math.min(...e.set.map((c) => c.cls.distance ?? 1e6)); return [exonic, created ? 1 : 0, Math.max(...e.cf), -Math.min(reach, 1e5)]; };
+  const cmp = (a, b) => { for (let i = 0; i < a.rank.length; i += 1) if (a.rank[i] !== b.rank[i]) return a.rank[i] - b.rank[i]; return 0; };
+  const valid = (set) => !set.some((c) => c.cls.zone === 'exon-interior') || synonymousGivenEdit(ctx, seq, edit, set.filter((c) => c.cls.zone === 'exon-interior'));
+  let considered = 0;
+  for (let size = 1; size <= cap; size += 1) {
+    const found = [];
+    const visit = (set) => { considered += 1; if (!valid(set)) return; const cf = cfds(set); if (isStrong(cf)) found.push(done(set, cf)); };
+    if (size === 1) cands.forEach((c) => visit([c]));
+    else if (size === 2) { for (let i = 0; i < cands.length; i += 1) for (let j = i + 1; j < cands.length; j += 1) if (cands[i].gp !== cands[j].gp) visit([cands[i], cands[j]]); }
+    else {
+      // three changes: only from the candidates that help most on their own, to keep the search small
+      const gain = cands.map((c) => ({ c, g: Math.min(...cfds([c]).map((x) => (x === null ? 1 : x))) })).sort((a, b) => a.g - b.g).slice(0, 30).map((x) => x.c);
+      for (let i = 0; i < gain.length; i += 1) for (let j = i + 1; j < gain.length; j += 1) for (let k = j + 1; k < gain.length; k += 1) if (new Set([gain[i].gp, gain[j].gp, gain[k].gp]).size === 3) visit([gain[i], gain[j], gain[k]]);
+    }
+    if (found.length) {
+      found.forEach((f) => { f.rank = rankOf(f); });
+      found.sort(cmp);
+      const seen = new Set(); const distinct = found.filter((f) => { const key = f.set.map((c) => c.gp).sort().join(','); if (seen.has(key)) return false; seen.add(key); return true; });
+      return { feasible: true, changes: distinct[0].set, cfdBefore: before, cfdAfter: distinct[0].cf, alternatives: distinct.slice(1, 4).map((f) => ({ changes: f.set, cfdAfter: f.cf })), considered };
+    }
+  }
+  return { feasible: false, changes: [], cfdBefore: before, cfdAfter: before, alternatives: [], considered, reason: cands.length ? `No set of up to ${cap} allowed substitutions makes every guide strongly protected.` : 'No allowed position (outside the splice-site windows, synonymous inside exons) lies in the guide sites.' };
+}
+
+/**
+ * The two-guide pair and the blocking set it shares. Pairs are ranked: feasible, fewest exonic changes (an exonic change near an exon is the larger splicing risk), cuts at least
+ * MIN_PAIR_CUT_SEPARATION bp apart, fewest changes, fewest guide-sequence warnings, nearest cuts.
+ * `candidates` are guide objects with sp, pam, str, ps, cut, d and qc; `pinned` optionally names two spacers to use.
+ */
+export function planGuidePair({ model, candidates, gp, alt, maxChanges, pinned = null }) {
+  const eligible = candidates.filter((g) => Math.abs(g.d) <= MAX_GUIDE_CUT_DISTANCE);
+  const pool = (eligible.length >= 2 ? eligible : candidates).slice(0, 6);
+  const pairs = [];
+  const pins = pinned && pinned.length === 2 ? candidates.filter((g) => pinned.includes(g.sp)) : [];
+  if (pins.length === 2) pairs.push(pins);
+  else for (let i = 0; i < pool.length; i += 1) for (let j = i + 1; j < pool.length; j += 1) pairs.push([pool[i], pool[j]]);
+  const plans = pairs.map((guides) => {
+    const plan = planBlockingSet({ model, guides, gp, alt, maxChanges });
+    const exonic = plan.changes.filter((c) => c.cls.zone === 'exon-interior').length;
+    const separation = Math.abs(guides[0].cut - guides[1].cut);
+    const warns = guides.reduce((n, g) => n + ((g.qc && g.qc.warnings && g.qc.warnings.length) || 0), 0);
+    return { guides, plan, exonic, separation, warns, sumD: guides.reduce((n, g) => n + Math.abs(g.d), 0) };
+  });
+  const key = (p) => [p.plan.feasible ? 0 : 1, p.exonic, p.separation >= MIN_PAIR_CUT_SEPARATION ? 0 : 1, p.plan.changes.length, p.warns, p.sumD];
+  plans.sort((a, b) => { const ka = key(a), kb = key(b); for (let i = 0; i < ka.length; i += 1) if (ka[i] !== kb[i]) return ka[i] - kb[i]; return 0; });
+  return { best: plans[0] || null, others: plans.slice(1, 4).filter((p) => p.plan.feasible), maxChanges: normalizeMaxBlockingChanges(maxChanges), triedPairs: plans.length };
+}
+
+/** An engine-style mutation record (gp, nb, lb, oc, nc, pur, mt) for each change, with the purpose written from the guides it serves. */
+export function describeChanges(model, changes, guides, edit) {
+  const seq = String(model.genomicSequence || ''); const ctx = codingMap(model);
+  return changes.map((c) => {
+    const roles = guides.map((g) => { const r = guideRole(g, c.gp); if (!r) return null; if (r.kind === 'pam') { const site = seq.slice(g.ps, g.ps + 23).split(''); site[c.gp - g.ps] = c.nb; const raw = site.join(''); const pam = g.str === '+' ? raw.slice(20) : rc(raw.slice(0, 3)); return `PAM ${g.pam}→${pam} of ${g.name}`; } return `${r.index > 10 ? 'seed ' : ''}position ${r.index}/20 of ${g.name}`; }).filter(Boolean);
+    const purpose = roles.join('; ') || 'blocking change';
+    if (c.cls.zone === 'exon-interior' && ctx) {
+      const ci = Math.floor(ctx.index.get(c.gp) / 3); const withEdit = new Map([[edit.gp, edit.nb]]); const withBoth = new Map(withEdit).set(c.gp, c.nb);
+      const oc = codonWith(ctx, seq, withEdit, ci), nc = codonWith(ctx, seq, withBoth, ci);
+      return { gp: c.gp, nb: c.nb, lb: `p.${aaOf(oc)}${ci + 1}${aaOf(nc)}`, oc, nc, pur: purpose, mt: 'silent', zone: c.cls.zone, location: c.cls.text };
+    }
+    return { gp: c.gp, nb: c.nb, lb: c.cls.zone === 'intron-deep' ? `intron ${c.cls.offset}` : 'noncoding', oc: c.ref, nc: c.nb, pur: purpose, mt: 'noncoding', zone: c.cls.zone, location: c.cls.text };
+  });
+}
+
+/** Rule-based screen of the edit and the blocking changes. Not a splice-site prediction. */
+export function screenSplice({ model, gp, ref, alt, changes }) {
+  const seq = String(model.genomicSequence || '');
+  const editClass = classifyPosition(model, gp);
+  const editNote = editClass.zone === 'donor-critical' || editClass.zone === 'acceptor-critical'
+    ? `The requested change lies in a splice-site window (${editClass.text}); it is expected to change splicing of that exon.`
+    : editClass.zone === 'unknown' ? 'No exon annotation: the splice context of the requested change is unknown.' : `The requested change lies at ${editClass.text}.`;
+  const created = createdSpliceDinucleotides(model, seq, changes.map((c) => ({ gp: c.gp, nb: c.nb })));
+  const items = changes.map((c) => {
+    const make = created.some((d) => Math.abs(d.gp - c.gp) <= 1);
+    let risk = 'low', reason;
+    if (c.zone === 'intron-deep') reason = `${c.location}; outside the splice-site windows (donor -3..+6, acceptor -40..+2).`;
+    else if (c.zone === 'exon-interior') { risk = 'review'; reason = `Synonymous, ${c.location}; exonic splicing enhancers and silencers are not modelled.`; }
+    else { risk = 'review'; reason = 'No exon annotation near this position; splice context unknown.'; }
+    if (make) { risk = 'review'; reason += ' It creates a new GT or AG dinucleotide within 60 bp of an exon.'; }
+    return { gp: c.gp, label: c.lb, change: `${c.oc}→${c.nc}`, zone: c.zone, risk, reason };
+  });
+  const overall = !changes.length ? 'not-applicable' : items.some((i) => i.risk === 'review') ? 'review' : 'pass';
+  return { method: 'rule-based positional screen (no sequence-based splice predictor was run)', edit: { zone: editClass.zone, note: editNote }, items, overall, windows: SPLICE_WINDOWS };
+}
+
+/** What to give a splice predictor: the edit alone and the edit with the blocking changes, as allele definitions on the reference. */
+export function buildSpliceCheckRequest(result) {
+  const inp = result.input; const b = result.blocking || {};
+  return {
+    schema: 'assured-splice-check-request/1', assembly: inp.assembly, chromosome: String(inp.chromosome).replace(/^chr/i, ''), referenceStart: inp.referenceStart, referenceFile: inp.fileName || '',
+    edit: { position: inp.position, ref: inp.ref, alt: inp.alt }, blocking: (b.changes || []).map((c) => ({ position: inp.referenceStart + c.gp, ref: c.oc.length === 1 ? c.oc : seqRef(result, c.gp), alt: c.nb })),
+  };
+}
+const seqRef = (result, gp) => String((result.gb && result.gb.genomicSequence) || '')[gp] || 'N';
+
+/**
+ * Add the scores of scripts/splice_check.py to a design. The recommendation follows the largest score change that the blocking changes cause on the edited allele
+ * (acceptor or donor, gain or loss): <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against them.
+ */
+export function applySpliceCheck(result, check) {
+  if (!result || result.err || !result.blocking || !result.blocking.changes.length) throw Error('This design has no blocking changes to check.');
+  if (!check || check.schema !== 'assured-splice-check-result/1') throw Error('This is not a splice check result file (schema assured-splice-check-result/1).');
+  const req = buildSpliceCheckRequest(result);
+  const same = check.request && check.request.edit && check.request.edit.position === req.edit.position && check.request.edit.alt === req.edit.alt && JSON.stringify((check.request.blocking || []).map((c) => [c.position, c.alt])) === JSON.stringify(req.blocking.map((c) => [c.position, c.alt]));
+  if (!same) throw Error('The splice check was made for a different edit or different blocking changes.');
+  const effect = Number(check.summary && check.summary.blockingEffectMax);
+  if (!Number.isFinite(effect)) throw Error('The splice check has no summary.blockingEffectMax.');
+  const verdict = effect <= SPLICE_CHECK_THRESHOLDS.pass ? 'pass' : effect <= SPLICE_CHECK_THRESHOLDS.review ? 'review' : 'fail';
+  const text = { pass: `${check.tool || 'The splice predictor'} puts the largest change caused by the blocking changes at ${effect.toFixed(3)} (<= ${SPLICE_CHECK_THRESHOLDS.pass}) on the edited allele: they are supported.`,
+    review: `${check.tool || 'The splice predictor'} puts the largest change caused by the blocking changes at ${effect.toFixed(3)} (between ${SPLICE_CHECK_THRESHOLDS.pass} and ${SPLICE_CHECK_THRESHOLDS.review}): review before ordering.`,
+    fail: `${check.tool || 'The splice predictor'} puts the largest change caused by the blocking changes at ${effect.toFixed(3)} (> ${SPLICE_CHECK_THRESHOLDS.review}): do not use them; use another set or the exact edit.` }[verdict];
+  const splice = { ...result.splice, external: { tool: check.tool || '', version: check.version || '', summary: check.summary, verdict, scores: check.scores || [] } };
+  const use = verdict === 'pass' ? (splice.overall === 'review' ? 'review' : 'blockers') : verdict === 'review' ? 'review' : 'exact';
+  return { ...result, splice, recommendation: { use, text: `${text}${verdict === 'pass' && splice.overall === 'review' ? ' The positional screen still lists items to review.' : ''}`, basis: 'splice predictor and positional screen' } };
+}
+
+export function initialRecommendation(mode, blocking, splice) {
+  if (mode === 'none') return null;
+  if (!blocking.feasible) return { use: 'exact', basis: 'positional rules', text: `${blocking.reason || 'No blocking set was found.'} Use the exact edit only and accept the re-cutting risk, or choose other guides.` };
+  if (!blocking.changes.length) return { use: 'exact', basis: 'engine protection grade', text: 'The requested edit already protects both guides strongly; no blocking changes are needed.' };
+  if (mode === 'pair') return { use: 'review', basis: 'none (splice screen not requested)', text: 'Blocking changes were added; their positions avoid the splice-site windows, but splice effects were not screened. Choose the splice-screened two-guide option or run the splice check before ordering.' };
+  return splice.overall === 'pass'
+    ? { use: 'blockers', basis: 'positional screen', text: 'Recommended: use the blocking changes. They lie outside the splice-site windows of every annotated exon. This is a positional screen; confirm with the splice predictor check (scripts/splice_check.py) and by RNA analysis of the edited clones.' }
+    : { use: 'review', basis: 'positional screen', text: 'Review before use: the screen lists items that it cannot clear by position alone (see the table). Run the splice predictor check, or use the exact edit.' };
+}
+
+const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/**
+ * The two-guide design for the pair policies ('pair', 'pair-check'): picks the pair and the shared blocking set, rebuilds both donors, validates them against the reference
+ * and returns the two guide candidates (engine-shaped, with blockingChanges and spliceAssessment as the other policies provide) together with the pair summary.
+ * If no pair is feasible the exact-edit candidates are returned unchanged with the reason.
+ */
+export function buildPairDesign({ model, seq, exactCandidates, gp, ref, alt, start, policy, maxChanges, pinned = null }) {
+  const blocking = { mode: policy, feasible: false, pair: [], changes: [], reason: '', otherPairs: [], alternatives: [] };
+  let candidates = exactCandidates; let splice = null;
+  if (exactCandidates.length < 2) blocking.reason = 'Fewer than two SpCas9 guides were found within 30 bp, so a two-guide design is not possible.';
+  else {
+    const planned = planGuidePair({ model, candidates: exactCandidates, gp, alt, maxChanges, pinned });
+    const best = planned.best;
+    if (!best || !best.plan.feasible) blocking.reason = best ? best.plan.reason : 'No guide pair could be evaluated.';
+    else {
+      const changes = describeChanges(model, best.plan.changes, best.guides, { gp, nb: alt });
+      const expected = new Map([[gp, alt], ...changes.map((c) => [c.gp, c.nb])]);
+      const donors = best.guides.map((g) => mkODN(model, g, [gp], [alt], changes, null));
+      const exactBases = donors.every((donor) => {
+        if (!donor) return false;
+        const wt = seq.slice(donor.donorStart, donor.donorEnd);
+        const diff = [...wt].flatMap((b, i) => (b !== donor.genomicDonor[i] ? [donor.donorStart + i] : []));
+        return diff.length === expected.size && diff.every((p) => expected.has(p) && donor.genomicDonor[p - donor.donorStart] === expected.get(p))
+          && donor.od === (donor.sl === '- strand target' ? rc(donor.genomicDonor) : donor.genomicDonor);
+      });
+      if (!exactBases) blocking.reason = 'A blocking change falls outside the ssODN window of one guide, or a donor failed validation; no blocking set is offered.';
+      else {
+        const edited = seq.slice(0, gp) + alt + seq.slice(gp + 1);
+        const order = (list) => list.map((g) => g.name).join(' + ');
+        const index = (g) => exactCandidates.findIndex((c) => c.name === g.name);
+        candidates = best.guides.map((g, at) => {
+          const c = exactCandidates[index(g)]; const donor = donors[at];
+          return { ...c, donor, inPair: true, protection: assessGuideAgainstPointMutationDonor(c, donor), blockingChanges: changes, comparison: null, spliceAssessment: screenSpliceChanges(model, edited, changes),
+            crossProtection: best.guides.map((x) => ({ guideName: x.name, ...assessGuideAgainstPointMutationDonor(x, donor) })),
+            nucleotideValidation: { valid: true, differences: 1 + changes.length, additionalChanges: changes.length, blockingPositions: changes.map((x) => start + x.gp) } };
+        }).sort((a, b) => index(a) - index(b));
+        const note = (changeList) => changeList.map((c) => `${start + c.gp}: ${c.oc}→${c.nc} (${c.location})`);
+        Object.assign(blocking, { feasible: true, pair: candidates.map((c) => c.name), separation: best.separation, minSeparation: MIN_PAIR_CUT_SEPARATION, changes, cfdBefore: best.plan.cfdBefore, cfdAfter: best.plan.cfdAfter, maxChanges: planned.maxChanges, reason: '',
+          alternatives: best.plan.alternatives.map((a) => ({ changes: note(describeChanges(model, a.changes, best.guides, { gp, nb: alt })), cfdAfter: a.cfdAfter })),
+          otherPairs: planned.others.map((o) => ({ pair: order(o.guides), separation: o.separation, changes: note(describeChanges(model, o.plan.changes, o.guides, { gp, nb: alt })) })) });
+      }
+    }
+  }
+  if (policy === 'pair-check' && blocking.feasible) splice = screenSplice({ model, gp, ref, alt, changes: blocking.changes });
+  const recommendation = initialRecommendation(policy, blocking, splice || { overall: 'not-applicable' });
+  const added = blocking.feasible ? blocking.changes.length : 0;
+  const warnings = {
+    lead: [blocking.feasible ? (added ? `${added} blocking substitution${added === 1 ? '' : 's'} added and shared by both ssODNs (see Blocking changes). Review each guide against the repaired allele.` : 'The requested edit already protects both guides strongly; no blocking substitutions were added.') : `No blocking set was added: ${blocking.reason}`,
+      policy === 'pair-check' && blocking.feasible ? 'Splice effects were screened by position only; no splice predictor was run. Splicing and protein outcomes are not validated.' : 'Splicing and protein outcomes are not predicted. An unchanged annotated CDS does not validate mature RNA or protein.'],
+    trail: [blocking.feasible ? 'The two ssODNs carry the same changes and are alternatives: use one per electroporation unless your protocol pools them.' : 'Alternative guides and donors are separate candidates; do not pool them.',
+      ...(blocking.feasible && blocking.separation < MIN_PAIR_CUT_SEPARATION ? [`The two cuts are ${blocking.separation} bp apart (below ${MIN_PAIR_CUT_SEPARATION}); with both guides active the bases between them can be excised. Screen for it.`] : [])],
+  };
+  const pairStrong = blocking.feasible && candidates.every((c) => c.crossProtection.every((p) => p.tier === 'strong'));
+  return { candidates, blocking, splice, recommendation, warnings, feasible: blocking.feasible, pairStrong };
+}
+
+/** The report block for a pair design: recommendation, the changes with their splice screen, the guide pair, and how to run the optional splice check. */
+export function pairSectionHtml(r) {
+  const b = r && r.blocking; if (!b) return '';
+  const e = escapeHtml; const start = r.input.referenceStart; const rec = r.recommendation;
+  const label = { blockers: 'Use the blocking changes', review: 'Review before use', exact: 'Use the exact edit only' };
+  const parts = [`<h2>Blocking changes${r.splice ? ' and splice screen' : ''}</h2>`];
+  if (rec) parts.push(`<p><strong>${e(label[rec.use] || rec.use)}.</strong> ${e(rec.text)} <span class="sub">(basis: ${e(rec.basis)})</span></p>`);
+  if (b.feasible) {
+    parts.push(`<p>Guide pair: ${e(b.pair.join(' + '))}; cuts ${b.separation} bp apart${b.separation < b.minSeparation ? ` (below ${b.minSeparation}: the bases between the cuts can be excised)` : ''}. Residual CFD on the repaired allele, ${e(b.pair.join(', '))}: ${b.cfdBefore.map((x) => (x === null ? 'n/a' : x.toFixed(3))).join(', ')} with the requested edit alone, ${b.cfdAfter.map((x) => (x === null ? 'n/a' : x.toFixed(3))).join(', ')} with the blocking changes.</p>`);
+    if (b.changes.length) {
+      const screen = new Map((r.splice ? r.splice.items : []).map((i) => [i.gp, i]));
+      const head = `<tr><th>Position</th><th>Change</th><th>Where</th><th>Purpose</th>${r.splice ? '<th>Splice screen</th>' : ''}</tr>`;
+      const rows = b.changes.map((c) => { const s = screen.get(c.gp); return `<tr><td>${e(`${r.input.assembly} chr${r.input.chromosome}:${start + c.gp}`)}</td><td>${e(`${c.oc}→${c.nc}`)}</td><td>${e(c.location)}</td><td>${e(c.pur)}</td>${r.splice ? `<td>${s ? `${e(s.risk)}: ${e(s.reason)}` : ''}</td>` : ''}</tr>`; }).join('');
+      parts.push(`<table>${head}${rows}</table>`);
+    }
+    if (r.splice) parts.push(`<p class="sub">${e(r.splice.edit.note)} Screen: ${e(r.splice.method)}.</p>`);
+    if (r.splice && r.splice.external) { const x = r.splice.external; parts.push(`<p>${e(x.tool)} ${e(x.version)}: largest change caused by the blocking changes ${Number(x.summary.blockingEffectMax).toFixed(3)}; verdict ${e(x.verdict)}.</p>`); }
+    else if (r.splice && b.changes.length) parts.push('<p class="sub">Optional: confirm with a splice predictor. Download the splice-check request from the app and run scripts/splice_check.py; attach its result to the design to update the recommendation.</p>');
+    if (b.alternatives.length || b.otherPairs.length) parts.push(`<p class="sub">Alternatives that meet the same rules: ${[...b.alternatives.map((a) => `same pair, ${a.changes.join(' and ')}`), ...b.otherPairs.map((o) => `${o.pair} (cuts ${o.separation} bp apart): ${o.changes.join(' and ') || 'no changes'}`)].map(e).join('; ')}.</p>`);
+  } else parts.push(`<p>${e(b.reason)}</p>`);
+  return parts.join('');
+}
