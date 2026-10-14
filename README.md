@@ -68,6 +68,15 @@ error, not a risk - and it is unavailable under co-delivery.
 - The design engine returns a terse internal result shape with no schema. Reports, exports and the CLI consume it by convention, so a change to that shape is not caught by validation.
 - The 26 archived 2026_GE designs have not been re-derived against the current engine. The audit's claims *about this application* are executable; its per-project findings are not.
 
+## Point-mutation designs: two guides and intronic blockers
+
+The point-mutation designer offers two guides whenever two exist within 30 bp of the edit.
+
+- **Partner guide.** The nearest window (cuts within 10 bp) can hold guides whose cuts are closer than 10 bp to each other; the designer then used to return one guide. It now keeps that guide as the lead and adds the best-protected guide from the 20 bp or 30 bp window whose cut is at least 10 bp from the lead's cut. The report lists the partner's cut distance as a review item, because HDR falls off with distance. If the two guides' blocking changes cannot be combined on one donor without changing the protein (co-delivery), the lone guide is offered and the report says so. Custom guides are never given a partner.
+- **Intronic blockers.** Blocking changes stay coding and silent. Only when those cannot make a guide strongly blocked is a search repeated with changes outside the coding sequence, kept only if it grades better. Such a change lies in the intron, never inside a splice-site window of an annotated exon (donor: last 3 exon bases and intron +1..+6; acceptor: intron -40..-1 and first 3 exon bases); UTR bases inside exons are not changed. These changes are not silent, so every such design carries a review item, and splice effects are not predicted.
+- **Turning it off.** Pass `ensureGuidePair: false` and `allowNonCodingBlockers: false` in the design options (`extra.design_options` in a manifest) to restore the earlier behaviour.
+- **Unchanged.** The release gate still grades a guide on its blocking changes alone, not on the mismatches the requested edit itself creates; the donor's own protection record (shown per ssODN) includes both.
+
 ## Genomic SNP mode
 
 Use the **Genomic SNP** tab for exact single-base edits, including intronic and

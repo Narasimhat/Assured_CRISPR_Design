@@ -92,3 +92,24 @@ export function pickGuidePair(entries, { minimumCutOffset = MINIMUM_ALTERNATIVE_
   }
   return [scored[0].guide];
 }
+
+/**
+ * The partner for a lone lead guide, chosen from candidates in a wider distance window.
+ *
+ * Used when the nearest window held one guide only, or guides whose cuts were all closer than `minimumCutOffset`, so no pair could be offered. The lead
+ * stays as it was; the partner is the best-protected candidate whose cut is at least `minimumCutOffset` bp from the lead's cut (then composition, then
+ * proximity; among equals the opposite strand is preferred), exactly as pickGuidePair chooses a partner. Returns null when no candidate is distinct.
+ *
+ * @param {object} lead the guide already selected (needs `cut` and `str`)
+ * @param {Array<{guide: object, index: number, rank: number}>} entries scored candidates of one window, nearest first
+ */
+export function pickPartnerGuide(lead, entries, { minimumCutOffset = MINIMUM_ALTERNATIVE_CUT_OFFSET } = {}) {
+  const scored = (entries || [])
+    .filter((entry) => entry.guide && entry.guide.sp !== lead.sp && Math.abs(entry.guide.cut - lead.cut) >= minimumCutOffset)
+    .map((entry) => ({ ...entry, severe: assessSpacerQuality(entry.guide.sp).severe }))
+    .sort(compareScoredGuides);
+  if (!scored.length) return null;
+  const best = scored[0];
+  const sameClass = scored.filter((entry) => entry.rank === best.rank && entry.severe === best.severe);
+  return (sameClass.find((entry) => entry.guide.str !== lead.str) || best).guide;
+}
