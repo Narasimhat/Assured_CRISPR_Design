@@ -1,4 +1,4 @@
-import { BLOCKING_POLICIES, buildBlockingComparison, isPairPolicy } from './genomicBlocking.js';
+import { BLOCKING_POLICIES, buildBlockingComparison, isTwoGuidePolicy } from './genomicBlocking.js';
 import { buildPairDesign, pairSectionHtml } from './pairBlocking.js';
 import { buildReportHtml } from './reportHtml.js';
 import { parseGB, mkODN, assessGuideAgainstPointMutationDonor, assessGuideSequence, designCenteredPrimerPairs, buildPrimerRecord, summarizePrimerPairQuality } from './designEngine.js';
@@ -16,7 +16,7 @@ export function designGenomicSnp(raw, input) {
   try {
     const policy=input.blockingPolicy || 'none';
     if(!BLOCKING_POLICIES[policy])throw Error('Unknown blocking-change policy.');
-    const maxChanges=Number(input.maxBlockingChanges ?? 2);
+    const maxChanges=Number(input.maxBlockingChanges ?? (isTwoGuidePolicy(policy) ? 3 : 2));
     if(!Number.isInteger(maxChanges) || maxChanges<1 || maxChanges>3)throw Error('Choose 1, 2 or 3 additional blocking changes.');
     const record = parseGB(raw);
     if (!record.seq || !/^[ACGTN]+$/.test(record.seq)) throw Error('Upload a GenBank reference with an A/C/G/T/N genomic sequence.');
@@ -48,12 +48,12 @@ export function designGenomicSnp(raw, input) {
       const differences = [...wt].flatMap((b,i) => b !== donor.genomicDonor[i] ? [donor.donorStart+i] : []);
       if (differences.length !== 1 || differences[0] !== gp || donor.genomicDonor[gp-donor.donorStart] !== alt) throw Error('Donor validation failed: the final allele does not contain exactly the requested substitution.');
       if (donor.od !== (guide.str === '+' ? rc(donor.genomicDonor) : donor.genomicDonor)) throw Error('Donor strand validation failed.');
-      const comparison=buildBlockingComparison(model,guide,gp,alt,isPairPolicy(policy)?'none':policy,maxChanges);
+      const comparison=buildBlockingComparison(model,guide,gp,alt,isTwoGuidePolicy(policy)?'none':policy,maxChanges);
       const chosen=comparison.selected;
       const additionalChanges=chosen.changes.length;
       return { name:`gRNA${index+1}`, ...guide, interval:{ start:start+guide.ps,end:start+guide.ps+22 }, qc:assessGuideSequence(guide.sp,input.deliveryMethod || 'rnp'), donor:chosen.donor, protection:chosen.protection, blockingChanges:chosen.changes, comparison, spliceAssessment:chosen.splice, nucleotideValidation:{ valid:true, differences:1+additionalChanges, additionalChanges } };
     });
-    const pair = isPairPolicy(policy) ? buildPairDesign({ model, seq:record.seq, exactCandidates, gp, ref, alt, start, policy, maxChanges, pinned:Array.isArray(input.guideSpacers) ? input.guideSpacers : null }) : null;
+    const pair = isTwoGuidePolicy(policy) ? buildPairDesign({ model, seq:record.seq, exactCandidates, gp, ref, alt, start, shared:policy==='pair', maxChanges, pinned:Array.isArray(input.guideSpacers) ? input.guideSpacers : null }) : null;
     const candidates = pair ? pair.candidates : exactCandidates;
     const primers = designCenteredPrimerPairs(record.seq,gp,{ minAmp:400,maxAmp:700,desiredAmp:500 }).slice(0,3).map((p,index)=>({ rank:index+1,ampliconLength:p.amp,forward:buildPrimerRecord('Fw',p.fw.seq),reverse:buildPrimerRecord('Rev',p.rev.seq),quality:p.quality || summarizePrimerPairQuality(p.fw.seq,p.rev.seq) }));
     const boundaries = (model.exons || []).flatMap(exon => [

@@ -176,6 +176,31 @@ export function planGuidePair({ model, candidates, gp, alt, maxChanges, pinned =
   return { best: plans[0] || null, others: plans.slice(1, 4).filter((p) => p.plan.feasible), maxChanges: normalizeMaxBlockingChanges(maxChanges), triedPairs: plans.length };
 }
 
+/**
+ * Delivered separately (no co-transfection): each guide gets the smallest set of its own that stops it re-cutting its repaired allele, and its own ssODN carries only that set.
+ * Pairs are ranked like planGuidePair, except that the cut separation does not matter because the guides are never in the same well.
+ */
+export function planIndependentPair({ model, candidates, gp, alt, maxChanges, pinned = null }) {
+  const eligible = candidates.filter((g) => Math.abs(g.d) <= MAX_GUIDE_CUT_DISTANCE);
+  const pool = (eligible.length >= 2 ? eligible : candidates).slice(0, 6);
+  const pins = pinned && pinned.length === 2 ? candidates.filter((g) => pinned.includes(g.sp)) : [];
+  const memo = new Map();
+  const planOf = (g) => { if (!memo.has(g.name)) memo.set(g.name, planBlockingSet({ model, guides: [g], gp, alt, maxChanges })); return memo.get(g.name); };
+  const pairs = [];
+  if (pins.length === 2) pairs.push(pins);
+  else for (let i = 0; i < pool.length; i += 1) for (let j = i + 1; j < pool.length; j += 1) pairs.push([pool[i], pool[j]]);
+  const plans = pairs.map((guides) => {
+    const each = guides.map(planOf);
+    const feasible = each.every((p) => p.feasible);
+    const exonic = each.reduce((n, p) => n + p.changes.filter((c) => c.cls.zone === 'exon-interior').length, 0);
+    const warns = guides.reduce((n, g) => n + ((g.qc && g.qc.warnings && g.qc.warnings.length) || 0), 0);
+    return { guides, plans: each, feasible, reason: each.find((p) => !p.feasible)?.reason || '', exonic, changeCount: each.reduce((n, p) => n + p.changes.length, 0), separation: Math.abs(guides[0].cut - guides[1].cut), warns, sumD: guides.reduce((n, g) => n + Math.abs(g.d), 0) };
+  });
+  const key = (p) => [p.feasible ? 0 : 1, p.exonic, p.changeCount, p.warns, p.sumD];
+  plans.sort((a, b) => { const ka = key(a), kb = key(b); for (let i = 0; i < ka.length; i += 1) if (ka[i] !== kb[i]) return ka[i] - kb[i]; return 0; });
+  return { best: plans[0] || null, others: plans.slice(1, 4).filter((p) => p.feasible), maxChanges: normalizeMaxBlockingChanges(maxChanges), triedPairs: plans.length };
+}
+
 /** An engine-style mutation record (gp, nb, lb, oc, nc, pur, mt) for each change, with the purpose written from the guides it serves. */
 export function describeChanges(model, changes, guides, edit) {
   const seq = String(model.genomicSequence || ''); const ctx = codingMap(model);
@@ -212,26 +237,28 @@ export function screenSplice({ model, gp, ref, alt, changes }) {
   return { method: 'rule-based positional screen (no sequence-based splice predictor was run)', edit: { zone: editClass.zone, note: editNote }, items, overall, windows: SPLICE_WINDOWS };
 }
 
-/** What to give a splice predictor: the edit alone and the edit with the blocking changes, as allele definitions on the reference. */
+/** What to give a splice predictor: the edit alone and the edit with each donor's blocking changes, as allele definitions on the reference. */
 export function buildSpliceCheckRequest(result) {
   const inp = result.input; const b = result.blocking || {};
+  const refOf = (c) => (c.oc.length === 1 ? c.oc : seqRef(result, c.gp));
+  const listOf = (changes) => changes.map((c) => ({ position: inp.referenceStart + c.gp, ref: refOf(c), alt: c.nb }));
   return {
     schema: 'assured-splice-check-request/1', assembly: inp.assembly, chromosome: String(inp.chromosome).replace(/^chr/i, ''), referenceStart: inp.referenceStart, referenceFile: inp.fileName || '',
-    edit: { position: inp.position, ref: inp.ref, alt: inp.alt }, blocking: (b.changes || []).map((c) => ({ position: inp.referenceStart + c.gp, ref: c.oc.length === 1 ? c.oc : seqRef(result, c.gp), alt: c.nb })),
+    edit: { position: inp.position, ref: inp.ref, alt: inp.alt }, blocking: listOf(b.changes || []), donors: (b.donors || []).map((d) => ({ name: d.name, blocking: listOf(d.changes) })),
   };
 }
 const seqRef = (result, gp) => String((result.gb && result.gb.genomicSequence) || '')[gp] || 'N';
 
 /**
  * Add the scores of scripts/splice_check.py to a design. The recommendation follows the largest score change that the blocking changes cause on the edited allele
- * (acceptor or donor, gain or loss): <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against them.
+ * (acceptor or donor, gain or loss; the worst of the ssODN alleles): <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against them.
  */
 export function applySpliceCheck(result, check) {
   if (!result || result.err || !result.blocking || !result.blocking.changes.length) throw Error('This design has no blocking changes to check.');
   if (!check || check.schema !== 'assured-splice-check-result/1') throw Error('This is not a splice check result file (schema assured-splice-check-result/1).');
   const req = buildSpliceCheckRequest(result);
-  const same = check.request && check.request.edit && check.request.edit.position === req.edit.position && check.request.edit.alt === req.edit.alt && JSON.stringify((check.request.blocking || []).map((c) => [c.position, c.alt])) === JSON.stringify(req.blocking.map((c) => [c.position, c.alt]));
-  if (!same) throw Error('The splice check was made for a different edit or different blocking changes.');
+  const sig = (r) => JSON.stringify([r.edit && [r.edit.position, r.edit.alt], ((r && r.donors) || []).map((d) => [d.name, (d.blocking || []).map((c) => [c.position, c.alt])])]);
+  if (!check.request || sig(check.request) !== sig(req)) throw Error('The splice check was made for a different edit or different blocking changes.');
   const effect = Number(check.summary && check.summary.blockingEffectMax);
   if (!Number.isFinite(effect)) throw Error('The splice check has no summary.blockingEffectMax.');
   const verdict = effect <= SPLICE_CHECK_THRESHOLDS.pass ? 'pass' : effect <= SPLICE_CHECK_THRESHOLDS.review ? 'review' : 'fail';
@@ -243,37 +270,45 @@ export function applySpliceCheck(result, check) {
   return { ...result, splice, recommendation: { use, text: `${text}${verdict === 'pass' && splice.overall === 'review' ? ' The positional screen still lists items to review.' : ''}`, basis: 'splice predictor and positional screen' } };
 }
 
-export function initialRecommendation(mode, blocking, splice) {
-  if (mode === 'none') return null;
+/** The recommendation before any splice predictor result: from the positional screen. */
+export function initialRecommendation(blocking, splice) {
   if (!blocking.feasible) return { use: 'exact', basis: 'positional rules', text: `${blocking.reason || 'No blocking set was found.'} Use the exact edit only and accept the re-cutting risk, or choose other guides.` };
   if (!blocking.changes.length) return { use: 'exact', basis: 'engine protection grade', text: 'The requested edit already protects both guides strongly; no blocking changes are needed.' };
-  if (mode === 'pair') return { use: 'review', basis: 'none (splice screen not requested)', text: 'Blocking changes were added; their positions avoid the splice-site windows, but splice effects were not screened. Choose the splice-screened two-guide option or run the splice check before ordering.' };
   return splice.overall === 'pass'
-    ? { use: 'blockers', basis: 'positional screen', text: 'Recommended: use the blocking changes. They lie outside the splice-site windows of every annotated exon. This is a positional screen; confirm with the splice predictor check (scripts/splice_check.py) and by RNA analysis of the edited clones.' }
-    : { use: 'review', basis: 'positional screen', text: 'Review before use: the screen lists items that it cannot clear by position alone (see the table). Run the splice predictor check, or use the exact edit.' };
+    ? { use: 'blockers', basis: 'positional screen', text: 'Recommended: use the blocking changes. They lie outside the splice-site windows of every annotated exon and none lies in coding sequence. This is a positional screen; confirm with the splice predictor check (scripts/splice_check.py) and by RNA analysis of the edited clones.' }
+    : { use: 'review', basis: 'positional screen', text: 'Review before use: the screen lists items that it cannot clear by position alone (see the table), for example silent changes inside coding sequence. Run the splice predictor check, or use the exact edit.' };
 }
 
 const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const dedupe = (changes) => { const seen = new Set(); return changes.filter((c) => { const k = `${c.gp}:${c.nb}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
 
 /**
- * The two-guide design for the pair policies ('pair', 'pair-check'): picks the pair and the shared blocking set, rebuilds both donors, validates them against the reference
- * and returns the two guide candidates (engine-shaped, with blockingChanges and spliceAssessment as the other policies provide) together with the pair summary.
- * If no pair is feasible the exact-edit candidates are returned unchanged with the reason.
+ * The two-guide design, as in the protein SNP knock-in tool: always two guides and two ssODNs.
+ * shared = true (co-transfection): one blocking set that both guides need, carried by both ssODNs.
+ * shared = false (delivered separately): each ssODN carries only the set for its own guide.
+ * Every change avoids the splice-site windows and is silent inside coding sequence (see the header). The guide candidates returned are the two of the pair
+ * (engine-shaped, with blockingChanges and spliceAssessment as the other policies provide). If no pair is feasible the exact-edit candidates come back unchanged with the reason.
  */
-export function buildPairDesign({ model, seq, exactCandidates, gp, ref, alt, start, policy, maxChanges, pinned = null }) {
-  const blocking = { mode: policy, feasible: false, pair: [], changes: [], reason: '', otherPairs: [], alternatives: [] };
+export function buildPairDesign({ model, seq, exactCandidates, gp, ref, alt, start, shared = true, maxChanges, pinned = null }) {
+  const blocking = { mode: shared ? 'pair' : 'independent', coDelivery: shared, feasible: false, pair: [], changes: [], donors: [], reason: '', otherPairs: [], alternatives: [] };
   let candidates = exactCandidates; let splice = null;
+  const note = (changeList) => changeList.map((c) => `${start + c.gp}: ${c.oc}→${c.nc} (${c.location})`);
+  const edited = seq.slice(0, gp) + alt + seq.slice(gp + 1);
   if (exactCandidates.length < 2) blocking.reason = 'Fewer than two SpCas9 guides were found within 30 bp, so a two-guide design is not possible.';
   else {
-    const planned = planGuidePair({ model, candidates: exactCandidates, gp, alt, maxChanges, pinned });
+    const planned = shared ? planGuidePair({ model, candidates: exactCandidates, gp, alt, maxChanges, pinned }) : planIndependentPair({ model, candidates: exactCandidates, gp, alt, maxChanges, pinned });
     const best = planned.best;
-    if (!best || !best.plan.feasible) blocking.reason = best ? best.plan.reason : 'No guide pair could be evaluated.';
+    const feasible = best && (shared ? best.plan.feasible : best.feasible);
+    if (!feasible) blocking.reason = best ? (shared ? best.plan.reason : best.reason) : 'No guide pair could be evaluated.';
     else {
-      const changes = describeChanges(model, best.plan.changes, best.guides, { gp, nb: alt });
-      const expected = new Map([[gp, alt], ...changes.map((c) => [c.gp, c.nb])]);
-      const donors = best.guides.map((g) => mkODN(model, g, [gp], [alt], changes, null));
-      const exactBases = donors.every((donor) => {
+      const index = (g) => exactCandidates.findIndex((c) => c.name === g.name);
+      const perGuideChanges = shared
+        ? best.guides.map(() => describeChanges(model, best.plan.changes, best.guides, { gp, nb: alt }))
+        : best.guides.map((g, at) => describeChanges(model, best.plans[at].changes, [g], { gp, nb: alt }));
+      const donors = best.guides.map((g, at) => mkODN(model, g, [gp], [alt], perGuideChanges[at], null));
+      const exactBases = donors.every((donor, at) => {
         if (!donor) return false;
+        const expected = new Map([[gp, alt], ...perGuideChanges[at].map((c) => [c.gp, c.nb])]);
         const wt = seq.slice(donor.donorStart, donor.donorEnd);
         const diff = [...wt].flatMap((b, i) => (b !== donor.genomicDonor[i] ? [donor.donorStart + i] : []));
         return diff.length === expected.size && diff.every((p) => expected.has(p) && donor.genomicDonor[p - donor.donorStart] === expected.get(p))
@@ -281,54 +316,60 @@ export function buildPairDesign({ model, seq, exactCandidates, gp, ref, alt, sta
       });
       if (!exactBases) blocking.reason = 'A blocking change falls outside the ssODN window of one guide, or a donor failed validation; no blocking set is offered.';
       else {
-        const edited = seq.slice(0, gp) + alt + seq.slice(gp + 1);
         const order = (list) => list.map((g) => g.name).join(' + ');
-        const index = (g) => exactCandidates.findIndex((c) => c.name === g.name);
         candidates = best.guides.map((g, at) => {
-          const c = exactCandidates[index(g)]; const donor = donors[at];
-          return { ...c, donor, inPair: true, protection: assessGuideAgainstPointMutationDonor(c, donor), blockingChanges: changes, comparison: null, spliceAssessment: screenSpliceChanges(model, edited, changes),
-            crossProtection: best.guides.map((x) => ({ guideName: x.name, ...assessGuideAgainstPointMutationDonor(x, donor) })),
+          const c = exactCandidates[index(g)]; const donor = donors[at]; const changes = perGuideChanges[at];
+          const own = { ...c, donor, inPair: true, protection: assessGuideAgainstPointMutationDonor(c, donor), blockingChanges: changes, comparison: null, spliceAssessment: screenSpliceChanges(model, edited, changes),
             nucleotideValidation: { valid: true, differences: 1 + changes.length, additionalChanges: changes.length, blockingPositions: changes.map((x) => start + x.gp) } };
+          return shared ? { ...own, crossProtection: best.guides.map((x) => ({ guideName: x.name, ...assessGuideAgainstPointMutationDonor(x, donor) })) } : own;
         }).sort((a, b) => index(a) - index(b));
-        const note = (changeList) => changeList.map((c) => `${start + c.gp}: ${c.oc}→${c.nc} (${c.location})`);
-        Object.assign(blocking, { feasible: true, pair: candidates.map((c) => c.name), separation: best.separation, minSeparation: MIN_PAIR_CUT_SEPARATION, changes, cfdBefore: best.plan.cfdBefore, cfdAfter: best.plan.cfdAfter, maxChanges: planned.maxChanges, reason: '',
-          alternatives: best.plan.alternatives.map((a) => ({ changes: note(describeChanges(model, a.changes, best.guides, { gp, nb: alt })), cfdAfter: a.cfdAfter })),
-          otherPairs: planned.others.map((o) => ({ pair: order(o.guides), separation: o.separation, changes: note(describeChanges(model, o.plan.changes, o.guides, { gp, nb: alt })) })) });
+        const union = dedupe(candidates.flatMap((c) => c.blockingChanges));
+        const cfd = shared ? { cfdBefore: best.plan.cfdBefore, cfdAfter: best.plan.cfdAfter } : { cfdBefore: best.plans.map((p) => p.cfdBefore[0]), cfdAfter: best.plans.map((p) => p.cfdAfter[0]) };
+        const guideOrder = best.guides.map((g) => g.name);
+        const reorder = (arr) => candidates.map((c) => arr[guideOrder.indexOf(c.name)]);
+        Object.assign(blocking, { feasible: true, pair: candidates.map((c) => c.name), separation: best.separation, minSeparation: shared ? MIN_PAIR_CUT_SEPARATION : 0, changes: union,
+          donors: candidates.map((c) => ({ name: c.name, changes: c.blockingChanges })), cfdBefore: reorder(cfd.cfdBefore), cfdAfter: reorder(cfd.cfdAfter), maxChanges: planned.maxChanges, reason: '',
+          alternatives: shared ? best.plan.alternatives.map((a) => ({ changes: note(describeChanges(model, a.changes, best.guides, { gp, nb: alt })), cfdAfter: a.cfdAfter })) : [],
+          otherPairs: planned.others.map((o) => ({ pair: order(o.guides), separation: o.separation, changes: shared ? note(describeChanges(model, o.plan.changes, o.guides, { gp, nb: alt }))
+            : o.guides.map((g, at) => `${g.name}: ${note(describeChanges(model, o.plans[at].changes, [g], { gp, nb: alt })).join(', ') || 'none'}`) })) });
       }
     }
   }
-  if (policy === 'pair-check' && blocking.feasible) splice = screenSplice({ model, gp, ref, alt, changes: blocking.changes });
-  const recommendation = initialRecommendation(policy, blocking, splice || { overall: 'not-applicable' });
+  if (blocking.feasible) splice = screenSplice({ model, gp, ref, alt, changes: blocking.changes });
+  const recommendation = initialRecommendation(blocking, splice || { overall: 'not-applicable' });
   const added = blocking.feasible ? blocking.changes.length : 0;
+  const sep = blocking.feasible && shared && blocking.separation < MIN_PAIR_CUT_SEPARATION;
   const warnings = {
-    lead: [blocking.feasible ? (added ? `${added} blocking substitution${added === 1 ? '' : 's'} added and shared by both ssODNs (see Blocking changes). Review each guide against the repaired allele.` : 'The requested edit already protects both guides strongly; no blocking substitutions were added.') : `No blocking set was added: ${blocking.reason}`,
-      policy === 'pair-check' && blocking.feasible ? 'Splice effects were screened by position only; no splice predictor was run. Splicing and protein outcomes are not validated.' : 'Splicing and protein outcomes are not predicted. An unchanged annotated CDS does not validate mature RNA or protein.'],
-    trail: [blocking.feasible ? 'The two ssODNs carry the same changes and are alternatives: use one per electroporation unless your protocol pools them.' : 'Alternative guides and donors are separate candidates; do not pool them.',
-      ...(blocking.feasible && blocking.separation < MIN_PAIR_CUT_SEPARATION ? [`The two cuts are ${blocking.separation} bp apart (below ${MIN_PAIR_CUT_SEPARATION}); with both guides active the bases between them can be excised. Screen for it.`] : [])],
+    lead: [blocking.feasible ? (added ? `${added} blocking substitution${added === 1 ? '' : 's'} added (${shared ? 'the same on both ssODNs' : 'each ssODN carries those of its own guide'}; see Blocking changes). Review each guide against the repaired allele.` : 'The requested edit already protects both guides strongly; no blocking substitutions were added.') : `No blocking set was added: ${blocking.reason}`,
+      blocking.feasible && added ? 'Splice effects were screened by position only; no splice predictor was run. Splicing and protein outcomes are not validated.' : 'Splicing and protein outcomes are not predicted. An unchanged annotated CDS does not validate mature RNA or protein.'],
+    trail: [blocking.feasible ? (shared ? 'Co-delivery: both guides and both ssODNs go into the same electroporation; each ssODN carries the changes for both guides.' : 'Delivered separately: electroporate each guide with its own ssODN; do not pool the two pairs.') : 'Alternative guides and donors are separate candidates; do not pool them.',
+      ...(sep ? [`The two cuts are ${blocking.separation} bp apart (below ${MIN_PAIR_CUT_SEPARATION}); with both guides active the bases between them can be excised. Screen for it.`] : [])],
   };
-  const pairStrong = blocking.feasible && candidates.every((c) => c.crossProtection.every((p) => p.tier === 'strong'));
+  const pairStrong = blocking.feasible && (shared ? candidates.every((c) => c.crossProtection.every((p) => p.tier === 'strong')) : candidates.every((c) => c.protection.tier === 'strong'));
   return { candidates, blocking, splice, recommendation, warnings, feasible: blocking.feasible, pairStrong };
 }
 
-/** The report block for a pair design: recommendation, the changes with their splice screen, the guide pair, and how to run the optional splice check. */
+/** The report block for a two-guide design: recommendation, the changes with the ssODNs that carry them and their splice screen, the guide pair, and how to run the optional splice check. */
 export function pairSectionHtml(r) {
   const b = r && r.blocking; if (!b) return '';
   const e = escapeHtml; const start = r.input.referenceStart; const rec = r.recommendation;
   const label = { blockers: 'Use the blocking changes', review: 'Review before use', exact: 'Use the exact edit only' };
-  const parts = [`<h2>Blocking changes${r.splice ? ' and splice screen' : ''}</h2>`];
+  const parts = [`<h2>Blocking changes and splice screen</h2>`];
   if (rec) parts.push(`<p><strong>${e(label[rec.use] || rec.use)}.</strong> ${e(rec.text)} <span class="sub">(basis: ${e(rec.basis)})</span></p>`);
   if (b.feasible) {
-    parts.push(`<p>Guide pair: ${e(b.pair.join(' + '))}; cuts ${b.separation} bp apart${b.separation < b.minSeparation ? ` (below ${b.minSeparation}: the bases between the cuts can be excised)` : ''}. Residual CFD on the repaired allele, ${e(b.pair.join(', '))}: ${b.cfdBefore.map((x) => (x === null ? 'n/a' : x.toFixed(3))).join(', ')} with the requested edit alone, ${b.cfdAfter.map((x) => (x === null ? 'n/a' : x.toFixed(3))).join(', ')} with the blocking changes.</p>`);
+    const fmt = (arr) => arr.map((x) => (x === null || x === undefined ? 'n/a' : x.toFixed(3))).join(', ');
+    parts.push(`<p>Guide pair: ${e(b.pair.join(' + '))}; ${b.coDelivery ? `co-delivered, both ssODNs carry the same changes; cuts ${b.separation} bp apart${b.separation < b.minSeparation ? ` (below ${b.minSeparation}: the bases between the cuts can be excised)` : ''}` : 'delivered separately, each ssODN carries only the changes for its own guide'}. Residual CFD on the repaired allele, ${e(b.pair.join(', '))}: ${fmt(b.cfdBefore)} with the requested edit alone, ${fmt(b.cfdAfter)} with the blocking changes.</p>`);
     if (b.changes.length) {
       const screen = new Map((r.splice ? r.splice.items : []).map((i) => [i.gp, i]));
-      const head = `<tr><th>Position</th><th>Change</th><th>Where</th><th>Purpose</th>${r.splice ? '<th>Splice screen</th>' : ''}</tr>`;
-      const rows = b.changes.map((c) => { const s = screen.get(c.gp); return `<tr><td>${e(`${r.input.assembly} chr${r.input.chromosome}:${start + c.gp}`)}</td><td>${e(`${c.oc}→${c.nc}`)}</td><td>${e(c.location)}</td><td>${e(c.pur)}</td>${r.splice ? `<td>${s ? `${e(s.risk)}: ${e(s.reason)}` : ''}</td>` : ''}</tr>`; }).join('');
+      const carriedBy = (c) => { const n = (b.donors || []).filter((d) => d.changes.some((x) => x.gp === c.gp && x.nb === c.nb)).map((d) => d.name); return n.length === (b.donors || []).length && n.length > 1 ? 'both ssODNs' : n.join(', '); };
+      const head = `<tr><th>Position</th><th>Change</th><th>Where</th><th>Purpose</th><th>Carried by</th>${r.splice ? '<th>Splice screen</th>' : ''}</tr>`;
+      const rows = b.changes.map((c) => { const s = screen.get(c.gp); return `<tr><td>${e(`${r.input.assembly} chr${r.input.chromosome}:${start + c.gp}`)}</td><td>${e(`${c.oc}→${c.nc}`)}</td><td>${e(c.location)}</td><td>${e(c.pur)}</td><td>${e(carriedBy(c))}</td>${r.splice ? `<td>${s ? `${e(s.risk)}: ${e(s.reason)}` : ''}</td>` : ''}</tr>`; }).join('');
       parts.push(`<table>${head}${rows}</table>`);
     }
     if (r.splice) parts.push(`<p class="sub">${e(r.splice.edit.note)} Screen: ${e(r.splice.method)}.</p>`);
     if (r.splice && r.splice.external) { const x = r.splice.external; parts.push(`<p>${e(x.tool)} ${e(x.version)}: largest change caused by the blocking changes ${Number(x.summary.blockingEffectMax).toFixed(3)}; verdict ${e(x.verdict)}.</p>`); }
     else if (r.splice && b.changes.length) parts.push('<p class="sub">Optional: confirm with a splice predictor. Download the splice-check request from the app and run scripts/splice_check.py; attach its result to the design to update the recommendation.</p>');
-    if (b.alternatives.length || b.otherPairs.length) parts.push(`<p class="sub">Alternatives that meet the same rules: ${[...b.alternatives.map((a) => `same pair, ${a.changes.join(' and ')}`), ...b.otherPairs.map((o) => `${o.pair} (cuts ${o.separation} bp apart): ${o.changes.join(' and ') || 'no changes'}`)].map(e).join('; ')}.</p>`);
+    if (b.alternatives.length || b.otherPairs.length) parts.push(`<p class="sub">Alternatives that meet the same rules: ${[...b.alternatives.map((a) => `same pair, ${a.changes.join(' and ')}`), ...b.otherPairs.map((o) => `${o.pair}${b.coDelivery ? ` (cuts ${o.separation} bp apart)` : ''}: ${(Array.isArray(o.changes) ? o.changes.join(b.coDelivery ? ' and ' : '; ') : o.changes) || 'no changes'}`)].map(e).join('; ')}.</p>`);
   } else parts.push(`<p>${e(b.reason)}</p>`);
   return parts.join('');
 }

@@ -1,4 +1,3 @@
-import { BLOCKING_POLICIES, isPairPolicy } from './genomicBlocking.js';
 import { applySpliceCheck, buildSpliceCheckRequest } from './pairBlocking.js';
 import { buildGenomicSequenceCsv } from './genomicSequenceExport.js';
 import { buildDesignSchemeSvg, buildDesignSchemeFilename } from './designScheme.js';
@@ -14,7 +13,7 @@ function download(name, text, type) {
 
 export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   const [raw,setRaw]=useState('');
-  const [input,setInput]=useState({blockingPolicy:'none',maxBlockingChanges:2,gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
+  const [input,setInput]=useState({coDelivery:true,gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
   const [result,setResult]=useState(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
@@ -39,7 +38,7 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   }
   function generate(event) {
     event.preventDefault();setError('');
-    const design=designGenomicSnp(raw,input);
+    const design=designGenomicSnp(raw,{...input,blockingPolicy:input.coDelivery?'pair':'independent'});
     if(design.err){setResult(null);setError(design.err);}else {setResult(design);onGenerate?.(design);}
   }
   const field=(label,key,type='text')=><label>{label}<input type={type} value={input[key]} onChange={e=>update(key,e.target.value)} required={['assembly','chromosome','referenceStart','position'].includes(key)} min={type==='number'?1:undefined} step={type==='number'?1:undefined}/></label>;
@@ -50,8 +49,6 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
       <label>Genomic reference (GenBank)<input type="file" accept=".gb,.gbk,.genbank" onChange={upload} /></label>
       <p>Reference stays in your browser. An Ensembl Location annotation fills the assembly, chromosome and reference start automatically. Forward genomic references only.</p>
       <div className="snp-grid">
-        <label>Additional blocking changes<select aria-label="Additional blocking changes" value={input.blockingPolicy} onChange={e=>update('blockingPolicy',e.target.value)}>{Object.entries(BLOCKING_POLICIES).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
-        {input.blockingPolicy!=='none' && <label>{isPairPolicy(input.blockingPolicy)?'Maximum shared blocking changes':'Maximum additional changes per donor'}<select aria-label="Maximum additional changes" value={input.maxBlockingChanges} onChange={e=>update('maxBlockingChanges',Number(e.target.value))}>{[1,2,3].map(n=><option key={n} value={n}>{n}</option>)}</select></label>}
         {field('Gene or locus','gene')}{field('Cell line (optional)','cellLine')}
         {field('Genome assembly','assembly')}{field('Chromosome','chromosome')}
         {field('Reference start (1-based genomic coordinate)','referenceStart','number')}
@@ -61,16 +58,14 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
         <label>Guide delivery<select value={input.deliveryMethod} onChange={e=>update('deliveryMethod',e.target.value)}><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression</option></select></label>
       </div>
       <label className="snp-check"><input type="checkbox" checked={input.forwardConfirmed} onChange={e=>update('forwardConfirmed',e.target.checked)}/>The reference sequence is in forward genomic orientation.</label>
-      <p>{input.blockingPolicy==='none'?'No additional blocking substitutions will be added. Every donor is checked for exactly the requested single-base change.'
-        :input.blockingPolicy==='pair'?'The tool picks two guides and the smallest set of PAM or seed substitutions that stops both re-cutting the repaired allele. The changes avoid the splice-site windows of annotated exons, are shared by both ssODNs, and every donor is checked against the reference.'
-        :input.blockingPolicy==='pair-check'?'As above, and the changes are then screened for splice effects by position and a recommendation is given. A splice-predictor check can be attached afterwards to refine it.'
-        :'Compare the requested-edit-only allele with permitted PAM/seed blocking alternatives. Coding changes must remain synonymous relative to the requested allele. Noncoding changes are not silent.'}</p>
+      <label className="snp-check"><input type="checkbox" checked={input.coDelivery} onChange={e=>update('coDelivery',e.target.checked)}/><span><strong>Co-transfect both guides and both ssODNs</strong><br/>On (default): two guides, and each ssODN carries the blocking changes for both. Off: each guide gets its own ssODN carrying only its own blocking changes; deliver one pair at a time.</span></label>
+      <p>Two guides and two ssODNs are always designed. Blocking changes are added only where the repaired allele would be re-cut. They stay outside the splice-site windows of annotated exons, and inside coding sequence they are silent. Every donor is checked against the reference.</p>
       <p>Splice assessment is a local junction and GT/AG motif screen, not a splice-strength prediction. Additional intronic changes remain subject to review.</p>
     <button type="submit" disabled={!raw || busy}>Generate genomic SNP design</button>
     </form>
     {error && <p role="alert" className="snp-alert">{error}</p>}
     {result?.recommendation && <div className="snp-reco" role="status"><strong>{{blockers:'Use the blocking changes.',review:'Review before use.',exact:'Use the exact edit only.'}[result.recommendation.use] || result.recommendation.use}</strong> {result.recommendation.text}</div>}
-    {result?.blocking?.changes?.length>0 && result.input.blockingPolicy==='pair-check' && <div className="snp-splice">
+    {result?.blocking?.changes?.length>0 && <div className="snp-splice">
       <p>Optional splice-predictor check: download the request, run <code>scripts/splice_check.py</code> with the same GenBank reference, then attach its result here.</p>
       <button type="button" onClick={()=>download(`${String(result.input.gene || 'locus').replace(/[^a-zA-Z0-9_-]/g,'_')}_${result.input.position}_splice_check_request.json`,JSON.stringify(buildSpliceCheckRequest(result),null,2),'application/json')}>Download splice-check request</button>
       <label>Attach splice-check result<input type="file" accept=".json,application/json" onChange={attachSplice}/></label>

@@ -4,12 +4,12 @@ export const BLOCKING_POLICIES = Object.freeze({
   none: 'Requested edit only',
   synonymous: 'Allow synonymous coding changes',
   noncoding: 'Allow synonymous and additional noncoding changes',
-  pair: 'Two guides: shared blocking changes on both ssODNs',
-  'pair-check': 'Two guides: shared blocking changes, splice-screened, with recommendation',
+  pair: 'Two guides, co-transfected: shared blocking changes on both ssODNs',
+  independent: 'Two guides, delivered separately: each ssODN blocks its own guide',
 });
 
-/** The pair policies design one guide pair and one blocking set carried by both ssODNs (see pairBlocking.js). */
-export const isPairPolicy = (policy) => policy === 'pair' || policy === 'pair-check';
+/** The two-guide policies (see pairBlocking.js): always two guides and two ssODNs; co-transfection shares the blocking set, otherwise each ssODN blocks its own guide. */
+export const isTwoGuidePolicy = (policy) => policy === 'pair' || policy === 'independent';
 
 // These are explicit screening heuristics, not splice-site strength predictions.
 export function spliceJunctions(model) {
