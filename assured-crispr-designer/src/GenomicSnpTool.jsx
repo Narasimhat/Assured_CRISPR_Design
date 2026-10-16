@@ -4,6 +4,7 @@ import { buildGenomicSequenceCsv } from './genomicSequenceExport.js';
 import { buildDesignSchemeSvg, buildDesignSchemeFilename } from './designScheme.js';
 import { useState } from 'react';
 import { designGenomicSnp, readGenomicReferenceMetadata, buildGenomicSnpReport } from './genomicSnp.js';
+import { fetchGeneReference, fetchVariantReference, searchClinVar, SPECIES } from './geneFetch.js';
 import './genomicSnp.css';
 
 function download(name, text, type) {
@@ -12,13 +13,66 @@ function download(name, text, type) {
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 
+const MODES=[['clinvar','ClinVar variant'],['gene','Gene'],['file','GenBank file']];
+const onEnter=run=>event=>{if(event.key==='Enter'){event.preventDefault();run();}};
+
 export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   const [raw,setRaw]=useState('');
   const [input,setInput]=useState({addBlocking:true,coDelivery:true,gene:'',cellLine:'',assembly:'',chromosome:'',referenceStart:'',position:'',ref:'G',alt:'A',forwardConfirmed:false,deliveryMethod:'rnp',fileName:''});
   const [result,setResult]=useState(null);
   const [error,setError]=useState('');
   const [busy,setBusy]=useState(false);
+  const [mode,setMode]=useState('clinvar');
+  const [look,setLook]=useState({query:'',source:'ensembl',species:'human'});
+  const [lookup,setLookup]=useState({status:'idle',variants:[],total:0,message:'',text:''});
+  const [loaded,setLoaded]=useState(null);
+  const working=lookup.status==='loading';
   const update=(key,value)=>{setInput(prev=>({...prev,[key]:value}));setResult(null);onInvalidate?.();setError('');};
+  const idle={status:'idle',variants:[],total:0,message:'',text:''};
+  function chooseMode(next) {
+    if(next===mode)return;
+    setMode(next);setRaw('');setResult(null);setError('');setLoaded(null);setLookup(idle);onInvalidate?.();
+    setInput(prev=>({...prev,fileName:'',assembly:'',chromosome:'',referenceStart:'',position:'',forwardConfirmed:false}));
+  }
+  function runDesign(text,next) {
+    const design=designGenomicSnp(text,{...next,blockingPolicy:blockingPolicyFor(next)});
+    if(design.err){setResult(null);setError(design.err);}else {setResult(design);onGenerate?.(design);}
+  }
+  async function findVariant() {
+    if(!look.query.trim()||working)return;
+    onInvalidate?.();setResult(null);setError('');setLoaded(null);setRaw('');
+    setLookup({...idle,status:'loading',text:'Searching ClinVar…'});
+    try {
+      const found=await searchClinVar(look.query);
+      if(found.variants.length===1 && found.variants[0].supported) await useVariant(found.variants[0]);
+      else setLookup({...idle,status:'found',variants:found.variants,total:found.total});
+    } catch(e) {setLookup({...idle,status:'error',message:e.message || 'The ClinVar lookup failed.'});}
+  }
+  async function useVariant(variant) {
+    setLookup(prev=>({...prev,status:'loading',message:'',text:`Fetching the ${variant.gene} reference from Ensembl…`}));
+    try {
+      const ref=await fetchVariantReference(variant);
+      const fileName=`ClinVar ${variant.accession} ${variant.title} (${variant.significance}); reference ${ref.summary.transcriptId} from Ensembl`;
+      const next={...input,...ref.input,fileName};
+      setRaw(ref.genbank);setInput(next);
+      setLoaded({title:variant.title,detail:[variant.significance,...variant.conditions.slice(0,2)].join(' · '),reference:`${ref.summary.text} · ${ref.input.assembly} chr${ref.input.chromosome}:${ref.input.position.toLocaleString('en-US')} ${ref.input.ref}>${ref.input.alt}${ref.cdna?` · ${ref.cdna}`:''}`,warnings:ref.summary.warnings});
+      setLookup(idle);setError('');
+      runDesign(ref.genbank,next);
+    } catch(e) {setLookup(prev=>({...prev,status:prev.variants.length?'found':'error',message:e.message || 'Could not build the reference.',text:''}));}
+  }
+  async function fetchGene() {
+    if(!look.query.trim()||working)return;
+    onInvalidate?.();setResult(null);setError('');setLoaded(null);setRaw('');
+    setLookup({...idle,status:'loading',text:'Fetching the gene…'});
+    try {
+      const ref=await fetchGeneReference({query:look.query,source:look.source,species:look.species});
+      const meta=readGenomicReferenceMetadata(ref.genbank);
+      setRaw(ref.genbank);
+      setInput(prev=>({...prev,gene:ref.summary.gene,fileName:ref.fileName,assembly:meta?.assembly || '',chromosome:meta?.chromosome || '',referenceStart:meta?.start || '',position:'',forwardConfirmed:meta?.orientation===1}));
+      setLoaded({title:ref.summary.gene,detail:'',reference:ref.summary.text,warnings:[...ref.summary.warnings,...(meta?.orientation===1?[]:[`${ref.summary.gene} is on the reverse strand. This tool supports forward-strand references only, as it does for an uploaded GenBank file.`])]});
+      setLookup(idle);
+    } catch(e) {setLookup({...idle,status:'error',message:e.message || 'The gene lookup failed.'});}
+  }
   async function upload(event) {
     const file=event.target.files?.[0];setResult(null);onInvalidate?.();setError('');setRaw('');
     if(!file)return;
@@ -39,31 +93,59 @@ export default function GenomicSnpTool({ onGenerate, onInvalidate }) {
   }
   function generate(event) {
     event.preventDefault();setError('');
-    const design=designGenomicSnp(raw,{...input,blockingPolicy:blockingPolicyFor(input)});
-    if(design.err){setResult(null);setError(design.err);}else {setResult(design);onGenerate?.(design);}
+    runDesign(raw,input);
   }
   const field=(label,key,type='text')=><label>{label}<input type={type} value={input[key]} onChange={e=>update(key,e.target.value)} required={['assembly','chromosome','referenceStart','position'].includes(key)} min={type==='number'?1:undefined} step={type==='number'?1:undefined}/></label>;
+  const showLocus=mode==='file';
+  const showEdit=mode!=='clinvar';
   return <section className="genomic-snp">
     <h2>Genomic SNP</h2>
     <p>Design an exact nucleotide substitution in an intron, splice site, untranslated region or coding sequence. Coordinates and alleles use the forward genomic strand.</p>
     <form onSubmit={generate}>
-      <label>Genomic reference (GenBank)<input type="file" accept=".gb,.gbk,.genbank" onChange={upload} /></label>
-      <p>Reference stays in your browser. An Ensembl Location annotation fills the assembly, chromosome and reference start automatically. Forward genomic references only.</p>
+      <div className="snp-mode" role="tablist" aria-label="Reference source">{MODES.map(([key,label])=><button key={key} type="button" role="tab" aria-selected={mode===key} className={mode===key?'on':''} onClick={()=>chooseMode(key)}>{label}</button>)}</div>
+      {mode==='clinvar' && <div className="snp-lookup">
+        <label>ClinVar variant<input value={look.query} onChange={e=>setLook(prev=>({...prev,query:e.target.value}))} onKeyDown={onEnter(findVariant)} placeholder="Variation ID, VCV accession, rsID or HGVS, e.g. NM_030667.3:c.2829+1G>A"/></label>
+        <button type="button" disabled={!look.query.trim() || working} onClick={findVariant}>Find variant and design</button>
+        <p>Single-base substitutions on forward-strand genes. The reference is the gene's MANE Select transcript from Ensembl, fetched in your browser and checked against the ClinVar base.</p>
+      </div>}
+      {mode==='gene' && <div className="snp-lookup">
+        <label>Gene symbol, Ensembl transcript (ENST…) or RefSeq accession (NM_…)<input value={look.query} onChange={e=>setLook(prev=>({...prev,query:e.target.value}))} onKeyDown={onEnter(fetchGene)} placeholder="PTPRO"/></label>
+        <div className="snp-grid">
+          <label>Source<select value={look.source} onChange={e=>setLook(prev=>({...prev,source:e.target.value}))}><option value="ensembl">Ensembl</option><option value="ncbi">NCBI</option></select></label>
+          <label>Species<select value={look.species} onChange={e=>setLook(prev=>({...prev,species:e.target.value}))}>{Object.entries(SPECIES).map(([key,s])=><option key={key} value={key}>{s.label}</option>)}</select></label>
+        </div>
+        <button type="button" disabled={!look.query.trim() || working} onClick={fetchGene}>Fetch gene</button>
+        <p>MANE Select (else canonical) transcript, gene span plus 1 kb on each side.</p>
+      </div>}
+      {mode==='file' && <>
+        <label>Genomic reference (GenBank)<input type="file" accept=".gb,.gbk,.genbank" onChange={upload} /></label>
+        <p>Reference stays in your browser. An Ensembl Location annotation fills the assembly, chromosome and reference start automatically. Forward genomic references only.</p>
+      </>}
+      {working && <p role="status">{lookup.text || 'Working…'}</p>}
+      {lookup.message && <p role="alert" className="snp-alert">{lookup.message}</p>}
+      {lookup.status==='found' && <div className="snp-variants" role="list">
+        {lookup.variants.map(v=><div role="listitem" key={v.id}>
+          <button type="button" disabled={!v.supported || working} onClick={()=>useVariant(v)}>{v.title}</button>
+          <span>{v.significance}{v.conditions[0]?` · ${v.conditions[0]}`:''}{v.supported?'':` · ${v.unsupportedReason}`}</span>
+        </div>)}
+        {lookup.total>lookup.variants.length && <p>Showing {lookup.variants.length} of {lookup.total} records. Narrow the search to see the rest.</p>}
+      </div>}
+      {loaded && <div className="snp-loaded" role="status"><strong>{loaded.title}</strong>{loaded.detail?` — ${loaded.detail}`:''}<br/>{loaded.reference}</div>}
+      {loaded?.warnings?.map((text,i)=><p key={i} role="alert" className="snp-alert">{text}</p>)}
       <div className="snp-grid">
-        {field('Gene or locus','gene')}{field('Cell line (optional)','cellLine')}
-        {field('Genome assembly','assembly')}{field('Chromosome','chromosome')}
-        {field('Reference start (1-based genomic coordinate)','referenceStart','number')}
-        {field('Edit position (1-based genomic coordinate)','position','number')}
-        <label>Reference base<select value={input.ref} onChange={e=>update('ref',e.target.value)}>{['A','C','G','T'].map(b=><option key={b}>{b}</option>)}</select></label>
-        <label>Alternate base<select value={input.alt} onChange={e=>update('alt',e.target.value)}>{['A','C','G','T'].map(b=><option key={b}>{b}</option>)}</select></label>
+        {showEdit && field('Gene or locus','gene')}{field('Cell line (optional)','cellLine')}
+        {showLocus && <>{field('Genome assembly','assembly')}{field('Chromosome','chromosome')}{field('Reference start (1-based genomic coordinate)','referenceStart','number')}</>}
+        {showEdit && field('Edit position (1-based genomic coordinate)','position','number')}
+        {showEdit && <><label>Reference base<select value={input.ref} onChange={e=>update('ref',e.target.value)}>{['A','C','G','T'].map(b=><option key={b}>{b}</option>)}</select></label>
+        <label>Alternate base<select value={input.alt} onChange={e=>update('alt',e.target.value)}>{['A','C','G','T'].map(b=><option key={b}>{b}</option>)}</select></label></>}
         <label>Guide delivery<select value={input.deliveryMethod} onChange={e=>update('deliveryMethod',e.target.value)}><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression</option></select></label>
       </div>
-      <label className="snp-check"><input type="checkbox" checked={input.forwardConfirmed} onChange={e=>update('forwardConfirmed',e.target.checked)}/>The reference sequence is in forward genomic orientation.</label>
+      {showLocus && <label className="snp-check"><input type="checkbox" checked={input.forwardConfirmed} onChange={e=>update('forwardConfirmed',e.target.checked)}/>The reference sequence is in forward genomic orientation.</label>}
       <label className="snp-check"><input type="checkbox" checked={input.addBlocking} onChange={e=>update('addBlocking',e.target.checked)}/><span><strong>Add PAM/seed blocking changes</strong><br/>On (default): two guides and two ssODNs, with silent changes that stop the guides re-cutting the repaired allele. Off: only the requested base is changed; every candidate guide is listed with its matched ssODN and graded for re-cutting.</span></label>
       <label className="snp-check" style={{opacity:input.addBlocking?1:0.5}}><input type="checkbox" disabled={!input.addBlocking} checked={input.coDelivery} onChange={e=>update('coDelivery',e.target.checked)}/><span><strong>Co-transfect both guides and both ssODNs</strong><br/>On (default): each ssODN carries the blocking changes for both guides. Off: each guide gets its own ssODN carrying only its own blocking changes; deliver one pair at a time.</span></label>
       <p>{input.addBlocking?'Blocking changes are added only where the repaired allele would be re-cut. They stay outside the splice-site windows of annotated exons, and inside coding sequence they are silent. Every donor is checked against the reference.':'No additional blocking substitutions will be added. Every donor is checked for exactly the requested single-base change.'}</p>
       <p>Splice assessment is a local junction and GT/AG motif screen, not a splice-strength prediction. Additional intronic changes remain subject to review.</p>
-    <button type="submit" disabled={!raw || busy}>Generate genomic SNP design</button>
+    <button type="submit" disabled={!raw || busy || working}>Generate genomic SNP design</button>
     </form>
     {error && <p role="alert" className="snp-alert">{error}</p>}
     {result?.recommendation && <div className="snp-reco" role="status"><strong>{{blockers:'Use the blocking changes.',review:'Review before use.',exact:'Use the exact edit only.'}[result.recommendation.use] || result.recommendation.use}</strong> {result.recommendation.text}</div>}

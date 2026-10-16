@@ -67,3 +67,9 @@ Add the reference here, then add a case to `CASES` in `../regression-fixtures.te
 Every case is additionally checked against the universal invariants in that file, so a
 new fixture strengthens the whole suite rather than only its own scenario. A fixture left
 unreferenced by any case will fail the suite.
+
+### `gene-fetch/responses.json`
+
+- **Source:** responses recorded on 2026-10-16 from Ensembl REST (`lookup/symbol`, `sequence/region`, `info/*`), NCBI Datasets (`gene/symbol/.../product_report`), and NCBI E-utilities (`efetch` nuccore, ClinVar `esearch`/`esummary`), keyed by request URL.
+- **Genes:** MYD88 (forward strand, 5 exons) and HBB (reverse strand, 3 exons). Ensembl and NCBI transcript lists are trimmed to the MANE Select transcript plus up to two others, so transcript selection is still exercised. ClinVar records: MYD88 rs387907272, HBB VCV000015333 (sickle-cell, c.20A>T), HBB haplotype 446748, PTPRO c.2829+1G>A.
+- **What it pins:** the GenBank record built from each source, `cdnaCoordinate`, ClinVar parsing and the Genomic SNP designer accepting a fetched reference. Public data only; tests replay it and never touch the network.

@@ -9,6 +9,7 @@ import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessCh
   formatDesignLabel, getBrunelloReferenceGuideSet, getPrimerQualitySummary, getProjectTypeMeta,
   normalizeGeneToken, normalizeLocusWindow } from "./reportHtml";
 import { describeKoGenomicContextFromModel, getGenomicSequence, normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel } from "./transcriptModel";
+import { fetchGeneReference, SPECIES } from "./geneFetch";
 import { HISTORICAL_PROJECTS, HISTORICAL_PROJECTS_SUMMARY } from "./data/historicalProjects";
 import { buildHistoricalContext, buildReviewItems, buildRowMeta } from "./reportInputs";
 import { getDonorReleaseStatus, getReleaseVerdict, getReleaseVerdictSections } from "./releaseVerdict";
@@ -1004,6 +1005,9 @@ function createBatchRow(index) {
     customGuides: "",
     gbRaw: "",
     fileName: "",
+    fetchQuery: "",
+    fetchSource: "ensembl",
+    fetchSpecies: "human",
     rawSequence: "",
     cdsStart: "",
     cdsEnd: "",
@@ -1360,7 +1364,7 @@ function getRowSectionIssues(row) {
     if (!parseRawSequenceInput(row?.rawSequence)) reference.push("Paste a genomic DNA sequence.");
     if (!row?.cdsStart || !row?.cdsEnd) reference.push("Provide CDS start and end coordinates.");
   } else if (!hasSequenceBackedReference(row) && row?.projectType !== "ko") {
-    reference.push("Upload a GenBank file or switch to raw DNA input.");
+    reference.push("Upload a GenBank file, fetch the gene, or switch to raw DNA input.");
   }
 
   if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
@@ -3097,6 +3101,25 @@ export default function App() {
     reader.readAsText(file);
   }, []);
 
+  const [geneFetchState, setGeneFetchState] = useState({});
+  const fetchRowGene = useCallback(async (index, query, source, species) => {
+    setGeneFetchState((current) => ({ ...current, [index]: { status: "loading" } }));
+    try {
+      const result = await fetchGeneReference({ query, source, species });
+      setBatchResults([]);
+      setBatchError("");
+      setBatchCopyState("");
+      setBatchRows((current) => current.map((row, rowIndex) => {
+        if (rowIndex !== index) return row;
+        const next = { ...row, gbRaw: result.genbank, fileName: result.fileName, label: row.label || result.summary.gene, gene: row.gene || result.summary.gene };
+        return { ...next, parseIssue: summarizeRowParseIssue(next) };
+      }));
+      setGeneFetchState((current) => ({ ...current, [index]: { status: "ok", summary: result.summary, fileName: result.fileName } }));
+    } catch (error) {
+      setGeneFetchState((current) => ({ ...current, [index]: { status: "error", message: error?.message || "The gene lookup failed." } }));
+    }
+  }, []);
+
   const onPrimerToolFile = useCallback((event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -3733,6 +3756,10 @@ export default function App() {
                 : "";
               const rowReady = !row.parseIssue && (row.projectType === "ko" ? (!!row.gene || hasSequenceBackedReference(row)) : hasSequenceBackedReference(row));
               const rowIssues = getRowSectionIssues(row);
+              const fetchQuery = row.fetchQuery || "";
+              const fetchSource = row.fetchSource || "ensembl";
+              const fetchSpecies = row.fetchSpecies || "human";
+              const fetchState = geneFetchState[index];
               return (
                 <div key={row.id} style={{ padding: 16, borderRadius: 18, border: `1px solid ${COLORS.borderSoft}`, background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)", boxShadow: "0 14px 28px rgba(15, 23, 42, 0.08)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
@@ -3821,6 +3848,37 @@ export default function App() {
                           <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
                         </label>
                       </label>
+                    )}
+                    {row.referenceSource !== "raw" && (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Or fetch the gene (MANE Select transcript, gene span plus 1 kb)</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <input
+                            value={fetchQuery}
+                            onChange={(event) => updateBatchRow(index, "fetchQuery", event.target.value)}
+                            onKeyDown={(event) => { if (event.key === "Enter" && fetchQuery.trim()) { event.preventDefault(); fetchRowGene(index, fetchQuery, fetchSource, fetchSpecies); } }}
+                            placeholder="Gene symbol, ENST… or NM_…"
+                            style={{ ...FIELD_STYLE, flex: "1 1 220px", width: "auto" }}
+                          />
+                          <select value={fetchSource} onChange={(event) => updateBatchRow(index, "fetchSource", event.target.value)} style={{ ...SELECT_STYLE, width: 120 }} aria-label="Source">
+                            <option value="ensembl">Ensembl</option>
+                            <option value="ncbi">NCBI</option>
+                          </select>
+                          <select value={fetchSpecies} onChange={(event) => updateBatchRow(index, "fetchSpecies", event.target.value)} style={{ ...SELECT_STYLE, width: 130 }} aria-label="Species">
+                            {Object.entries(SPECIES).map(([key, species]) => <option key={key} value={key}>{species.label}</option>)}
+                          </select>
+                          <ActionButton onClick={() => fetchRowGene(index, fetchQuery, fetchSource, fetchSpecies)} disabled={!fetchQuery.trim() || fetchState?.status === "loading"}>
+                            {fetchState?.status === "loading" ? "Fetching…" : "Fetch"}
+                          </ActionButton>
+                        </div>
+                        {fetchState?.status === "error" && <InlineNotice tone="danger" style={{ marginTop: 8 }}>{fetchState.message}</InlineNotice>}
+                        {fetchState?.status === "ok" && row.fileName === fetchState.fileName && (
+                          <InlineNotice tone={fetchState.summary.warnings.length ? "warning" : "success"} style={{ marginTop: 8 }}>
+                            {fetchState.summary.text}
+                            {fetchState.summary.warnings.map((text, warningIndex) => <div key={warningIndex}>{text}</div>)}
+                          </InlineNotice>
+                        )}
+                      </div>
                     )}
 
                     <label style={{ display: "block", marginTop: 12 }}>
