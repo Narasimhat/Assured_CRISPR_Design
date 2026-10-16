@@ -72,4 +72,6 @@ unreferenced by any case will fail the suite.
 
 - **Source:** responses recorded on 2026-10-16 from Ensembl REST (`lookup/symbol`, `sequence/region`, `info/*`), NCBI Datasets (`gene/symbol/.../product_report`), and NCBI E-utilities (`efetch` nuccore, ClinVar `esearch`/`esummary`), keyed by request URL.
 - **Genes:** MYD88 (forward strand, 5 exons) and HBB (reverse strand, 3 exons). Ensembl and NCBI transcript lists are trimmed to the MANE Select transcript plus up to two others, so transcript selection is still exercised. ClinVar records: MYD88 rs387907272, HBB VCV000015333 (sickle-cell, c.20A>T), HBB haplotype 446748, PTPRO c.2829+1G>A.
+- **Regions:** the genomic sequence is recorded for the gene fetch (gene span ± 1 kb) and for Genomic SNP references (± 6 kb) of the MYD88 and HBB variants.
+- **`hbb-splice-check-result.json`:** the output of `scripts/splice_check.py` (SpliceAI 1.3.1) for the reverse-strand HBB sickle-cell design with its 6 kb reference, run on 2026-10-16. Largest change from the blocking changes 0.124 (acceptor loss), the edit alone 0.011.
 - **What it pins:** the GenBank record built from each source, `cdnaCoordinate`, ClinVar parsing and the Genomic SNP designer accepting a fetched reference. Public data only; tests replay it and never touch the network.
