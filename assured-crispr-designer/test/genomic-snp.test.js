@@ -32,7 +32,8 @@ test('rejects reference mismatch, out-of-range and invalid alleles',()=>{
 });
 test('does not guess or silently change assembly, chromosome, reference start or strand',()=>{
  for(const change of [{assembly:'GRCh37'},{chromosome:'13'},{referenceStart:1002}])assert.match(designGenomicSnp(make(),{...input,...change}).err,/conflicts/);
- assert.match(designGenomicSnp(make(sequence,'chromosome:GRCh38:12:1001:2200:-1'),input).err,/Reverse-oriented/);
+ // A reverse-oriented record is mapped from its Location annotation; forward-strand alleles that do not match its complement are a mismatch, not a strand guess.
+ assert.match(designGenomicSnp(make(sequence,'chromosome:GRCh38:12:1001:2200:-1'),input).err,/Reference mismatch/);
  assert.match(designGenomicSnp(make(sequence,'chromosome:GRCh38:12:1001:2201:1'),input).err,/sequence length/);
  assert.match(designGenomicSnp(make(sequence,'none'),{...input,forwardConfirmed:false}).err,/Confirm/);
  assert.equal(readGenomicReferenceMetadata(make()).start,1001);
