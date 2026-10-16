@@ -60,7 +60,7 @@ error, not a risk - and it is unavailable under co-delivery.
 
 - Guide selection does not yet calculate a genome-wide CFD/MIT specificity score or a full off-target candidate list.
 - Guide GC content is reported, but a calibrated on-target efficiency model is not yet applied to every design mode. Reference KO guides may carry source-library scores when available.
-- Uploaded transcript identifiers are recorded, but MANE Select matching is not yet automatic. Confirm the intended transcript—especially the terminal coding exon for N- and C-terminal tagging—before sign-off.
+- Uploaded transcript identifiers are recorded, but MANE Select matching is not automatic for uploads (a fetched reference uses MANE Select; see below). Confirm the intended transcript—especially the terminal coding exon for N- and C-terminal tagging—before sign-off.
 - Remote primer specificity is an approximation and is not a substitute for a locally indexed, assembly-specific in-silico PCR result.
 - `strong` blocking means predicted residual activity at or below 0.023, not zero. Only a fully destroyed PAM makes a site uncuttable.
 - CFD is SpCas9-only, was fitted on off-target cleavage in a single screen, and estimates relative activity rather than a probability. It says nothing about repair outcome. It is the best published proxy for re-cutting of a repaired allele, not a measurement of it.
@@ -80,8 +80,9 @@ The point-mutation designer offers two guides whenever two exist within 30 bp of
 ## Genomic SNP mode
 
 Use the **Genomic SNP** tab for exact single-base edits, including intronic and
-splice-site substitutions. Upload a forward-oriented genomic GenBank reference,
-then enter assembly, chromosome, reference start, edit position (all coordinates
+splice-site substitutions. Look up a ClinVar variant (the reference is fetched for you),
+fetch a gene, or upload a forward-oriented genomic GenBank reference. For a file,
+enter assembly, chromosome, reference start, edit position (all coordinates
 1-based), and forward-strand reference/alternate bases. Ensembl `Location:` metadata
 fills the reference mapping automatically; conflicting coordinates and reference-base
 mismatches are rejected. A CDS is optional. Reverse-oriented input records are rejected.
@@ -93,6 +94,16 @@ or **REVIEW REQUIRED**, never ordering approval. Guides lacking strong repaired-
 protection, splice effects, parental genotype and genome-wide specificity need review.
 These results have their own downloads; they are not included in the protein-workspace
 batch ordering or Assured QC exports.
+
+## Fetching a reference instead of uploading one
+
+Both the design-request rows (protein workspace) and the Genomic SNP tab can fetch the reference from Ensembl or NCBI instead of reading a GenBank file. `src/geneFetch.js` builds the same record a Benchling "Import from genome" export contains: the sequence in sense orientation, gene, exon and CDS features, and an Ensembl-style `Location:` comment. Everything downstream (parsers, designers, reports, the Location check) sees an ordinary GenBank file, and the fetched text is saved with the project like an upload.
+
+- **Gene.** Gene symbol (aliases resolved through Ensembl cross-references), Ensembl transcript or gene ID, transcript name such as `PTPRO-201`, RefSeq accession (`NM_…`) or NCBI Gene ID. A symbol resolves to the MANE Select transcript, else the Ensembl canonical one, else the longest coding transcript. The record is the gene span plus 1 kb on each side; a reverse-strand gene is written reverse-complemented, as Benchling does. Ensembl IDs are always answered by Ensembl and RefSeq accessions by NCBI; the source selector matters for symbols. Species: human, mouse, rat, zebrafish.
+- **ClinVar variant** (Genomic SNP tab). Variation ID, VCV accession, rsID, HGVS name (`NM_030667.3:c.2829+1G>A`) or `GENE c.…`. Only a record that is itself a single-base substitution is designable; haplotypes and other types are listed with the reason. The designer takes the ClinVar GRCh38 position and alleles, fetches the gene's MANE Select transcript from Ensembl, and refuses to continue if the reference base differs from ClinVar's. It reports the variant's cDNA position on the fetched transcript and warns when ClinVar names a different one. The design then runs exactly as for an upload (two guides, two ssODNs, blocking changes as set in the form), and the report's Reference row names the ClinVar record and the Ensembl transcript.
+- **Reverse-strand genes.** The Genomic SNP designer still needs a forward-strand reference, as for uploads. A ClinVar variant in a reverse-strand gene is refused with that reason before anything is fetched.
+- **Where it runs.** Requests go from the browser to Ensembl REST, NCBI Datasets and NCBI E-utilities, which all allow cross-origin reads, so it works on Vercel and GitHub Pages alike and nothing but the identifier you type is sent. Public Ensembl and NCBI services rate-limit and occasionally return errors; the module retries transient failures and otherwise says which service failed. Benchling's own API is not used: it needs a per-user key and does not allow browser requests.
+- **Tests.** `test/gene-fetch.test.js` replays recorded Ensembl, NCBI and ClinVar responses (`test/fixtures/gene-fetch/responses.json`: MYD88 on the forward strand, HBB on the reverse strand, three ClinVar records). It checks that Ensembl and NCBI give identical exons, coding sequence and bases, that reverse-strand records translate correctly, and that a fetched ClinVar reference is accepted by the Genomic SNP designer. Against a Benchling import of PTPRO-201 the fetched record (gene span, no flank) had identical sequence, 27 exons and CDS, and the F942E design output was byte-identical.
 
 ## Local development
 
