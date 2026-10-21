@@ -159,7 +159,7 @@ test("procurement readiness blocks weak guide protection and always retains exte
   assert.match(collectProcurementReviewNotes(readiness).join(" "), /Genome-wide/i);
 });
 
-test("archived APOE and Landthaler primer pairs no longer pass thermodynamic review", () => {
+test("archived APOE and collaborator-group primer pairs no longer pass thermodynamic review", () => {
   const archivedPairs = [
     ["APOE_R154S", "GACACCCTCCCGCCCTCTCGGCCG", "CGCGGGTCCGGCTGCCCATCTCCT"],
     ["APOE_V254E", "CGATGACCTGCAGAAGCGCCTGGC", "ACAGGGTCTCCCGCTGCAGGCTGC"],
