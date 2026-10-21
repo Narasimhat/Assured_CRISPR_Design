@@ -1,0 +1,88 @@
+# CITATION.cff for ASSURED CRISPR Designer
+# Draft prepared for owner review. Items marked TODO(owner) need a decision or data only the owner has.
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata in this file. A versioned archive DOI will be added after the first archived release."
+type: software
+title: "ASSURED CRISPR Designer"
+abstract: >-
+  Browser and command-line design tool for CRISPR-Cas9 knockouts, point mutations and
+  tag or reporter knock-ins in human pluripotent stem cells. It designs two guides per
+  edit, grades re-cutting protection of the repaired allele by CFD, builds ssODN, block or
+  AAV donors, proposes genotyping primers, reports a per-pair release state, and writes a
+  design hand-off file (assured-qc-design/1) for the Assured QC app.
+authors:
+  - family-names: Telugu
+    given-names: Narasimha
+    affiliation: "Max Delbrück Center for Molecular Medicine in the Helmholtz Association (MDC), Berlin, Germany"
+    # TODO(owner): add orcid: "https://orcid.org/0000-0000-0000-0000" and any co-authors before release.
+repository-code: "https://github.com/Narasimhat/Assured_CRISPR_Design"
+url: "https://assured-crispr-design.vercel.app"
+license: MIT
+keywords:
+  - CRISPR
+  - Cas9
+  - guide RNA design
+  - homology-directed repair
+  - ssODN
+  - human induced pluripotent stem cells
+# TODO(owner): after the archive deposit add
+#   version: <tag>
+#   date-released: <YYYY-MM-DD>
+#   doi: <archive DOI>
+# and, once the manuscript is published, a preferred-citation block for it.
+references:
+  - type: article
+    authors:
+      - family-names: Ludwik
+        given-names: Katarzyna A.
+      - family-names: Telugu
+        given-names: Narasimha
+      - family-names: Schommer
+        given-names: Sandra
+      - family-names: Stachelscheid
+        given-names: Harald
+      - family-names: Diecke
+        given-names: Sebastian
+    title: "ASSURED-optimized CRISPR protocol for knockout/SNP knockin in hiPSCs"
+    journal: "STAR Protocols"
+    volume: 4
+    year: 2023
+    month: 9
+    doi: "10.1016/j.xpro.2023.102406"
+    notes: "The protocol this tool implements and extends."
+  - type: article
+    authors:
+      - family-names: Doench
+        given-names: "J. G."
+      - family-names: Fusi
+        given-names: "N."
+      - family-names: Sullender
+        given-names: "M."
+      - family-names: Hegde
+        given-names: "M."
+      - family-names: Vaimberg
+        given-names: "E. W."
+      - family-names: Donovan
+        given-names: "K. F."
+      - family-names: Smith
+        given-names: "I."
+      - family-names: Tothova
+        given-names: "Z."
+      - family-names: Wilen
+        given-names: "C."
+      - family-names: Orchard
+        given-names: "R."
+      - family-names: Virgin
+        given-names: "H. W."
+      - family-names: Listgarten
+        given-names: "J."
+      - family-names: Root
+        given-names: "D. E."
+    title: "Optimized sgRNA design to maximize activity and minimize off-target effects of CRISPR-Cas9"
+    journal: "Nature Biotechnology"
+    volume: 34
+    start: 184
+    end: 191
+    year: 2016
+    doi: "10.1038/nbt.3437"
+    notes: "Source of the CFD score used to grade guide blocking (src/cfd.js)."
