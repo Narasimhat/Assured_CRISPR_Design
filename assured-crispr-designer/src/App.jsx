@@ -3765,7 +3765,7 @@ export default function App() {
                   <FormSection title="Basic details" hint="Start with the gene, the edit type, and any project identifiers you already know.">
                     {!!rowIssues.project.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.project.join(" ")}</InlineNotice>}
                     <Grid>
-                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="e.g. P-0001" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Team or client</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal program or sponsor" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>

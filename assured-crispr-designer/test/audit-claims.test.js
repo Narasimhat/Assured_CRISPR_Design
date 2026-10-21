@@ -71,7 +71,7 @@ test("audit: a design can compute cleanly and still not be releasable", () => {
 // --- "Reject/warn on incomplete or ambiguous SpCas9 spacer sequences ... including 19 nt" -
 
 test("audit: historical 19 nt spacer rows are refused, not silently padded", () => {
-  // 45638/45639 APOE HALO carried 19 nt guides and a blank gRNA1 row.
+  // P01/P02 APOE HALO carried 19 nt guides and a blank gRNA1 row.
   const nineteen = "GCACCGAGGAGCTGCGGGT"; // 19 nt
   assert.equal(nineteen.length, 19);
   const result = design("pm", "apoe-r154s.gb", "R154S", "", {
@@ -101,7 +101,7 @@ test("audit: a blank guide row cannot become a design", () => {
 // --- "strict PAM disruption (NAG/NGA are not accepted as dead PAMs)" ----------------------
 
 test("audit: NAG and NGA PAM changes are not graded as strong blocking", () => {
-  // Finding 2: APOE R176C, V254E, PHF6, SCN5A and several Landthaler designs called
+  // Finding 2: APOE R176C, V254E, PHF6, SCN5A and several collaborator-group designs called
   // NAG/NGA changes "guide blocking present". Only a real PAM kill counts as strong.
   const result = design("pm", "apoe-r154s.gb", "R176C", "", { expectedGene: "APOE" });
   const blocking = summarizeGuideBlocking(result);
@@ -178,7 +178,7 @@ test("audit finding 1: a donor failing its protein assertion blocks release", ()
 // --- "cross-guide protection" / "guide-to-donor pairing" ---------------------------------
 
 test("audit: alternative guides are never presented as poolable unless every donor blocks them", () => {
-  // 72876/72878/72889 NKX3.1 + RNF213: one document mixed projects and WT/mutant donors,
+  // P15/P16/P17 NKX3.1 + RNF213: one document mixed projects and WT/mutant donors,
   // making accidental co-delivery plausible.
   const result = designAsymmetric();
   if ((result.gs || []).length > 1 && !result.coDeliverySafe) {
@@ -284,7 +284,7 @@ test("audit: a failed design contributes no order rows at all", () => {
 // --- MYD88 KO claims ----------------------------------------------------------------------
 
 test("audit: a knockout reports both products, not one amplicon size", () => {
-  // 75647 MYD88 KO: the old report gave a single amplicon size for a dual-cut deletion.
+  // P26 MYD88 KO: the old report gave a single amplicon size for a dual-cut deletion.
   const result = design("ko", "two-genes-partial-first.gb", "", "", { expectedGene: "TARGETB" });
   assert.equal(result.err, undefined);
   assert.ok(result.amp, "no amplicon description");
@@ -345,7 +345,7 @@ test("audit: the document's application-change list is the one the suite covers"
 
 
 test("audit: guide-to-donor pairing survives into the exported rows", () => {
-  // 72876/72878/72889 NKX3.1 + RNF213: one combined order made cross-project and WT/mutant
+  // P15/P16/P17 NKX3.1 + RNF213: one combined order made cross-project and WT/mutant
   // co-delivery plausible. Pairing on the design object is not enough - the export is what
   // a supplier and a bench scientist actually read, so the link has to be in the row.
   //
