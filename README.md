@@ -200,3 +200,37 @@ splice-site predictor; a pass does not validate splicing. For a prediction, down
 wild type, the edit and the edit with each ssODN's blocking changes and writes a result file; attach that file in the app to update the recommendation. The largest score
 change caused by the blocking changes on the edited allele (the worst ssODN allele) is judged: <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against
 them (the tool's own thresholds). Limits: forward-strand references only; genome-wide specificity is not checked; RNA outcomes still need validation in the edited clones.
+
+## Install, run and test
+
+Requires Node.js 20 (the version the CI workflows use) and npm. All commands run in `assured-crispr-designer/`.
+
+```bash
+cd assured-crispr-designer
+npm ci                 # exact versions from package-lock.json
+npm run dev            # local app (Vite)
+npm test               # design-engine safety suite (node --test)
+npm run build          # production build
+npm run design -- --manifest examples/manifest_knockout.json
+npm run export-report -- --manifest examples/manifest_apoe_r176c.json --output outputs/apoe_r176c_report.html
+```
+
+The two command-line entry points run the same engine as the hosted app; see [RUNNER_USAGE.md](./RUNNER_USAGE.md) for manifests,
+donor formats and exit codes. `outputs/` is git-ignored: generated reports stay out of the repository.
+
+Reference pages for the hand-off to Assured QC, the blocking rules, the splice check and third-party components are in [docs/](./docs/README.md).
+
+## How to cite
+
+Citation metadata is in [CITATION.cff](./CITATION.cff) (GitHub shows it under **Cite this repository**). Until a versioned archive with a DOI is
+published, cite the protocol this tool implements and extends, and state the commit or release you used:
+
+> Ludwik KA, Telugu N, Schommer S, Stachelscheid H, Diecke S. ASSURED-optimized CRISPR protocol for knockout/SNP knockin in hiPSCs.
+> *STAR Protocols* 4 (2023), 102406. https://doi.org/10.1016/j.xpro.2023.102406
+
+If you use the guide-blocking grades, also cite Doench et al. 2016, *Nat Biotechnol* 34:184-191 (CFD).
+
+## Licence
+
+MIT (see [LICENSE](./LICENSE)) for the code and documentation written for this project. Bundled data and external services keep their own terms;
+see [docs/third-party.md](./docs/third-party.md). The optional SpliceAI check is not bundled and is restricted to non-commercial use by its authors.
