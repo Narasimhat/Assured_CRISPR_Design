@@ -200,3 +200,9 @@ splice-site predictor; a pass does not validate splicing. For a prediction, down
 wild type, the edit and the edit with each ssODN's blocking changes and writes a result file; attach that file in the app to update the recommendation. The largest score
 change caused by the blocking changes on the edited allele (the worst ssODN allele) is judged: <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against
 them (the tool's own thresholds). Limits: forward-strand references only; genome-wide specificity is not checked; RNA outcomes still need validation in the edited clones.
+
+## FAIR metadata and provenance notary
+
+Open **FAIR metadata & provenance notary** in the app. Select a downloaded design JSON, report, CSV, or raw dataset, complete the twelve metadata fields, and download its JSON certificate. In the same panel, select a certificate and a received file to compare fingerprints. Files remain in the browser; no remote requests or storage are added. Limits: 50 MB dataset and 1 MB imported certificate.
+
+The score is metadata completeness (12 equal-weight presence checks, plus HTTPS URL syntax), not formal FAIR certification or scientific/regulatory approval. Schema conformance, repository availability, vocabulary, licenses, and global identifier persistence are not independently checked. Records use SHA-256 and sorted-key canonical JSON (`assured-provenance/1`), with local UTC time and explicit `unanchored` status. Certificates are self-issued: an attacker can replace both a record and its hash. A trusted original or independently verified signature/ledger anchor is required to establish issuer provenance. No blockchain transaction or immutable ledger is implemented. Existing scientific release/QC decisions are unaffected.

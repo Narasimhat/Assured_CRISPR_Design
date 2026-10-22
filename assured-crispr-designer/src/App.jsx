@@ -1,3 +1,4 @@
+import ProvenancePanel from './ProvenancePanel.jsx';
 import { useCallback, useEffect, useMemo, useState } from "react";
 import GenomicSnpTool, { GenomicSnpReport } from "./GenomicSnpTool.jsx";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
@@ -3448,6 +3449,7 @@ export default function App() {
   return (
     <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top left, rgba(15,118,110,0.08), transparent 24%), radial-gradient(circle at top right, rgba(180,83,9,0.08), transparent 22%), linear-gradient(180deg, #FDFEFE 0%, ${COLORS.bg} 38%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
       <div style={{ width: "min(1560px, calc(100vw - 32px))", margin: "0 auto", padding: "20px 16px 40px" }}>
+        <ProvenancePanel source="Assured CRISPR Design" />
         <div style={{ ...CARD_STYLE, marginBottom: 14, background: "linear-gradient(180deg, #F8FBFD, #EEF4F8)", border: "1px solid #D7DEE7", padding: 20, boxShadow: "0 24px 48px rgba(2, 8, 23, 0.12)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, alignItems: "stretch" }}>
             <div>
