@@ -7,7 +7,7 @@ import { parseGB } from "../src/designEngine.js";
 import { normalizeGenBankToTranscriptModel } from "../src/transcriptModel.js";
 import { readGenomicReferenceMetadata, designGenomicSnp } from "../src/genomicSnp.js";
 import { blockingPolicyFor } from "../src/genomicBlocking.js";
-import { GeneFetchError, SNP_FLANK, buildGenBank, cdnaCoordinate, cdnaFromVariantName, cdsToGenomic, fetchGeneReference, fetchVariantReference, parseGeneQuery, searchClinVar, translateDna } from "../src/geneFetch.js";
+import { FETCH_ORIGINS, GeneFetchError, SNP_FLANK, buildGenBank, cdnaCoordinate, cdnaFromVariantName, cdsToGenomic, fetchGeneReference, fetchVariantReference, parseGeneQuery, searchClinVar, translateDna } from "../src/geneFetch.js";
 
 // Responses recorded from Ensembl REST, NCBI Datasets and NCBI E-utilities on 2026-10-16 (public data; transcripts trimmed to the
 // MANE Select one plus two others so selection is still exercised). Tests replay them; nothing here touches the network.
@@ -276,4 +276,25 @@ test("an outage names the other source for a gene symbol but not for an accessio
 test("Genomic SNP references carry enough context for the optional SpliceAI check", () => {
   // scripts/splice_check.py needs 400 bases of window plus 5,000 of SpliceAI context on each side of the edit.
   assert.ok(SNP_FLANK >= 5400);
+});
+
+test("every origin the fetchers call is allowed by the deployed Content-Security-Policy, and nothing broader", async () => {
+  // The Vercel deployment sends a CSP with connect-src. A browser blocks any origin it does not list, and reports only "Failed to fetch",
+  // which the app shows as "Could not reach ClinVar". Node and jsdom do not enforce CSP, so this compares the header with the requests directly.
+  const config = JSON.parse(fs.readFileSync(path.join(here, "..", "..", "vercel.json"), "utf8"));
+  const policy = config.headers.flatMap((h) => h.headers).find((h) => h.key === "Content-Security-Policy").value;
+  const directives = Object.fromEntries(policy.split(";").map((d) => d.trim()).filter(Boolean).map((d) => { const [name, ...values] = d.split(/\s+/); return [name, values]; }));
+  const allowed = directives["connect-src"];
+  assert.ok(allowed.includes("'self'"));
+  const seen = new Set();
+  const recording = async (url) => { seen.add(new URL(url).origin); return replay()(url); };
+  const o = { fetchImpl: recording, sleep: noSleep, date: DATE };
+  await fetchGeneReference({ query: "MYD88", source: "ensembl", ...o });
+  await fetchGeneReference({ query: "MYD88", source: "ncbi", ...o });
+  const found = (await searchClinVar("rs387907272", o)).variants[0];
+  await fetchVariantReference(found, o);
+  assert.deepEqual([...seen].sort(), [...FETCH_ORIGINS].sort(), "the fixtures exercise every origin the module declares");
+  for (const origin of seen) assert.ok(allowed.includes(origin), `${origin} is not in connect-src`);
+  // Exactly 'self' plus those origins: no wildcard, no scheme-wide source.
+  assert.deepEqual(allowed.filter((token) => token !== "'self'").sort(), [...FETCH_ORIGINS].sort());
 });
