@@ -7,7 +7,7 @@ import { parseGB } from "../src/designEngine.js";
 import { normalizeGenBankToTranscriptModel } from "../src/transcriptModel.js";
 import { readGenomicReferenceMetadata, designGenomicSnp } from "../src/genomicSnp.js";
 import { blockingPolicyFor } from "../src/genomicBlocking.js";
-import { GeneFetchError, buildGenBank, cdnaCoordinate, cdnaFromVariantName, cdsToGenomic, fetchGeneReference, fetchVariantReference, parseGeneQuery, searchClinVar, translateDna } from "../src/geneFetch.js";
+import { GeneFetchError, SNP_FLANK, buildGenBank, cdnaCoordinate, cdnaFromVariantName, cdsToGenomic, fetchGeneReference, fetchVariantReference, parseGeneQuery, searchClinVar, translateDna } from "../src/geneFetch.js";
 
 // Responses recorded from Ensembl REST, NCBI Datasets and NCBI E-utilities on 2026-10-16 (public data; transcripts trimmed to the
 // MANE Select one plus two others so selection is still exercised). Tests replay them; nothing here touches the network.
@@ -232,7 +232,7 @@ test("a ClinVar variant becomes a verified reference with its cDNA coordinate", 
   const ref = await fetchVariantReference(found, opts());
   assert.equal(ref.cdna, "c.755"); assert.equal(ref.clinvarCdna, "c.755");
   assert.deepEqual(ref.summary.warnings, []);
-  assert.deepEqual(ref.input, { gene: "MYD88", assembly: "GRCh38", chromosome: "3", referenceStart: 38137552, position: 38141150, ref: "T", alt: "C", forwardConfirmed: true });
+  assert.deepEqual(ref.input, { gene: "MYD88", assembly: "GRCh38", chromosome: "3", referenceStart: 38132552, position: 38141150, ref: "T", alt: "C", forwardConfirmed: true });
   assert.equal(baseAt(ref.genbank, 38141150), "T");
   // The reference the tool builds is accepted by the Genomic SNP designer as it stands.
   for (const flags of [{ addBlocking: true, coDelivery: true }, { addBlocking: false, coDelivery: true }]) {
@@ -245,8 +245,6 @@ test("a ClinVar variant becomes a verified reference with its cDNA coordinate", 
 });
 
 test("a variant the tool cannot design from is refused before anything is built", async () => {
-  const hbb = (await searchClinVar("VCV000015333", opts())).variants[0];
-  await assert.rejects(fetchVariantReference(hbb, opts()), /reverse strand/);
   const haplotype = (await searchClinVar("446748", opts())).variants[0];
   await assert.rejects(fetchVariantReference(haplotype, opts()), /haplotype/);
   const found = (await searchClinVar("rs387907272", opts())).variants[0];
@@ -273,4 +271,9 @@ test("an outage names the other source for a gene symbol but not for an accessio
   await assert.rejects(fetchGeneReference({ query: "MYD88", source: "ensembl", fetchImpl: down, sleep: noSleep }), /Ensembl returned 503.*NCBI can resolve gene symbols too/);
   await assert.rejects(fetchGeneReference({ query: "MYD88", source: "ncbi", fetchImpl: down, sleep: noSleep }), /NCBI Datasets returned 503.*Ensembl can resolve gene symbols too/);
   await assert.rejects(fetchGeneReference({ query: "NM_002468.5", fetchImpl: down, sleep: noSleep }), (error) => !/can resolve gene symbols/.test(error.message));
+});
+
+test("Genomic SNP references carry enough context for the optional SpliceAI check", () => {
+  // scripts/splice_check.py needs 400 bases of window plus 5,000 of SpliceAI context on each side of the edit.
+  assert.ok(SNP_FLANK >= 5400);
 });

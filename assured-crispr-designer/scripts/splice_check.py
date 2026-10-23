@@ -5,11 +5,12 @@ The Genomic SNP tab adds blocking changes that avoid the splice-site windows and
 edit and the edit with each ssODN's blocking changes with SpliceAI and reports how much the blocking changes move the predicted splice sites on the edited allele. Attach the
 result file to the design in the app to update its recommendation.
 
-  python scripts/splice_check.py request.json reference.gb [-o splice_check.json] [--window 400] [--strand +]
+  python scripts/splice_check.py request.json reference.gb [-o splice_check.json] [--window 400] [--strand +|-]
 
 request.json  the "splice-check request" downloaded from the app (schema assured-splice-check-request/1)
-reference.gb  the same forward-strand genomic GenBank reference that was uploaded to the app
---strand      orientation of the gene on the reference; use "-" for a gene on the reverse strand (SpliceAI scores a gene in its own orientation)
+reference.gb  the same genomic GenBank reference that was uploaded to or fetched by the app. A reference of a reverse-strand gene is written along the transcript
+              ("Location: ...:-1"); the script turns it back into the forward strand, because the request lists forward-strand positions and alleles
+--strand      strand of the gene (SpliceAI scores a gene in its own orientation). Default: "-" when the reference's Location ends in :-1, otherwise "+"
 
 Needs python 3.10 or 3.11 with numpy<2, tensorflow-cpu 2.15 and spliceai (pip install spliceai --no-deps, then tensorflow-cpu==2.15.1). SpliceAI is run on windows of
 +-window bases around the edit with 5,000 bases of context on each side, averaging its five models. Nothing leaves your computer.
@@ -23,23 +24,29 @@ rc = lambda s: "".join(COMP.get(b, "N") for b in reversed(s))
 
 
 def read_genbank_sequence(path):
+    """The sequence as written in the file, and 1 or -1 for the orientation in its Location comment (-1: written along a reverse-strand transcript)."""
     raw = open(path, encoding="utf-8", errors="replace").read()
     if "\nORIGIN" not in raw:
         sys.exit("No ORIGIN section in the GenBank file.")
     body = raw[raw.rindex("\nORIGIN"):].split("\n//")[0].split("\n")[2:]
     seq = "".join(re.sub(r"[^A-Za-z]", "", re.match(r"\s*\d+\s+(.*)$", l).group(1)) for l in body if re.match(r"\s*\d+\s+", l))
-    return seq.upper()
+    location = re.search(r"Location:\s*chromosome:[^:\s]+:[^:\s]+:\d+:\d+:(-?1)\b", raw, re.I)
+    return seq.upper(), (-1 if location and location.group(1) == "-1" else 1)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("request"); ap.add_argument("reference"); ap.add_argument("-o", "--out", default="splice_check.json")
-    ap.add_argument("--window", type=int, default=400); ap.add_argument("--strand", choices=["+", "-"], default="+")
+    ap.add_argument("--window", type=int, default=400); ap.add_argument("--strand", choices=["+", "-"], default=None)
     a = ap.parse_args()
     req = json.load(open(a.request))
     if req.get("schema") != "assured-splice-check-request/1":
         sys.exit("This is not a splice-check request from the app (schema assured-splice-check-request/1).")
-    seq = read_genbank_sequence(a.reference); start = int(req["referenceStart"])
+    seq, orientation = read_genbank_sequence(a.reference); start = int(req["referenceStart"])
+    if int(req.get("orientation", 1)) != orientation:
+        sys.exit("The request was made for a reference written in the other orientation (Location ...:%d vs ...:%d); use the GenBank file that was uploaded to the app." % (int(req.get("orientation", 1)), orientation))
+    if orientation == -1: seq = rc(seq)  # positions and alleles in the request are forward-strand
+    strand = a.strand or ("-" if orientation == -1 else "+")
     conv = lambda items: [(int(c["position"]) - start, c["ref"], c["alt"]) for c in items]
     edit = conv([{"position": req["edit"]["position"], "ref": req["edit"]["ref"], "alt": req["edit"]["alt"]}])
     donors = [(d["name"], conv(d["blocking"])) for d in (req.get("donors") or [{"name": "ssODN", "blocking": req["blocking"]}])]
@@ -68,7 +75,7 @@ def main():
         s = list(seq)
         for p, _, alt in group: s[p] = alt
         window = "".join(s)[centre - half - flank: centre + half + 1 + flank]
-        if a.strand == "-": window = rc(window)
+        if strand == "-": window = rc(window)
         pred[name] = np.mean([m.predict(one_hot_encode(window)[None, :], verbose=0) for m in models], axis=0)[0]  # columns: neither, acceptor, donor
 
     def delta(base, other):
@@ -85,7 +92,7 @@ def main():
     blocking_scores = [s for s in scores if " vs edit" in s["comparison"] and s["comparison"] != "edit vs wild type"]
     only_scores = [s for s in scores if "only vs wild type" in s["comparison"]]
     from importlib.metadata import version as pkg_version
-    result = {"schema": "assured-splice-check-result/1", "tool": "SpliceAI", "version": pkg_version("spliceai"), "request": req, "window": half, "strand": a.strand, "scores": scores,
+    result = {"schema": "assured-splice-check-result/1", "tool": "SpliceAI", "version": pkg_version("spliceai"), "request": req, "window": half, "strand": strand, "scores": scores,
               "summary": {"blockingEffectMax": max(map(effect, blocking_scores), default=0.0), "editEffectMax": scores[0]["max"], "blockingOnlyEffectMax": max(map(effect, only_scores), default=0.0)},
               "note": "Predictions from SpliceAI; the largest absolute change in acceptor or donor probability within the window."}
     json.dump(result, open(a.out, "w"), indent=1)
