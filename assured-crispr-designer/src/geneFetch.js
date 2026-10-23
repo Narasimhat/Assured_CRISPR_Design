@@ -13,6 +13,9 @@ const DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2";
 /** Bases kept on each side of the gene span, so homology arms and primers for tags near the gene ends have sequence to use. */
 export const DEFAULT_FLANK = 1000;
 
+/** Genomic SNP references carry more: the optional SpliceAI check (scripts/splice_check.py) needs 5,400 bases of reference on each side of the edit. */
+export const SNP_FLANK = 6000;
+
 export const SPECIES = Object.freeze({
   human: { label: "Human", ensembl: "homo_sapiens", taxon: "9606" },
   mouse: { label: "Mouse", ensembl: "mus_musculus", taxon: "10090" },
@@ -517,19 +520,18 @@ export async function searchClinVar(query, { fetchImpl = defaultFetch, sleep = d
  * Builds the reference for a ClinVar single-base variant: the gene's MANE Select (else canonical) transcript from Ensembl, checked
  * against the ClinVar reference base, with the variant's cDNA coordinate on that transcript for comparison with ClinVar's own.
  */
-export async function fetchVariantReference(variantRecord, { flank = DEFAULT_FLANK, fetchImpl = defaultFetch, sleep = defaultSleep, date = new Date() } = {}) {
+export async function fetchVariantReference(variantRecord, { flank = SNP_FLANK, fetchImpl = defaultFetch, sleep = defaultSleep, date = new Date() } = {}) {
   if (!variantRecord?.supported) throw new GeneFetchError(variantRecord?.unsupportedReason || "This variant cannot be designed.");
   const v = variantRecord.variant;
   const ctx = { fetchImpl, sleep };
   const spec = await ensemblSpec({ kind: "symbol", symbol: variantRecord.gene, text: variantRecord.gene }, "human", flank, ctx);
-  if (spec.strand === -1) {
-    throw new GeneFetchError(`${variantRecord.gene} is on the reverse strand. The Genomic SNP designer supports forward-strand references only, as it does for an uploaded GenBank file.`);
-  }
   if (spec.chromosome !== String(v.chromosome).replace(/^chr/i, "")) throw new GeneFetchError(`ClinVar places this variant on chromosome ${v.chromosome} but Ensembl places ${variantRecord.gene} on chromosome ${spec.chromosome}.`);
   const warnings = await fillRegion(spec, { include: v.position });
-  const index = v.position - spec.regionStart;
+  // The record is written along the transcript, so a reverse-strand gene is read from the far end and complemented.
+  const index = senseIndex(spec, v.position) - 1; // senseIndex counts from 1
   if (index < 0 || index >= spec.seq.length) throw new GeneFetchError("The variant lies outside the fetched reference.");
-  if (spec.seq[index] !== v.ref) throw new GeneFetchError(`ClinVar reports ${v.ref} at ${v.assembly} chr${v.chromosome}:${v.position}, but the Ensembl reference has ${spec.seq[index]}. The two sources disagree on this position; do not design from either without checking.`);
+  const forwardBase = spec.strand === -1 ? COMPLEMENT[spec.seq[index]] : spec.seq[index];
+  if (forwardBase !== v.ref) throw new GeneFetchError(`ClinVar reports ${v.ref} at ${v.assembly} chr${v.chromosome}:${v.position}, but the Ensembl reference has ${forwardBase}. The two sources disagree on this position; do not design from either without checking.`);
   const built = buildGenBank(spec, { date });
   const mine = cdnaCoordinate(spec, v.position);
   const theirs = cdnaFromVariantName(variantRecord.cdnaChange) || cdnaFromVariantName(variantRecord.title);
