@@ -1307,6 +1307,22 @@ function buildGenomicBlockingComparisonHtml(result) {
   }).join('')}<p>Local screening uses annotated junction dinucleotides, a conservative 20-bp proximity flag and GT/AG motif changes. No local flags does not establish splice safety. Branch points, enhancers, silencers and alternative transcripts remain unassessed.</p>`;
 }
 
+export function buildGuideAlternativesHtml(result) {
+  const search = result?.guideAlternatives;
+  if (!search) return "";
+  const esc = value => escapeSchemeHtml(String(value));
+  const rows = (search.candidates || []).map(g => `<tr>
+    <td class="mono">${esc(g.sp)}</td><td>${esc(g.pm)}</td><td>${esc(g.str)}</td>
+    <td>${Math.abs(g.d)} bp ${g.d < 0 ? "upstream" : g.d > 0 ? "downstream" : "at insertion"}</td>
+    <td><b>${esc(g.protection)}</b><br>${esc(g.reason)}</td>
+    <td>${g.byInsertion ? "Target disrupted by insertion" : Number.isFinite(g.cfd) ? g.cfd.toFixed(4) : "Not assessed"}</td>
+  </tr>`).join("");
+  return `<h3>Alternative gRNAs within ±${search.radius} bp</h3>
+    <p>${result.gs.length} selected guide(s) from the ${search.selectedWindow} bp search window. ${esc(search.note)}</p>
+    ${rows ? `<table><thead><tr><th>Spacer (5′ → 3′)</th><th>PAM</th><th>Strand</th><th>Cut distance</th><th>Protection with current donor</th><th>CFD residual</th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<p>No additional candidates passed the existing PAM and spacer filters within ±${search.radius} bp.</p>`}`;
+}
+
 export function buildReportHtml(meta, result, fileName, historicalContext, reviewItems, brunelloLibrary = null) {
   if (!result) return "";
   const headerRows = [
@@ -1408,6 +1424,7 @@ details.fold>.body{padding:8px 12px 10px 12px}
   ${result.type === "genomic-snv" ? `<p class="mono">${result.context.before}[${result.input.ref}→${result.input.alt}]${result.context.after}</p><p>${result.context.nearestExonBoundary ? `Nearest annotated boundary: ${result.context.nearestExonBoundary.label}, ${result.context.nearestExonBoundary.edge}; offset ${result.context.nearestExonBoundary.distance} bp.` : "Exon boundary context unavailable."}</p>` : ""}
   <h2>2. gRNA Sequences</h2>
   <table>${tableHtml([["Name", "Sequence", "Strand", "GC", "Notes"]], true)}${tableHtml(guideRows)}</table>
+  ${buildGuideAlternativesHtml(result)}
   <h2>3. Recommended Primers</h2>
   ${buildPrimerSummaryHtml(result)}
   <p class="sub">${primerMeta}</p>

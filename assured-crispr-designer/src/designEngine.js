@@ -1180,6 +1180,20 @@ const SPACED_SD40_V5 = buildSpacedSD40V5Entries();
 Object.assign(CASSETTES, SPACED_SD40_V5.cassettes);
 Object.assign(DONOR_PRESETS, SPACED_SD40_V5.presets);
 
+// Minimal FLAG fusion: DYKDDDDK, directly adjacent to the native protein.
+const FLAG_SEQ = "GACTACAAGGACGACGATGACAAG";
+CASSETTES.FLAG = { seq: `${FLAG_SEQ}TAA`, len: 27, pos: "C-term" };
+DONOR_PRESETS.FLAG = {
+  ct: { seq: `${FLAG_SEQ}TAA`, segments: [
+    { label: "FLAG", role: "TAG", color: DONOR_COLORS.TAG, seq: FLAG_SEQ },
+    { label: "Stop", role: "STOP", color: DONOR_COLORS.STOP, seq: "TAA" },
+  ] },
+  nt: { seq: `ATG${FLAG_SEQ}`, segments: [
+    { label: "Start", role: "START", color: DONOR_COLORS.START, seq: "ATG" },
+    { label: "FLAG", role: "TAG", color: DONOR_COLORS.TAG, seq: FLAG_SEQ },
+  ] },
+};
+
 function getInsertPreset(name, orientation) {
   const preset = DONOR_PRESETS[name];
   if (preset) return { ...preset[orientation], segments: cloneSegments(preset[orientation].segments) };
@@ -3757,6 +3771,29 @@ export function designNT(gb, tag, homologyArmLength, options = {}) {
   };
 }
 
+/** Nearby terminal-tag candidates, assessed against the donor actually generated.
+ * These are review alternatives; they do not become selected guides or QC cut sites.
+ */
+function buildTerminalGuideAlternatives(model, result) {
+  if (!["ct", "nt"].includes(result.type) || !result.gs?.length) return null;
+  const target = result.gs[0].cut - result.gs[0].d;
+  const selected = new Set(result.gs.map(g => `${g.sp}:${g.str}:${g.cut}`));
+  const candidates = findSpCas9Guides(model, reverseComplement, target, 30)
+    .filter(g => !selected.has(`${g.sp}:${g.str}:${g.cut}`))
+    .sort((a, b) => Math.abs(a.d) - Math.abs(b.d) || a.cut - b.cut || a.str.localeCompare(b.str))
+    .map(guide => {
+      const insertion = classifyGuideReplacementProtection(guide, target, target + 3, target);
+      // CFD substitutions alone cannot score a target split by an inserted cassette.
+      const cfd = insertion.protected ? null : (scoreResidualActivity(model, guide, result.ss || [])?.score ?? null);
+      const protection = insertion.protected ? "strong" : (cfd === 1 ? "none" : gradeProtectionFromCfd(cfd) || "unknown");
+      return { sp: guide.sp, pm: guide.pam, str: guide.str, gc: guide.gc, cut: guide.cut, d: guide.d,
+        protection, cfd, byInsertion: insertion.protected,
+        reason: insertion.protected ? insertion.reason : "CFD estimate against this donor's existing blocking substitutions; a different guide may need a regenerated donor." };
+    });
+  return { radius: 30, selectedWindow: result.guideWindow, candidates,
+    note: "The primary selection is retained. Alternatives are assessed against the current donor and require review before use. Genome-wide specificity has not been checked. Selecting a different guide requires regenerating and reviewing its donor." };
+}
+
 export function runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength, options = {}) {
   if (!model?.genomicSequence) return { err: "Transcript model is missing genomic sequence." };
   if (!projectType) return { err: "Select a project type first." };
@@ -3775,6 +3812,8 @@ export function runDesignFromTranscriptModel(projectType, model, mutation, tag, 
   else designResult = designKO(model, options);
 
   if (designResult?.err) return designResult;
+  const alternatives = buildTerminalGuideAlternatives(model, designResult);
+  if (alternatives) designResult.guideAlternatives = alternatives;
   const deliveryMethod = options.deliveryMethod || "unknown";
   const guideSequenceQc = (designResult.gs || []).map((guide, index) => ({
     guideIndex: index + 1,
