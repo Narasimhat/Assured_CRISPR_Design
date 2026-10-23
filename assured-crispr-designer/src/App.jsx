@@ -3680,53 +3680,53 @@ export default function App() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
-            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "#FFFFFF" }}>
-              <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Batch input</div>
-              <div style={{ color: COLORS.muted, fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
-                Paste one request per line if you want to generate rows quickly, or skip this and build rows manually.
-              </div>
-              <InlineNotice tone="info" style={{ marginBottom: 10 }}>
-                Start with one simple line such as <strong>TP53 knockout</strong> or <strong>APOE R176C SNP knockin</strong>, then click <strong>Parse requests</strong>.
-              </InlineNotice>
-              <label style={{ display: "block" }}>
-                <textarea
-                  value={requestText}
-                  onChange={(event) => setRequestText(event.target.value)}
-                  style={{ ...FIELD_STYLE, minHeight: 146, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
-                  placeholder={SAMPLE_REQUEST_TEXT}
-                />
-              </label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 14, alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "#FCFCFD" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+              <ActionButton variant="secondary" onClick={addProjectRow}>Add design</ActionButton>
+              <ActionButton variant="subtle" onClick={loadSampleRequests}>Load demo requests</ActionButton>
+              <ActionButton variant="danger" onClick={() => resetWorkspace("pm")}>Clear workspace</ActionButton>
             </div>
-            <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "#FCFCFD" }}>
-              <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Actions</div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12, alignItems: "center" }}>
-                <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
-                  <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
-                  <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
-                </label>
-                <ActionButton variant="secondary" onClick={parseRequests}>Parse requests</ActionButton>
-                <ActionButton variant="secondary" onClick={addProjectRow}>Add design</ActionButton>
-                <ActionButton variant="subtle" onClick={loadSampleRequests}>Load demo requests</ActionButton>
-                <ActionButton variant="danger" onClick={() => resetWorkspace("pm")}>Clear workspace</ActionButton>
-              </div>
-              {batchError && <InlineNotice tone="danger" style={{ marginBottom: 12 }}>{batchError}</InlineNotice>}
-              <div style={{ display: "grid", gap: 8 }}>
-                <div style={{ padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: `1px solid ${COLORS.borderSoft}` }}>
-                  <div style={{ color: COLORS.muted, fontSize: 12, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 4 }}>Current workspace</div>
-                  <div style={{ fontSize: 14, fontWeight: 700 }}>{batchRows.length} design row{batchRows.length === 1 ? "" : "s"}</div>
+            <details style={{ fontSize: 13 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 700, color: COLORS.accent }}>
+                Batch text &amp; GenBank folder import (optional)
+              </summary>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 12, padding: 12, borderRadius: 12, border: `1px solid ${COLORS.borderSoft}`, background: "#FFFFFF" }}>
+                <div>
+                  <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Batch input</div>
+                  <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
+                    Paste one request per line (e.g. <strong>TP53 knockout</strong> or <strong>APOE R176C SNP knockin</strong>), then click <strong>Parse requests</strong>.
+                  </div>
+                  <label style={{ display: "block" }}>
+                    <textarea
+                      value={requestText}
+                      onChange={(event) => setRequestText(event.target.value)}
+                      style={{ ...FIELD_STYLE, minHeight: 110, resize: "vertical", fontFamily: 'Consolas, "Courier New", monospace' }}
+                      placeholder={SAMPLE_REQUEST_TEXT}
+                    />
+                  </label>
                 </div>
-                {batchFolderEntries.length > 0 ? (
-                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.22)", color: COLORS.success, fontSize: 13, lineHeight: 1.55 }}>
-                    Folder ready: {batchFolderEntries.length} GenBank file{batchFolderEntries.length === 1 ? "" : "s"} loaded for automatic matching.
+                <div>
+                  <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Batch Actions</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10, alignItems: "center" }}>
+                    <label style={{ ...FIELD_STYLE, width: "auto", display: "inline-flex", alignItems: "center", gap: 10, cursor: "pointer", fontWeight: 700 }}>
+                      <span style={{ color: COLORS.accent }}>Upload GenBank folder</span>
+                      <input type="file" accept=".gb,.gbk,.genbank,.txt" multiple webkitdirectory="" directory="" onChange={onBatchFolder} style={{ display: "none" }} />
+                    </label>
+                    <ActionButton variant="secondary" onClick={parseRequests}>Parse requests</ActionButton>
                   </div>
-                ) : (
-                  <div style={{ padding: "10px 12px", borderRadius: 12, background: "#F8FAFC", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
-                    {APP_CONFIG.emptyFolderNotice}
-                  </div>
-                )}
+                  {batchError && <InlineNotice tone="danger" style={{ marginBottom: 10 }}>{batchError}</InlineNotice>}
+                  {batchFolderEntries.length > 0 ? (
+                    <div style={{ padding: "8px 10px", borderRadius: 10, background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.22)", color: COLORS.success, fontSize: 12, lineHeight: 1.5 }}>
+                      Folder ready: {batchFolderEntries.length} GenBank file{batchFolderEntries.length === 1 ? "" : "s"} loaded for automatic matching.
+                    </div>
+                  ) : (
+                    <div style={{ padding: "8px 10px", borderRadius: 10, background: "#F8FAFC", border: `1px solid ${COLORS.borderSoft}`, color: COLORS.muted, fontSize: 12, lineHeight: 1.5 }}>
+                      {APP_CONFIG.emptyFolderNotice}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
+            </details>
           </div>
 
           <div style={{ display: "grid", gap: 12 }}>
@@ -3789,7 +3789,95 @@ export default function App() {
                     </div>
                   </div>
 
-                  <FormSection title="Basic details" hint="Start with the gene, the edit type, and any project identifiers you already know.">
+                  <FormSection title="1. Reference Sequence & Gene Fetch" hint="Fetch the gene directly from Ensembl / NCBI (MANE Select transcript + 1 kb flank), upload a GenBank file, or paste raw DNA." tone="accent">
+                    {!!rowIssues.reference.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.reference.join(" ")}</InlineNotice>}
+                    {row.referenceSource !== "raw" && (
+                      <div style={{ marginBottom: 14, padding: 12, borderRadius: 12, background: "#F0F9FF", border: "1.5px solid #0284C7" }}>
+                        <div style={{ color: "#0369A1", fontSize: 13.5, fontWeight: 800, marginBottom: 6 }}>
+                          Fetch Gene from Ensembl / NCBI (MANE Select transcript, gene span + 1 kb flank)
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <input
+                            value={fetchQuery}
+                            onChange={(event) => updateBatchRow(index, "fetchQuery", event.target.value)}
+                            onKeyDown={(event) => { if (event.key === "Enter" && (fetchQuery.trim() || row.gene?.trim())) { event.preventDefault(); fetchRowGene(index, fetchQuery.trim() || row.gene.trim(), fetchSource, fetchSpecies); } }}
+                            placeholder="Enter gene symbol (e.g. TP53, APOE, NR2F2), ENST… or NM_…"
+                            style={{ ...FIELD_STYLE, flex: "1 1 220px", width: "auto", background: "#FFFFFF" }}
+                          />
+                          <select value={fetchSource} onChange={(event) => updateBatchRow(index, "fetchSource", event.target.value)} style={{ ...SELECT_STYLE, width: 130, backgroundColor: "#FFFFFF" }} aria-label="Source">
+                            <option value="ensembl">Ensembl</option>
+                            <option value="ncbi">NCBI</option>
+                          </select>
+                          <select value={fetchSpecies} onChange={(event) => updateBatchRow(index, "fetchSpecies", event.target.value)} style={{ ...SELECT_STYLE, width: 140, backgroundColor: "#FFFFFF" }} aria-label="Species">
+                            {Object.entries(SPECIES).map(([key, species]) => <option key={key} value={key}>{species.label}</option>)}
+                          </select>
+                          <ActionButton variant="primary" onClick={() => fetchRowGene(index, fetchQuery.trim() || row.gene?.trim() || "", fetchSource, fetchSpecies)} disabled={!(fetchQuery.trim() || row.gene?.trim()) || fetchState?.status === "loading"}>
+                            {fetchState?.status === "loading" ? "Fetching…" : "Fetch Gene"}
+                          </ActionButton>
+                        </div>
+                        {fetchState?.status === "error" && <InlineNotice tone="danger" style={{ marginTop: 8 }}>{fetchState.message}</InlineNotice>}
+                        {fetchState?.status === "ok" && row.fileName === fetchState.fileName && (
+                          <InlineNotice tone={fetchState.summary.warnings.length ? "warning" : "success"} style={{ marginTop: 8 }}>
+                            {fetchState.summary.text}
+                            {fetchState.summary.warnings.map((text, warningIndex) => <div key={warningIndex}>{text}</div>)}
+                          </InlineNotice>
+                        )}
+                      </div>
+                    )}
+
+                    <Grid>
+                      <label style={{ display: "block" }}>
+                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Or provide sequence via</div>
+                        <select value={row.referenceSource} onChange={(event) => updateBatchRow(index, "referenceSource", event.target.value)} style={SELECT_STYLE}>
+                          <option value="genbank">GenBank file (.gb / .gbk) or Ensembl/NCBI Fetch</option>
+                          <option value="raw">Raw DNA + CDS coordinates</option>
+                        </select>
+                      </label>
+
+                      {row.referenceSource !== "raw" && (
+                        <label style={{ display: "block" }}>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Upload local GenBank file {row.projectType === "ko" ? "(optional for gene-only KO mode)" : ""}</div>
+                          <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                            <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
+                            <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
+                            <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
+                          </label>
+                        </label>
+                      )}
+                    </Grid>
+
+                    {row.referenceSource === "raw" && (
+                      <div style={{ marginTop: 12 }}>
+                        <label style={{ display: "block", marginBottom: 12 }}>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>DNA sequence</div>
+                          <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA using A, C, G, and T only" />
+                        </label>
+                        <Grid>
+                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Coding region start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
+                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Coding region end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
+                        </Grid>
+                        <label style={{ display: "block", marginTop: 12 }}>
+                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Exon coordinates (optional)</div>
+                          <textarea value={row.exonCoordinates} onChange={(event) => updateBatchRow(index, "exonCoordinates", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder={"One exon per line, 1-based inclusive\n101-240\n301-512"} />
+                        </label>
+                      </div>
+                    )}
+
+                    <label style={{ display: "block", marginTop: 12 }}>
+                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Use your own gRNAs (optional)</div>
+                      <textarea
+                        value={row.customGuides}
+                        onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
+                        style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
+                        placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
+                      />
+                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
+                        If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
+                      </div>
+                    </label>
+                  </FormSection>
+
+                  <FormSection title="2. Basic details" hint="Set the gene, edit type, and any project identifiers.">
                     {!!rowIssues.project.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.project.join(" ")}</InlineNotice>}
                     <Grid>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
@@ -3812,87 +3900,6 @@ export default function App() {
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
-                  </FormSection>
-
-                  <FormSection title="Sequence input" hint="Use a GenBank file for the easiest path. Paste raw DNA only if you also know the CDS coordinates." tone="accent">
-                    {!!rowIssues.reference.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.reference.join(" ")}</InlineNotice>}
-                    <label style={{ display: "block", marginBottom: 12 }}>
-                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>How are you providing sequence?</div>
-                      <select value={row.referenceSource} onChange={(event) => updateBatchRow(index, "referenceSource", event.target.value)} style={SELECT_STYLE}>
-                        <option value="genbank">GenBank file</option>
-                        <option value="raw">Raw DNA + CDS coordinates</option>
-                      </select>
-                    </label>
-
-                    {row.referenceSource === "raw" ? (
-                      <>
-                        <label style={{ display: "block", marginBottom: 12 }}>
-                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>DNA sequence</div>
-                          <textarea value={row.rawSequence} onChange={(event) => updateBatchRow(index, "rawSequence", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 120, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder="Paste genomic DNA using A, C, G, and T only" />
-                        </label>
-                        <Grid>
-                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Coding region start (1-based)</div><input value={row.cdsStart} onChange={(event) => updateBatchRow(index, "cdsStart", event.target.value)} style={FIELD_STYLE} placeholder="101" /></label>
-                          <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Coding region end (1-based)</div><input value={row.cdsEnd} onChange={(event) => updateBatchRow(index, "cdsEnd", event.target.value)} style={FIELD_STYLE} placeholder="1452" /></label>
-                        </Grid>
-                        <label style={{ display: "block", marginTop: 12 }}>
-                          <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Exon coordinates (optional)</div>
-                          <textarea value={row.exonCoordinates} onChange={(event) => updateBatchRow(index, "exonCoordinates", event.target.value)} style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }} placeholder={"One exon per line, 1-based inclusive\n101-240\n301-512"} />
-                        </label>
-                      </>
-                    ) : (
-                      <label style={{ display: "block" }}>
-                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>GenBank file {row.projectType === "ko" ? "(optional for gene-only KO mode)" : ""}</div>
-                        <label style={{ ...FIELD_STYLE, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
-                          <span style={{ color: row.fileName ? COLORS.success : COLORS.muted }}>{row.fileName || "Upload .gb / .gbk / .genbank"}</span>
-                          <span style={{ color: COLORS.accent, fontWeight: 700 }}>Browse</span>
-                          <input type="file" accept=".gb,.gbk,.genbank,.txt" onChange={(event) => onBatchFile(index, event)} style={{ display: "none" }} />
-                        </label>
-                      </label>
-                    )}
-                    {row.referenceSource !== "raw" && (
-                      <div style={{ marginTop: 12 }}>
-                        <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Or fetch the gene (MANE Select transcript, gene span plus 1 kb)</div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <input
-                            value={fetchQuery}
-                            onChange={(event) => updateBatchRow(index, "fetchQuery", event.target.value)}
-                            onKeyDown={(event) => { if (event.key === "Enter" && fetchQuery.trim()) { event.preventDefault(); fetchRowGene(index, fetchQuery, fetchSource, fetchSpecies); } }}
-                            placeholder="Gene symbol, ENST… or NM_…"
-                            style={{ ...FIELD_STYLE, flex: "1 1 220px", width: "auto" }}
-                          />
-                          <select value={fetchSource} onChange={(event) => updateBatchRow(index, "fetchSource", event.target.value)} style={{ ...SELECT_STYLE, width: 120 }} aria-label="Source">
-                            <option value="ensembl">Ensembl</option>
-                            <option value="ncbi">NCBI</option>
-                          </select>
-                          <select value={fetchSpecies} onChange={(event) => updateBatchRow(index, "fetchSpecies", event.target.value)} style={{ ...SELECT_STYLE, width: 130 }} aria-label="Species">
-                            {Object.entries(SPECIES).map(([key, species]) => <option key={key} value={key}>{species.label}</option>)}
-                          </select>
-                          <ActionButton onClick={() => fetchRowGene(index, fetchQuery, fetchSource, fetchSpecies)} disabled={!fetchQuery.trim() || fetchState?.status === "loading"}>
-                            {fetchState?.status === "loading" ? "Fetching…" : "Fetch"}
-                          </ActionButton>
-                        </div>
-                        {fetchState?.status === "error" && <InlineNotice tone="danger" style={{ marginTop: 8 }}>{fetchState.message}</InlineNotice>}
-                        {fetchState?.status === "ok" && row.fileName === fetchState.fileName && (
-                          <InlineNotice tone={fetchState.summary.warnings.length ? "warning" : "success"} style={{ marginTop: 8 }}>
-                            {fetchState.summary.text}
-                            {fetchState.summary.warnings.map((text, warningIndex) => <div key={warningIndex}>{text}</div>)}
-                          </InlineNotice>
-                        )}
-                      </div>
-                    )}
-
-                    <label style={{ display: "block", marginTop: 12 }}>
-                      <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Use your own gRNAs (optional)</div>
-                      <textarea
-                        value={row.customGuides}
-                        onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
-                        style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
-                        placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
-                      />
-                      <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
-                        If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
-                      </div>
-                    </label>
                   </FormSection>
 
                   <FormSection title="What should be designed?" hint={APP_CONFIG.designDetailsHint} tone="warm">
