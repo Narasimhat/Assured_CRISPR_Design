@@ -10,6 +10,12 @@ const ENSEMBL = "https://rest.ensembl.org";
 const EUTILS = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
 const DATASETS = "https://api.ncbi.nlm.nih.gov/datasets/v2";
 
+/**
+ * The origins this module requests. The Vercel deployment sends a Content-Security-Policy whose connect-src must list exactly these (vercel.json);
+ * a test compares the two, because a browser blocks any other origin with no more detail than "Failed to fetch".
+ */
+export const FETCH_ORIGINS = Object.freeze([ENSEMBL, EUTILS, DATASETS].map((url) => new URL(url).origin));
+
 /** Bases kept on each side of the gene span, so homology arms and primers for tags near the gene ends have sequence to use. */
 export const DEFAULT_FLANK = 1000;
 
