@@ -1,7 +1,7 @@
 # ASSURED CRISPR Designer
 
 **Enzyme selection:** fetch a gene or upload GenBank in Workspace, select SpCas9,
-AsCas12a or Mad7, and choose the modification. Cas12a/Mad7 now construct
+AsCas12a, LbCas12a or Mad7, and choose the modification. Cas12a/Mad7 now construct
 two-guide knockout and HDR designs through the same reports, primers, ordering
 and QC exports as Cas9, using enzyme-specific geometry and canonical-PAM
 blocking checks. See [ENZYME_DONORS.md](./ENZYME_DONORS.md) for review requirements.

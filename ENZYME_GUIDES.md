@@ -1,6 +1,6 @@
 # Enzyme-aware CRISPR design
 
-In **Workspace**, fetch a gene or upload GenBank, select SpCas9, AsCas12a or
+In **Workspace**, fetch a gene or upload GenBank, select SpCas9, AsCas12a, LbCas12a or
 Mad7, and choose the modification. All three systems now use the same canonical
 result format and the same on-screen report, HTML report, design figure,
 primer workflow, ordering spreadsheets and Assured QC JSON export. Raw DNA with
@@ -64,7 +64,7 @@ input sequence, including minus-strand guides. GenBank feature locations use
 1-based inclusive coordinates and `complement(...)` for minus-strand guides.
 Cut sites are interbase coordinates; target and non-target labels are relative
 to the guide. Offsets are measured from the spacer's 5′ boundary in guide
-orientation. AsCas12a/Mad7 defaults predict non-target cleavage at spacer offset
+orientation. AsCas12a/LbCas12a/Mad7 defaults predict non-target cleavage at spacer offset
 18 and target cleavage at offset 23. Actual cuts can be heterogeneous and depend
 on enzyme, substrate and conditions. These defaults need experimental validation.
 The Mad7 defaults are Cas12-family assumptions, not Mad7-specific measurements.
@@ -83,6 +83,12 @@ Failed candidates remain visible and are exported with reasons. Passing candidat
 rank first; supplied model scores rank within each filter class.
 
 ## Direct repeats and scoring
+
+LbCas12a uses its own config entry (version 1.1.0), a 5′ TTTV PAM and a default
+23-base spacer (20–24 allowed). Its repeat is unset until supplied and verified
+against reagent documentation. Its scorer is a separate external adapter; no
+AsCas12a model is silently treated as an LbCas12a model. All workspace and
+genomic SNP selectors include LbCas12a automatically.
 
 Mad7's direct repeat is intentionally unset: licensed documentation was not
 available during implementation. Supply the sequence, documentation reference

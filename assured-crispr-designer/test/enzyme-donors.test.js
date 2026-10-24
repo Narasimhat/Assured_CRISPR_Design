@@ -27,7 +27,7 @@ const base = { enzyme: "mad7", projectType: "pm", mutation: "N3K", gene: "TEST",
   deliveryMethod: "rnp", autoTrimArms: false };
 const protein = dna => dna.match(/.../g).map(toAA).join("");
 
-for (const enzyme of ["mad7", "ascas12a"]) {
+for (const enzyme of ["mad7", "ascas12a", "lbcas12a"]) {
   test(`${enzyme}: PM donor reconstructs the repaired allele and makes only the requested protein change`, () => {
     const run = planEnzymeModification({ ...base, enzyme });
     assert.ok(run.donor_design.donors.length, JSON.stringify(run.donor_design));

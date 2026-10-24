@@ -44,7 +44,7 @@ test("native nearest-window policy keeps the closest lead and adds a distinct po
   assert.equal(selected.partnerFallback.partnerCutDistance, 19);
 });
 
-for (const enzyme of ["mad7", "ascas12a"]) {
+for (const enzyme of ["mad7", "ascas12a", "lbcas12a"]) {
   test(`${enzyme}: knockout uses exactly the shared Cas9 pair/exon policy and screening primers`, () => {
     const result = runDesign("ko", gb, "", "", "", { enzyme, deliveryMethod: "rnp" });
     assert.ok(!result.err, result.err);

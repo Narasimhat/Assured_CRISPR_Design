@@ -18,7 +18,7 @@ test("enzyme records are versioned, immutable and reject unknown enzymes/PAM cod
   assert.ok(pamRegex("YTTN").test("CTTA"));
   assert.ok(!pamRegex("TTTV").test("TTTT"));
 });
-for (const [enzyme, pam] of [["mad7", "CTTA"], ["ascas12a", "TTTG"]]) {
+for (const [enzyme, pam] of [["mad7", "CTTA"], ["ascas12a", "TTTG"], ["lbcas12a", "TTTG"]]) {
   test(`${enzyme}: exact PAM/spacer and staggered interbase cuts on both strands`, () => {
     const site = pam + spacer;
     const plus = findEnzymeGuides(site, { enzyme }).find(guide => guide.start === 0 && guide.strand === "+");

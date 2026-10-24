@@ -1,5 +1,5 @@
 // Config versions describe computational assumptions, not experimental validation.
-export const ENZYME_CONFIG_VERSION = "1.0.0";
+export const ENZYME_CONFIG_VERSION = "1.1.0";
 const defaults = { gc_min: 40, gc_max: 60, max_homopolymer: 4, self_complement_length: 6 };
 const entries = [
   { id: "spcas9", name: "SpCas9", pam_pattern: "NGG", pam_side: "3prime",
@@ -10,6 +10,10 @@ const entries = [
     spacer_len: { default: 23, min: 20, max: 24 }, direct_repeat: "UAAUUUCUACUCUUGUAGAU", direct_repeat_position: "5prime",
     cut_offsets: { target: 23, non_target: 18 }, seed_length: 8, scoring_model: "deepcpf1-external",
     license_note: "", repeat_note: "Mature AsCas12a repeat; verify against the nuclease and delivery reagent documentation before ordering." },
+  { id: "lbcas12a", name: "LbCas12a", pam_pattern: "TTTV", pam_side: "5prime",
+    spacer_len: { default: 23, min: 20, max: 24 }, direct_repeat: null, direct_repeat_position: "5prime",
+    cut_offsets: { target: 23, non_target: 18 }, seed_length: 8, scoring_model: "lbcas12a-external",
+    license_note: "", repeat_note: "Supply and verify the LbCas12a direct repeat against your nuclease and delivery reagent documentation. Cut offsets are nominal Cas12a assumptions." },
   { id: "mad7", name: "Mad7", pam_pattern: "YTTN", pam_side: "5prime",
     spacer_len: { default: 23, min: 20, max: 24 }, direct_repeat: null, direct_repeat_position: "5prime",
     cut_offsets: { target: 23, non_target: 18 }, seed_length: 8, scoring_model: "deepcpf1-external",

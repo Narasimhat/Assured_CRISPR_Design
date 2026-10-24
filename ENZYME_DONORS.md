@@ -1,6 +1,6 @@
 # Cas12a/Mad7 HDR donors
 
-In **Workspace**, fetch a gene or upload GenBank, select AsCas12a/Mad7, and choose
+In **Workspace**, fetch a gene or upload GenBank, select AsCas12a/LbCas12a/Mad7, and choose
 the modification. Point mutations, internal tags and N-/C-terminal cassettes now
 produce donors in the same **Report** used for Cas9, including HTML, figures,
 ordering spreadsheets and QC JSON. Frameshift knockout uses end joining and needs no
