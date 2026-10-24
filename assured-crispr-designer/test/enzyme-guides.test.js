@@ -80,6 +80,7 @@ test("CSV/GenBank carry enzyme, full parameters, filters and input-oriented minu
   assert.match(csv, /config_version/);
   assert.match(csv, /self_complement_length/);
   assert.match(csv, /mad7/);
+  assert.ok(csv.includes(',"-",'));
   const gb = enzymeGuideGenbank(run);
   assert.match(gb, /complement\(1\.\.23\)/);
   assert.match(gb, /complement\(24\.\.27\)/);

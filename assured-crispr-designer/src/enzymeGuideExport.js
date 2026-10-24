@@ -1,6 +1,6 @@
 const csvCell = value => {
   let text = typeof value === "object" && value !== null ? JSON.stringify(value) : String(value ?? "");
-  if (/^[=+@-]/.test(text)) text = "'" + text;
+  if (/^[=+@-].+/.test(text)) text = "'" + text;
   return `"${text.replace(/"/g, '""')}"`;
 };
 export function enzymeGuideCsv(run) {
