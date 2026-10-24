@@ -2,6 +2,7 @@ import { parseGB, toAA, INTERNAL_TAGS, getCassetteSequenceLength } from "./desig
 import { normalizeGenBankToTranscriptModel, normalizeRawSequenceToTranscriptModel,
   codingPosToGenomic, getCodonAtAa, getGenomicSequence, getCdsFromModel } from "./transcriptModel.js";
 import { designEnzymeGuides } from "./enzymeGuides.js";
+import { buildEnzymeDonorDesign } from "./enzymeDonors.js";
 
 /** Modification-aware guide planning, deliberately independent of Cas9 donor/CFD logic. */
 export function planEnzymeModification(row, rawReference = null) {
@@ -73,10 +74,17 @@ export function planEnzymeModification(row, rawReference = null) {
   run.modification = { type, label, mutation: row.mutation || null, tag: ["it", "ct", "nt"].includes(type) ? row.tag : null,
     target_boundary: target, ko_intervals: koIntervals, search_radius: radius,
     distance_basis: "nearest predicted strand cut to the target boundary", total_reference_candidates: allCount,
-    donor_status: "not_supported", note: "Guide planning only. Cas12a/Mad7 donor construction, repaired-allele protection and primer recommendations are not implemented. No ordering approval or knockout pair selection is implied." };
+    donor_status: "pending", note: "Donors are constructed and checked against the requested protein change. Cas12a/Mad7 re-cutting activity is not calibrated, so this is not ordering approval. Knockout mode lists coding-region guides and does not select a deletion pair." };
   run.reference = { gene: model.gene, transcript_id: model.transcriptId, source: row.referenceSource === "raw" ? "raw DNA" : row.fileName || "GenBank",
     requested_gene: row.gene || null, reference_issues: model.referenceIssues || [], orientation: "input record orientation" };
   run.parameters.delivery = row.deliveryMethod === "unknown" || !row.deliveryMethod ? "unknown" : run.parameters.delivery;
   if (run.parameters.delivery === "unknown") run.modification.note += " Delivery is undecided; Pol III terminator screening must be repeated if U6 delivery is selected.";
+  run.parameters.donor = { requested_format: row.donorFormat || "auto", requested_arm5: row.homologyArm || null,
+    requested_arm3: row.homologyArm3 || null, auto_trim: row.autoTrimArms !== false,
+    strand: row.enzymeDonorStrand || "sense", synonymous_pam_blocking: row.enzymePamBlocking !== false,
+    max_blocking_changes_per_guide: Number(row.maxBlockingChanges || 3), co_delivery: row.coDelivery !== false };
+  run.donor_design = buildEnzymeDonorDesign(model, run, row);
+  run.modification.donor_status = run.donor_design.status;
+  if (run.donor_design.status === "blocked") run.status = "BLOCKED";
   return run;
 }

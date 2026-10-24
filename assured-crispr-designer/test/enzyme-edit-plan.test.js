@@ -28,7 +28,7 @@ test("uploaded GenBank and fetched GenBank use the same modification-aware guide
   assert.equal(run.modification.target_boundary, 66);
   assert.ok(run.candidates.length > 0);
   assert.ok(run.candidates.every(guide => guide.cut_distance <= 30));
-  assert.equal(run.modification.donor_status, "not_supported");
+  assert.ok(["review_required", "blocked"].includes(run.modification.donor_status));
   assert.equal(run.status, "REVIEW REQUIRED");
   assert.equal(run.parameters.delivery, "rnp");
   const fetched = planEnzymeModification({ ...base, fileName: "TEST_Ensembl.gb" });

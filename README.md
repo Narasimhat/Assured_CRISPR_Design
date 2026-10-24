@@ -1,11 +1,13 @@
 # ASSURED CRISPR Designer
 
 **Enzyme selection:** fetch a gene or upload GenBank in Workspace, select SpCas9,
-AsCas12a or Mad7, and choose the modification. Cas12a/Mad7 produce a guide plan
-around that edit; SpCas9 retains the full donor workflow. An advanced Sequence
+AsCas12a or Mad7, and choose the modification. Cas12a/Mad7 now construct
+protein-checked HDR donors with configurable format/arms and canonical-PAM
+blocking checks. See [ENZYME_DONORS.md](./ENZYME_DONORS.md) for review requirements.
+SpCas9 retains its existing workflow. An advanced Sequence
 Scan tab also provides configurable whole-sequence discovery.
 See [ENZYME_GUIDES.md](./ENZYME_GUIDES.md) for usage and validation limits.
-Donor design remains SpCas9-specific; no trained Cas12a scoring model is bundled.
+SpCas9 CFD remains SpCas9-specific; no trained Cas12a scoring model is bundled.
 
 Hosted browser app for CRISPR design review and ordering-ready exports.
 

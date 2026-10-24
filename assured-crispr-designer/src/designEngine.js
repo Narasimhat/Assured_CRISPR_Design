@@ -1194,7 +1194,7 @@ DONOR_PRESETS.FLAG = {
   ] },
 };
 
-function getInsertPreset(name, orientation) {
+export function getInsertPreset(name, orientation) {
   const preset = DONOR_PRESETS[name];
   if (preset) return { ...preset[orientation], segments: cloneSegments(preset[orientation].segments) };
   if (orientation === "nt" && name.startsWith("N:")) {
@@ -2964,7 +2964,7 @@ function translateDnaToCodonEntries(sequence) {
   return entries;
 }
 
-function buildInsertValidation(expectedSequence, actualSequence, options = {}) {
+export function buildInsertValidation(expectedSequence, actualSequence, options = {}) {
   const allowTerminalStop = !!options.allowTerminalStop;
   const segments = Array.isArray(options.segments) ? options.segments : [];
   const expected = String(expectedSequence || "").toUpperCase();

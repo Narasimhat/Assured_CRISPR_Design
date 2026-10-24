@@ -4,6 +4,7 @@ import { designEnzymeGuides } from "./enzymeGuides.js";
 import { enzymeGuideCsv, enzymeGuideGenbank } from "./enzymeGuideExport.js";
 import { casOffinderInput } from "./enzymeOffTargets.js";
 import "./enzymeGuides.css";
+import EnzymeDonorReport from "./EnzymeDonorReport.jsx";
 
 function download(name, text, type = "text/plain") {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -51,7 +52,7 @@ export default function EnzymeGuideTool({ initialRun = null, reportOnly = false 
       <p>{run.modification.target_boundary === null ? "Guides within the selected coding segments." : `Target boundary: ${run.modification.target_boundary}; at least one predicted strand cut within ${run.modification.search_radius} bp.`} Return to Workspace to change the reference, enzyme or modification.</p>
       {run.reference.reference_issues.map((issue, index) => <p key={index}>{issue.message}</p>)}
       {config.license_note && <p className="enzyme-notice">{config.license_note}</p>}
-    </> : <p>For gene fetch or GenBank-based modification planning, choose the enzyme in Workspace. This advanced tool scans a complete pasted sequence. Donor design supports SpCas9 only.</p>}
+    </> : <p>For gene fetch, GenBank uploads and guide/donor design, choose the enzyme and modification in Workspace. This advanced tool only scans a complete pasted sequence.</p>}
     {!reportOnly && <form onSubmit={generate} onChange={invalidate}>
       <div className="enzyme-fields">
         <label>Enzyme<select aria-label="Enzyme" value={enzyme} onChange={event => {
@@ -81,7 +82,7 @@ export default function EnzymeGuideTool({ initialRun = null, reportOnly = false 
     </form>}
     {error && <p role="alert" className="enzyme-error">{error}</p>}
     {run && <div aria-live="polite">
-      <h3>REVIEW REQUIRED · {run.candidates.filter(guide => guide.qc.passed).length} passing / {run.candidates.length} candidates</h3>
+      <h3>{run.status} · {run.candidates.filter(guide => guide.qc.passed).length} passing / {run.candidates.length} candidates</h3>
       <p>{run.created_at} · {run.coordinate_system}. Genome-wide specificity has not been checked.</p>
       <p>{enzyme === "mad7" ? "Mad7 model scores are approximate Cas12a proxies when supplied. " : ""}Scores are unavailable until a validated activity model is configured.</p>
       <div><button onClick={() => download(`${enzyme}-guides.csv`, enzymeGuideCsv(run), "text/csv")}>Export CSV</button>
@@ -89,10 +90,11 @@ export default function EnzymeGuideTool({ initialRun = null, reportOnly = false 
         <button onClick={() => download(`${enzyme}-run.json`, JSON.stringify(run, null, 2), "application/json")}>Export run JSON</button></div>
       <div className="enzyme-table"><table><caption>First 200 candidates; exports contain all candidates, including filter failures.</caption><thead><tr>{["Strand / site", "PAM", "Spacer (5′→3′)", "Cuts (target / non-target)", "GC", "Filters", "Score", "Full crRNA (RNA, 5′→3′)"].map(title => <th key={title} scope="col">{title}</th>)}</tr></thead>
         <tbody>{run.candidates.slice(0, 200).map(guide => <tr key={guide.id}>
-          <td>{guide.strand} [{guide.start}, {guide.end})</td><td>{guide.pam}</td><td><code>{guide.spacer}</code></td>
+          <td>{guide.strand} [{guide.start}, {guide.end})<br /><code>{guide.id}</code>{run.donor_design?.selected_guide_ids.includes(guide.id) && <div>Selected for donor design</div>}</td><td>{guide.pam}</td><td><code>{guide.spacer}</code></td>
           <td>{guide.cuts.target} / {guide.cuts.non_target}</td><td>{guide.gc.toFixed(1)}%</td><td>{guide.qc.passed ? "Pass" : guide.qc.reasons.join(", ")}</td>
           <td>{guide.score.value ?? "Unavailable"}{guide.score.approximate && " (approximate)"}</td><td><code>{guide.full_crrna || "Unavailable"}</code></td>
         </tr>)}</tbody></table></div>
+      <EnzymeDonorReport run={run} />
       <h3>Genome off-target search</h3>
       <p>Export input for a locally installed Cas-OFFinder, then use the repository CLI to run it against your assembly and report top hits. The browser does not run a genome search.</p>
       <div className="enzyme-fields"><label>Genome FASTA path on the search machine<input value={genomePath} onChange={e => setGenomePath(e.target.value)} /></label>

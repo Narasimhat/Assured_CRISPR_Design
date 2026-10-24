@@ -3,7 +3,7 @@
 In **Workspace**, fetch the gene from Ensembl/NCBI or upload GenBank, select the
 enzyme in Basic details, and choose the modification as usual. SpCas9 retains
 the existing complete workflow. AsCas12a and Mad7 generate modification-aware
-guide plans in **Report**, with CSV, GenBank and JSON downloads. Raw DNA plus
+guide and donor designs in **Report**, with CSV, GenBank and JSON downloads. Raw DNA plus
 CDS coordinates is also supported. The **Sequence Scan** tab is an advanced,
 whole-sequence scanner; it is not needed for the normal reference workflow.
 
@@ -16,15 +16,17 @@ a single-exon gene); it does not select or validate a deletion pair. No nearby
 guides is a valid empty result, not an invitation to substitute distant guides.
 Uploaded/fetched CDS reference blockers are rejected before planning.
 
-Cas12a/Mad7 reports explicitly contain **no donor construction, repaired-allele
-protection or primer recommendations**, and never enter batch ordering or QC
-donor exports. Gene-only KO library lookup is SpCas9-only: other enzymes need
+Cas12a/Mad7 HDR donors now support point mutations and internal/terminal tags.
+They include protein validation and canonical-PAM/exact-target re-cutting checks,
+with separate donor CSV/FASTA/GenBank downloads. See [ENZYME_DONORS.md](./ENZYME_DONORS.md).
+They do not enter the SpCas9-specific batch ordering or QC schemas. Primer
+design is available separately in Primer Tool. Gene-only KO library lookup is SpCas9-only: other enzymes need
 a sequence-backed reference. The existing genomic SNP tab remains SpCas9-only.
 
 The shared scanner adds guide discovery for SpCas9, AsCas12a
-and Mad7. Existing protein-edit and genomic SNP donor calculations remain SpCas9
-workflows. Do not feed Cas12a/Mad7 guides into their CFD or synonymous-blocking
-calculations: those calculations are specific to SpCas9.
+and Mad7. The original protein-edit engine and genomic SNP calculations retain
+their SpCas9-specific CFD and blocking logic. Cas12a/Mad7 donors use the separate
+enzyme-aware construction and canonical-PAM checks described in ENZYME_DONORS.md.
 
 ## Config and coordinates
 
