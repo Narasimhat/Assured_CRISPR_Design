@@ -266,11 +266,72 @@ test("cDNA positions are read from ClinVar names in every form ClinVar uses", ()
   assert.equal(cdnaFromVariantName(""), "");
 });
 
-test("an outage names the other source for a gene symbol but not for an accession", async () => {
+test("an outage reports both source failures for a symbol but preserves an exact accession", async () => {
   const down = async () => reply(503, "");
-  await assert.rejects(fetchGeneReference({ query: "MYD88", source: "ensembl", fetchImpl: down, sleep: noSleep }), /Ensembl returned 503.*NCBI can resolve gene symbols too/);
-  await assert.rejects(fetchGeneReference({ query: "MYD88", source: "ncbi", fetchImpl: down, sleep: noSleep }), /NCBI Datasets returned 503.*Ensembl can resolve gene symbols too/);
+  await assert.rejects(fetchGeneReference({ query: "MYD88", source: "ensembl", fetchImpl: down, sleep: noSleep }), /Ensembl returned 503.*NCBI fallback also failed.*upload a GenBank/);
+  await assert.rejects(fetchGeneReference({ query: "MYD88", source: "ncbi", fetchImpl: down, sleep: noSleep }), /NCBI Datasets returned 503.*Ensembl fallback also failed/);
   await assert.rejects(fetchGeneReference({ query: "NM_002468.5", fetchImpl: down, sleep: noSleep }), (error) => !/can resolve gene symbols/.test(error.message));
+});
+
+test("Ensembl browser/CORS failure recovers through NCBI and records actual source/transcript in the UI and GenBank", async () => {
+  const fetchImpl = async (url, options) => {
+    assert.ok(options.signal instanceof AbortSignal);
+    if (url.startsWith("https://rest.ensembl.org/")) throw new TypeError("Failed to fetch");
+    return replay()(url);
+  };
+  const result = await fetchGeneReference({ query: "MYD88", source: "ensembl", fetchImpl, sleep: noSleep, date: DATE });
+  assert.equal(result.summary.source, "ncbi");
+  assert.equal(result.summary.transcriptId, "NM_002468.5");
+  assert.deepEqual(result.summary.fallback, { requested_source: "ensembl", resolved_source: "ncbi", reason: "Could not reach Ensembl. Check the connection and try again." });
+  assert.match(result.summary.warnings[0], /fetched automatically from NCBI.*Review the selected transcript/);
+  assert.match(result.genbank, /Source recovery: ensembl unavailable; used ncbi/);
+  assert.match(result.genbank, /NM_002468/);
+});
+
+test("NCBI service outage can recover a symbol through Ensembl", async () => {
+  const fetchImpl = async url => url.includes("ncbi.nlm.nih.gov") ? reply(503, "") : replay()(url);
+  const result = await fetchGeneReference({ query: "HBB", source: "ncbi", fetchImpl, sleep: noSleep, date: DATE });
+  assert.equal(result.summary.source, "ensembl");
+  assert.equal(result.summary.gene, "HBB");
+  assert.equal(result.summary.fallback.resolved_source, "ensembl");
+});
+
+test("a transient browser failure is retried before changing sources", async () => {
+  let attempts = 0;
+  const fetchImpl = async url => {
+    if (url.includes("lookup/symbol/homo_sapiens/MYD88") && ++attempts < 3) throw new TypeError("Failed to fetch");
+    return replay()(url);
+  };
+  const result = await fetchGeneReference({ query: "MYD88", fetchImpl, sleep: noSleep, date: DATE });
+  assert.equal(attempts, 3);
+  assert.equal(result.summary.source, "ensembl");
+  assert.equal(result.summary.fallback, undefined);
+});
+
+test("exact Ensembl transcript IDs never fall back to a different RefSeq transcript", async () => {
+  const urls = [];
+  await assert.rejects(fetchGeneReference({ query: "ENST00000650905.2", sleep: noSleep, fetchImpl: async url => {
+    urls.push(url); throw new TypeError("Failed to fetch");
+  } }), /cannot be substituted automatically/);
+  assert.ok(urls.every(url => url.startsWith("https://rest.ensembl.org/")));
+  assert.equal(urls.length, 3);
+});
+
+test("permission and gene-not-found errors do not silently change the reference provider", async () => {
+  for (const status of [403, 404]) {
+    const urls = [];
+    await assert.rejects(fetchGeneReference({ query: "UNKNOWN", sleep: noSleep, fetchImpl: async url => {
+      urls.push(url); return reply(status, JSON.stringify({ error: "Not available" }));
+    } }));
+    assert.ok(urls.every(url => url.startsWith("https://rest.ensembl.org/")));
+  }
+});
+
+test("non-JSON service error pages can recover through the alternate source", async () => {
+  const fetchImpl = async url => url.startsWith("https://rest.ensembl.org/") ? reply(200, "<html>unavailable</html>") : replay()(url);
+  const result = await fetchGeneReference({ query: "MYD88", fetchImpl, sleep: noSleep, date: DATE });
+  assert.equal(result.summary.source, "ncbi");
+  assert.match(result.summary.fallback.reason, /unreadable response/);
 });
 
 test("Genomic SNP references carry enough context for the optional SpliceAI check", () => {

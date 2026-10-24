@@ -114,6 +114,19 @@ Both the design-request rows (protein workspace) and the Genomic SNP tab can fet
 - **Where it runs.** Requests go from the browser to Ensembl REST, NCBI Datasets and NCBI E-utilities, which all allow cross-origin reads, so it works on Vercel and GitHub Pages alike and nothing but the identifier you type is sent. The Vercel deployment's Content-Security-Policy (`vercel.json`) lists exactly these three origins in `connect-src` besides `'self'`; a browser blocks any other origin and reports only "Failed to fetch", so a new host must be added there (a test compares the header with the origins the module requests). Public Ensembl and NCBI services rate-limit and occasionally return errors; the module retries transient failures and otherwise says which service failed. Benchling's own API is not used: it needs a per-user key and does not allow browser requests.
 - **Tests.** `test/genomic-reverse.test.js` checks the mirror equivalence, the HBB sickle-cell design (c.20A>T installs T on the transcript strand and turns E7 into V, silent blockers map to the right forward bases) and the forward-coordinate outputs. `test/gene-fetch.test.js` replays recorded Ensembl, NCBI and ClinVar responses (`test/fixtures/gene-fetch/responses.json`: MYD88 on the forward strand, HBB on the reverse strand, three ClinVar records). It checks that Ensembl and NCBI give identical exons, coding sequence and bases, that reverse-strand records translate correctly, and that a fetched ClinVar reference is accepted by the Genomic SNP designer. Against a Benchling import of PTPRO-201 the fetched record (gene span, no flank) had identical sequence, 27 exons and CDS, and the F942E design output was byte-identical.
 
+### Gene-fetch service outages
+
+For a gene symbol such as **TP53**, the source selector is the preferred provider.
+The app retries transient failures and automatically tries NCBI if Ensembl is
+unavailable (or Ensembl if NCBI is unavailable). The summary warns about the
+switch and records the actual transcript/assembly; the GenBank COMMENT records
+the recovery source and reason. Review the selected transcript before designing.
+Requests time out after 15 seconds per attempt.
+
+Exact Ensembl IDs/transcript names and RefSeq accessions retain their provider;
+they are never silently replaced by a transcript from the other service. If
+both services fail, the error reports both failures and offers GenBank upload.
+
 ## Local development
 
 ```bash
