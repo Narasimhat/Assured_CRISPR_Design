@@ -2,9 +2,11 @@
 
 In **Workspace**, fetch a gene or upload GenBank, select AsCas12a/Mad7, and choose
 the modification. Point mutations, internal tags and N-/C-terminal cassettes now
-produce donors in **Report**. Frameshift knockout uses end joining and needs no
-HDR donor; defined HDR deletions are not implemented. The separate Genomic SNP
-tab and the SpCas9 engine retain their existing SpCas9-specific behavior.
+produce donors in the same **Report** used for Cas9, including HTML, figures,
+ordering spreadsheets and QC JSON. Frameshift knockout uses end joining and needs no
+HDR donor; defined HDR deletions are not implemented. The Genomic SNP tab also
+accepts all three enzymes while sharing its existing nucleotide, pair and splice
+validation rules. SpCas9 keeps its calibrated CFD behavior.
 
 ## Construction
 
@@ -25,9 +27,15 @@ tab and the SpCas9 engine retain their existing SpCas9-specific behavior.
   No SpCas9 strand preference is applied to Cas12a/Mad7. A cloned/AAV output
   contains only the homology cassette, not a ready-to-use vector or backbone.
 
-Up to two passing guides with target-strand cut sites at least 10 bp apart are
-matched. Co-delivery constructs one shared donor and checks both guides. With
-co-delivery off, each alternative has its own matched donor and is labeled
+The shared nearest-window policy chooses the guides. For point mutations and
+internal tags, the default is the same complete 127-base reference window as
+Cas9 (36/91 bases around the cut according to guide strand), plus the inserted
+tag for an internal knock-in. Each selected guide has an explicitly matched
+donor. Co-delivery carries shared blocking changes on both donors and checks
+each repaired allele against both guides; independent delivery keeps per-guide
+changes. Terminal knock-ins use the shared homology-arm planner and cassette.
+Explicit format/arm overrides remain available. With co-delivery off, each
+alternative is labeled
 **one guide/donor pair at a time; do not pool alternatives**. When no guide passes
 the filters, donors are blocked rather than attached to an unsuitable guide.
 
@@ -71,20 +79,22 @@ splice effects, delivery, strand choice and experimental HDR efficiency still
 require review. Independent synonymous edits can affect expression even when
 the protein sequence is unchanged; codon usage is not optimized here.
 
-## Downloads and traceability
+## Reports, downloads and traceability
 
-The report shows DNA, homology lengths, matched guide IDs, desired/blocking edits,
-full expected/repaired proteins, re-cutting findings and synthesis flags.
-The run JSON includes requested parameters even when construction is blocked.
+The standard report shows guide DNA/PAM, matched donors, homology lengths,
+expected/repaired codons and proteins, blocking changes, primer recommendations,
+release findings and the design figure. The on-screen and downloaded HTML views
+use the same presentation functions as Cas9. The canonical result also drives
+the same order-row/spreadsheet pipeline and Assured QC JSON hand-off, including
+enzyme, PAM geometry, both strand cuts and configuration provenance.
 
-- **Donor CSV / FASTA:** selected 5′→3′ DNA sequence and explicit sense/antisense
-  orientation relative to the input reference. BLOCKED exports are labeled for
-  troubleshooting and must not be ordered.
-- **Donor GenBank:** input-sense donor sequence with homology/core/edit features,
-  independent of the chosen order strand; metadata records that choice.
-- **Run JSON:** full config/version, reference and modified allele, parameters,
-  guide pairing, checks, warnings and status.
+For ssODNs, both DNA strands are displayed, with the selected strand explicitly
+labeled in input-reference coordinates. Cas9 strand-bias claims are not silently
+applied to Cas12a/Mad7. Terminal donors keep the chosen format, cassette and arm
+annotations. Sequence exports retain review status; export does not constitute
+ordering approval.
 
-These downloads are independent of the existing SpCas9 ordering/QC schemas.
-Synthesis flags are heuristics, not vendor approval. Model and licensed-repeat
-validation requirements in ENZYME_GUIDES.md still apply.
+The module-level donor CSV/FASTA/GenBank helpers remain available for programmatic
+use. The normal website uses the shared report/order/QC interfaces. Synthesis
+flags are heuristics, not vendor approval. Model and licensed-repeat validation
+requirements in ENZYME_GUIDES.md still apply.

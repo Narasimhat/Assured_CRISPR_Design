@@ -125,6 +125,6 @@ test("legacy Cas9 adapter preserves exhaustive ordering, fields, windows and hom
     assert.deepEqual(findSpCas9Guides({ genomicSequence: sequence }, rc, target, range), expected);
   }
 });
-test("Cas12a/Mad7 cannot silently enter the Cas9 donor protection engine", () => {
-  assert.match(runDesignFromTranscriptModel("pm", null, "A1G", null, 100, { enzyme: "mad7" }).err, /SpCas9 only/);
+test("Enzyme design validates its reference before entering the shared workflow", () => {
+  assert.match(runDesignFromTranscriptModel("pm", null, "A1G", null, 100, { enzyme: "mad7" }).err, /missing genomic sequence/);
 });

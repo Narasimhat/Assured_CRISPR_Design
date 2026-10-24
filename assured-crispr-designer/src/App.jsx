@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import GenomicSnpTool, { GenomicSnpReport } from "./GenomicSnpTool.jsx";
 import EnzymeGuideTool from "./EnzymeGuideTool.jsx";
 import { ENZYMES, getEnzyme } from "./enzymeConfig.js";
-import { planEnzymeModification } from "./enzymeEditPlan.js";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessChecks,
@@ -471,6 +470,8 @@ function extractParentIdFromFolderName(name) {
   return match ? match[1] : "";
 }
 
+function isSpCas9Result(result) { return !result?.enzyme || result.enzyme.id === "spcas9"; }
+
 function buildGuideRows(result) {
   return (result?.gs || []).map((guide) => [guide.n, `${guide.sp} ${guide.pm}`, `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
 }
@@ -904,7 +905,8 @@ function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuild
 }
 
 // JSX only. The HTML equivalent lives in reportHtml.js, which must stay React-free.
-function renderGuideSequence(spacer, pam) {
+function renderGuideSequence(spacer, pam, enzyme = null) {
+  if (enzyme?.pam_side === "5prime") return <><span style={{ background: "#FEF3C7", color: "#92400E", fontFamily: "Consolas, monospace", fontWeight: 800 }}>{pam}</span>{" "}<span style={{ fontFamily: "Consolas, monospace", fontWeight: 700 }}>{spacer}</span></>;
   return (
     <>
       <span style={{ fontFamily: "Consolas, monospace", fontWeight: 700, color: "#111827" }}>{spacer}</span>{" "}
@@ -2601,7 +2603,6 @@ export default function App() {
   const internalTagOptions = useMemo(() => Object.keys(INTERNAL_TAGS), []);
   const supportsWorkspaceAccess = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
   const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
-  const batchEnzymeResults = useMemo(() => batchResults.filter((entry) => entry.status === "enzyme-guides"), [batchResults]);
   const selectedEntry = useMemo(
     () => batchSuccessfulResults.find((entry) => entry.rowId === selectedProjectId) || batchSuccessfulResults[0] || null,
     [batchSuccessfulResults, selectedProjectId],
@@ -2695,7 +2696,7 @@ export default function App() {
     : true;
 
   const replaceSelectedKoGuide = useCallback((slotIndex, replacementGuide) => {
-    if (!selectedEntry?.result || selectedEntry.result.type !== "ko") return;
+    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !isSpCas9Result(selectedEntry.result)) return;
     setBatchResults((current) => current.map((entry) => {
       if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
       const nextResult = updateKoResultWithMappedGuides(entry.result, entry.row, slotIndex, replacementGuide);
@@ -2717,7 +2718,7 @@ export default function App() {
   }, [replaceSelectedKoGuide]);
 
   const applyKoGuidePairToSelected = useCallback((pairCandidate) => {
-    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !pairCandidate?.guides?.length) return;
+    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !isSpCas9Result(selectedEntry.result) || !pairCandidate?.guides?.length) return;
     setBatchResults((current) => current.map((entry) => {
       if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
       const nextResult = finalizeKoResultWithGuides(entry.result, entry.row, pairCandidate.guides);
@@ -2770,7 +2771,7 @@ export default function App() {
   }, [fpbaseRowId, fpbaseLookup.status, loadFpbaseReporters]);
 
   useEffect(() => {
-    if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
+    if (selectedEntry?.result?.type !== "ko" || !isSpCas9Result(selectedEntry.result) || !selectedEntry.result.gene) {
       setBrunelloLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
       return;
     }
@@ -2802,7 +2803,7 @@ export default function App() {
   }, [selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
-    if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
+    if (selectedEntry?.result?.type !== "ko" || !isSpCas9Result(selectedEntry.result) || !selectedEntry.result.gene) {
       setCasDbLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
       return;
     }
@@ -2836,7 +2837,7 @@ export default function App() {
   }, [casDbOrganismId, selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
-    const koEntries = batchSuccessfulResults.filter((entry) => entry.result?.type === "ko" && entry.result?.gene);
+    const koEntries = batchSuccessfulResults.filter((entry) => entry.result?.type === "ko" && isSpCas9Result(entry.result) && entry.result?.gene);
     const activeIds = new Set(koEntries.map((entry) => entry.rowId));
     setBatchKoReferenceMap((current) => {
       const next = Object.fromEntries(Object.entries(current).filter(([rowId]) => activeIds.has(rowId)));
@@ -3248,14 +3249,7 @@ export default function App() {
       const slot = index + 1;
       if (!hasSequenceBackedReference(row) && !(row.projectType === "ko" && row.gene && !parseCustomGuideInput(row.customGuides).length)) return { slot, rowId: row.id, row, status: "empty" };
       try {
-        if (row.enzyme && row.enzyme !== "spcas9") {
-          if (!hasSequenceBackedReference(row)) throw new Error("Fetch a gene or upload GenBank before generating Cas12a/Mad7 guides. Gene-only reference libraries support SpCas9 only.");
-          const rawReference = row.referenceSource === "raw" ? {
-            gene: row.gene, sequence: parseRawSequenceInput(row.rawSequence), cdsStart: row.cdsStart,
-            cdsEnd: row.cdsEnd, exons: parseExonCoordinateInput(row.exonCoordinates),
-          } : null;
-          return { slot, rowId: row.id, row, status: "enzyme-guides", result: planEnzymeModification(row, rawReference) };
-        }
+        if (row.enzyme && row.enzyme !== "spcas9" && !hasSequenceBackedReference(row)) throw new Error("Fetch a gene or upload GenBank first; Cas9 reference-guide libraries cannot supply guides for another enzyme.");
         if (row.projectType === "ko" && !hasSequenceBackedReference(row)) {
           if (parseCustomGuideInput(row.customGuides).length) {
             return {
@@ -3315,6 +3309,14 @@ export default function App() {
           return { slot, rowId: row.id, row, status: "success", result: referenceOnlyDesign, debug: "" };
         }
         const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm, {
+          enzyme: row.enzyme || "spcas9",
+          spacerLength: Number(row.enzymeSpacerLength || getEnzyme(row.enzyme || "spcas9").spacer_len.default),
+          directRepeat: row.enzymeDirectRepeat,
+          repeatSource: row.enzymeRepeatSource,
+          repeatVerified: row.enzymeRepeatVerified,
+          donorStrand: row.enzymeDonorStrand || "sense",
+          pamBlocking: row.enzymePamBlocking !== false,
+          expectedGene: row.gene,
           customGuides: parseCustomGuideInput(row.customGuides),
           // Terminal-tag donors: format (auto picks by insert size), per-side arms and trimming of
           // an arm that runs into a hard-to-synthesize stretch. See donorFormat.js.
@@ -3351,7 +3353,7 @@ export default function App() {
       }
     }));
     setBatchResults(nextResults);
-    if (nextResults.some((entry) => entry.status === "success" || entry.status === "enzyme-guides")) {
+    if (nextResults.some((entry) => entry.status === "success")) {
       setShowGenomicReport(false);
       setActiveTab("report");
     } else {
@@ -3812,7 +3814,6 @@ export default function App() {
                       {row.parseIssue && <Badge color={COLORS.accentAlt}>{row.parseIssue}</Badge>}
                       {!row.parseIssue && rowReady && !batchStatus && <Badge color={COLORS.accent}>Ready to generate</Badge>}
                       {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
-                      {batchStatus?.status === "enzyme-guides" && <Badge color={COLORS.accentAlt}>{getEnzyme(row.enzyme).name} · {batchStatus.result.status}</Badge>}
                       {batchStatus?.status === "error" && <Badge color={COLORS.danger}>Error</Badge>}
                       {batchSuccessfulResults.length > 1 && batchStatus?.status === "success" && (
                         <ActionButton variant="secondary" onClick={() => setSelectedProjectId(row.id)}>
@@ -3945,7 +3946,7 @@ export default function App() {
                     {getEnzyme(row.enzyme).license_note && <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).license_note}</p>}
                     <Grid>
                       <label>Spacer length<input aria-label={`Spacer length for design ${slot}`} type="number" min={getEnzyme(row.enzyme).spacer_len.min} max={getEnzyme(row.enzyme).spacer_len.max} value={row.enzymeSpacerLength || 23} onChange={event => updateBatchRow(index, "enzymeSpacerLength", event.target.value)} style={FIELD_STYLE} /></label>
-                      <label>Search radius around the edit (bp)<input aria-label={`Search radius for design ${slot}`} type="number" min="1" max="500" value={row.guideSearchRadius ?? 30} onChange={event => updateBatchRow(index, "guideSearchRadius", event.target.value)} style={FIELD_STYLE} /><span style={{ fontSize: 12, color: COLORS.muted }}>For knockout, guides are shortlisted within coding segments instead.</span></label>
+                      <div style={{ color: COLORS.muted, fontSize: 13 }}>Guide selection uses the same 10 → 20 → 30 bp windows as Cas9, with protection ranked within a window. Knockout uses the same two-guide exon and spacing rules.</div>
                     </Grid>
                     <details><summary>Full crRNA: direct repeat verification</summary>
                       <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).repeat_note}</p>
@@ -3962,7 +3963,7 @@ export default function App() {
                       <label>PAM-blocking substitutions per guide<select aria-label={`PAM blocking limit for design ${slot}`} value={row.maxBlockingChanges || "3"} onChange={event => updateBatchRow(index, "maxBlockingChanges", event.target.value)} style={SELECT_STYLE}><option value="1">Up to 1</option><option value="2">Up to 2</option><option value="3">Up to 3</option></select></label>
                     </Grid>
                     <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={row.enzymePamBlocking !== false} onChange={event => updateBatchRow(index, "enzymePamBlocking", event.target.checked)} />Try synonymous changes that remove the canonical enzyme PAM, avoiding annotated splice windows.</label>
-                    <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={row.coDelivery !== false} onChange={event => updateBatchRow(index, "coDelivery", event.target.checked)} />Shared donor for co-delivery of the selected guides. Turn off to construct separate matched guide/donor alternatives.</label>
+                    <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={row.coDelivery !== false} onChange={event => updateBatchRow(index, "coDelivery", event.target.checked)} />Co-transfect the selected guides and matched donors, with shared blocking changes on every donor. Turn off to deliver one matched pair at a time.</label>
                   </FormSection>}
 
                   <FormSection title="What should be designed?" hint={APP_CONFIG.designDetailsHint} tone="warm">
@@ -4128,13 +4129,12 @@ export default function App() {
                       {batchStatus.error}
                     </div>
                   )}
-                  {batchStatus?.status === "enzyme-guides" && <div style={{ marginTop: 10, color: COLORS.muted }}>{batchStatus.result.candidates.length} candidate guides · {batchStatus.result.donor_design?.donors.length || 0} donors · {batchStatus.result.status}. Review guide and donor details in Report.</div>}
                   {batchStatus?.status === "success" && (
                     <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                       {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" || batchStatus.result.type === "it" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
                     </div>
                   )}
-                  {batchStatus?.status === "success" && batchStatus.result?.type === "ko" && (
+                  {batchStatus?.status === "success" && batchStatus.result?.type === "ko" && isSpCas9Result(batchStatus.result) && (
                     <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
                       <div style={{ color: "#111827", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>High-throughput KO pair suggestions</div>
                       <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
@@ -4195,11 +4195,7 @@ export default function App() {
         {activeTab === "report" && showGenomicReport && genomicReport && (
           <GenomicSnpReport result={genomicReport} onEdit={() => setActiveTab("genomic-snp")} onOtherReports={() => setShowGenomicReport(false)} />
         )}
-        {activeTab === "report" && !showGenomicReport && batchEnzymeResults.map(entry => <div key={`${entry.rowId}:${entry.result.created_at}`} style={{ marginTop: 18 }}>
-          <h2 style={{ color: COLORS.text }}>Design {entry.slot}: {entry.row.label || entry.row.gene || "Enzyme guide plan"}</h2>
-          <EnzymeGuideTool initialRun={entry.result} reportOnly />
-        </div>)}
-        {activeTab === "report" && !showGenomicReport && (!batchEnzymeResults.length || batchSuccessfulResults.length > 0) && (
+        {activeTab === "report" && !showGenomicReport && (
         <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(240,228,204,0.12), rgba(16,34,52,0.90))", border: `1px solid ${COLORS.borderSoft}` }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
@@ -4356,7 +4352,7 @@ export default function App() {
                     {(selectedEntry.result?.gs || []).map((guide, rowIndex) => (
                       <tr key={rowIndex}>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.n}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm)}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm, selectedEntry.result.enzyme)}</td>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.str} strand</td>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.gc}%</td>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.arm || guide.note || ""}</td>
@@ -4404,6 +4400,7 @@ export default function App() {
                         ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs above are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up."
                         : "No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption."}
                     </div>
+                    {isSpCas9Result(selectedEntry.result) && <>
                     <InlineNotice style={{ marginBottom: 12 }}>
                       The primary recommended knockout pair is already summarized above. The reference-library sections below are optional if you want backup guides or alternative local pairs.
                     </InlineNotice>
@@ -4796,6 +4793,7 @@ export default function App() {
                         </>
                       )}
                     </CollapsiblePanel>
+                    </>}
                   </>
                 )}
                 {selectedEntry.result.type === "it" && (

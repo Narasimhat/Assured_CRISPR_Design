@@ -32,7 +32,8 @@ function codingProjection(model, edits) {
     if (start === undefined || covered.length !== edit.end - edit.start) throw new Error("An edit cannot be mapped continuously into the coding sequence.");
     return { ...edit, start, end: start + covered.length };
   });
-  return applyAlleleEdits(model.cdsSequence, projected);
+  const codingSequence = model.cdsSegments.map(([start, end]) => model.genomicSequence.slice(start, end)).join("");
+  return applyAlleleEdits(codingSequence, projected);
 }
 
 /** Assemble the intended edit using the same curated insert presets as Cas9. */
@@ -106,7 +107,7 @@ export function assessEnzymeReCutting(model, guide, config, edits, donorSequence
       : "The spacer was changed but a canonical PAM remains. Cas12a/Mad7 mismatch tolerance is not calibrated; protection needs review." };
 }
 
-function findSynonymousPamEdits(model, guide, config, edits, interval, maxChanges, excludedAa) {
+export function findSynonymousPamEdits(model, guide, config, edits, interval, maxChanges, excludedAa, allowed = () => true) {
   const pamMatches = pamRegex(config.pam_pattern);
   if (!pamMatches.test(editedPam(model, guide, edits))) return [];
   const touchedAa = [...new Set(Array.from({ length: guide.pam_end - guide.pam_start }, (_, i) => genomicPosToAa(model, guide.pam_start + i)).filter(Boolean))];
@@ -119,7 +120,7 @@ function findSynonymousPamEdits(model, guide, config, edits, interval, maxChange
     if (edits.some(edit => info.genomicPositions.some(pos => pos >= edit.start && pos < edit.end))) continue;
     for (const codon of codons.filter(value => value !== info.cod && toAA(value) === info.aa)) {
       const changes = [...codon].flatMap((base, i) => base === info.cod[i] ? [] : [{ start: info.genomicPositions[i], end: info.genomicPositions[i] + 1, sequence: base, kind: "synonymous_pam", aa_number: aa }]);
-      if (changes.length > maxChanges || changes.some(edit => edit.start < interval.start || edit.end > interval.end || inSpliceWindow(model, edit.start))) continue;
+      if (changes.length > maxChanges || changes.some(edit => edit.start < interval.start || edit.end > interval.end || inSpliceWindow(model, edit.start) || !allowed(edit.start))) continue;
       const candidate = [...edits, ...changes];
       if (translate(codingProjection(model, candidate)) !== translate(codingProjection(model, edits))) continue;
       if (!pamMatches.test(editedPam(model, guide, candidate))) options.push(changes);
@@ -134,8 +135,9 @@ export function buildEnzymeDonorDesign(model, run, row = {}) {
   if (run.modification.type === "ko") return { status: "not_required", donors: [], selected_guide_ids: [],
     note: "Frameshift knockout uses end joining; no HDR donor is required. A defined HDR deletion or replacement is a separate design." };
   const selected = [];
-  for (const guide of run.candidates.filter(candidate => candidate.qc.passed)) {
-    if (!selected.length || selected.every(other => Math.abs(other.cuts.target - guide.cuts.target) >= 10)) selected.push(guide);
+  const supplied = row.selectedGuideIds?.length ? row.selectedGuideIds.map(id => run.candidates.find(guide => guide.id === id)).filter(Boolean) : null;
+  for (const guide of supplied || run.candidates.filter(candidate => candidate.qc.passed)) {
+    if (supplied || !selected.length || selected.every(other => Math.abs(other.cuts.target - guide.cuts.target) >= 10)) selected.push(guide);
     if (selected.length === 2) break;
   }
   if (!selected.length) return { status: "blocked", donors: [], selected_guide_ids: [], errors: ["No guide passes the configured filters near this edit. Adjust the reference, search radius or enzyme before constructing a matched donor."] };
@@ -153,22 +155,34 @@ export function buildEnzymeDonorDesign(model, run, row = {}) {
     if (plan.arms.five < spec.minArm || plan.arms.three < spec.minArm) throw new Error(`Insufficient reference or homology: ${plan.arms.five}/${plan.arms.three} bp arms; ${spec.minArm} bp minimum per arm for ${spec.short}. Fetch more flanking sequence or change the donor format/arms.`);
     const interval = { start: request.coreStart - plan.arms.five, end: request.coreEnd + plan.arms.three };
     const coDelivery = row.coDelivery !== false;
-    const groups = coDelivery ? [selected] : selected.map(guide => [guide]);
+    const asymmetric = row.nativeDonorWindows && ["pm", "it"].includes(run.modification.type) && (!row.donorFormat || row.donorFormat === "auto" || row.donorFormat === "ssodn") && !row.homologyArm && !row.homologyArm3;
+    const windows = asymmetric ? selected.map(guide => {
+      let start = guide.cuts.target - (guide.strand === "+" ? 36 : 91);
+      let end = start + 127;
+      if (start < 0) { end -= start; start = 0; }
+      if (end > model.genomicSequence.length) { start -= end - model.genomicSequence.length; end = model.genomicSequence.length; }
+      if (start < 0 || end - start !== 127) throw new Error("Supply enough flanking reference for a complete 127-base donor window.");
+      return { start, end };
+    }) : selected.map(() => interval);
+    const commonWindow = coDelivery ? { start: Math.max(...windows.map(window => window.start)), end: Math.min(...windows.map(window => window.end)) } : null;
+    const groups = asymmetric ? selected.map(guide => coDelivery ? selected : [guide]) : coDelivery ? [selected] : selected.map(guide => [guide]);
     const donors = groups.map((guides, index) => {
-      if (guides.some(guide => Object.values(guide.cuts).some(cut => cut < interval.start || cut > interval.end))) throw new Error("A predicted strand cut lies outside the donor-covered interval. Lengthen homology arms or choose a closer guide.");
+      const donorWindow = asymmetric ? windows[index] : interval;
+      const blockingWindow = commonWindow || donorWindow;
+      if (guides.some(guide => Object.values(guide.cuts).some(cut => cut < donorWindow.start || cut > donorWindow.end))) throw new Error("A predicted strand cut lies outside the donor-covered interval. Lengthen homology arms or choose a closer guide.");
       let edits = [...request.edits];
       const maxChanges = Number(row.maxBlockingChanges || 3);
       if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 3) throw new Error("Choose 1–3 synonymous PAM-blocking substitutions per guide.");
       if (row.enzymePamBlocking !== false) for (const guide of guides) {
         const state = assessEnzymeReCutting(model, guide, run.enzyme, edits).state;
         if (["intact_target", "mismatched_target_unscored"].includes(state)) edits = [...edits,
-          ...findSynonymousPamEdits(model, guide, run.enzyme, edits, interval, maxChanges, request.targetAa)];
+          ...findSynonymousPamEdits(model, guide, run.enzyme, edits, blockingWindow, maxChanges, request.targetAa)];
       }
-      if (edits.some(edit => edit.start < interval.start || edit.end > interval.end)) throw new Error("The donor does not cover every requested and blocking change.");
-      const local = edits.map(edit => ({ ...edit, start: edit.start - interval.start, end: edit.end - interval.start }));
-      const sense = applyAlleleEdits(model.genomicSequence.slice(interval.start, interval.end), local);
+      if (edits.some(edit => edit.start < donorWindow.start || edit.end > donorWindow.end)) throw new Error("The donor does not cover every requested and blocking change.");
+      const local = edits.map(edit => ({ ...edit, start: edit.start - donorWindow.start, end: edit.end - donorWindow.start }));
+      const sense = applyAlleleEdits(model.genomicSequence.slice(donorWindow.start, donorWindow.end), local);
       const repaired = applyAlleleEdits(model.genomicSequence, edits);
-      const reconstructed = model.genomicSequence.slice(0, interval.start) + sense + model.genomicSequence.slice(interval.end);
+      const reconstructed = model.genomicSequence.slice(0, donorWindow.start) + sense + model.genomicSequence.slice(donorWindow.end);
       if (reconstructed !== repaired) throw new Error("Donor-to-repaired-allele reconstruction failed.");
       const actualProtein = translate(codingProjection(model, edits));
       if (actualProtein !== request.expectedProtein) throw new Error("Final donor changes the protein beyond the requested modification.");
@@ -187,14 +201,15 @@ export function buildEnzymeDonorDesign(model, run, row = {}) {
       if (guides.some(guide => Object.values(guide.cuts).some(cut => cut < interval.start || cut > interval.end))) warnings.push("A predicted strand cut is outside the donor-covered reference interval; review repair geometry.");
       if (synthesis.length) warnings.push("The donor contains synthesis-complexity flags; review the vendor's synthesis screen.");
       if (plan.arms.limited.five || plan.arms.limited.three) warnings.push("Homology arms were limited by the supplied reference.");
-      const coreStart = plan.arms.five;
+      const coreStart = request.coreStart - donorWindow.start;
       return { id: `${run.enzyme.id}-donor-${index + 1}`, enzyme: run.enzyme.id, config_version: run.enzyme.version,
         status: intact ? "BLOCKED" : "REVIEW REQUIRED", matched_guide_ids: guides.map(guide => guide.id),
         delivery: coDelivery ? "co-delivery of matched guides" : "one matched guide/donor pair at a time; do not pool alternatives",
-        format: plan.format, format_label: spec.label, reference_interval: interval, coordinate_system: run.coordinate_system,
+        format: plan.format, format_label: spec.label, reference_interval: donorWindow, coordinate_system: run.coordinate_system,
+        primary_guide_id: asymmetric ? selected[index].id : guides[0].id,
         sequence: sense, reverse_complement: reverseComplementDna(sense), strand, order_sequence: strand === "antisense" ? reverseComplementDna(sense) : sense,
         strand_note: plan.format === "ssodn" ? "Strand is a user choice relative to the input record, not a Cas9-derived recommendation. Optimize experimentally for this nuclease." : "Double-stranded homology cassette shown in input orientation; vector backbone is not included.",
-        arms: plan.arms, annotations: [{ label: "5prime homology", start: 0, end: coreStart },
+        arms: { ...plan.arms, five: coreStart, three: donorWindow.end - request.coreEnd }, annotations: [{ label: "5prime homology", start: 0, end: coreStart },
           { label: run.modification.label, start: coreStart, end: coreStart + coreLength },
           { label: "3prime homology", start: coreStart + coreLength, end: sense.length }],
         edits, protein_validation: proteinValidation, insert_validation: request.insertValidation,

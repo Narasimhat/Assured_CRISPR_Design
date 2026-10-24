@@ -5,10 +5,10 @@ import { designEnzymeGuides } from "./enzymeGuides.js";
 import { buildEnzymeDonorDesign } from "./enzymeDonors.js";
 
 /** Modification-aware guide planning, deliberately independent of Cas9 donor/CFD logic. */
-export function planEnzymeModification(row, rawReference = null) {
+export function planEnzymeModification(row, rawReference = null, { model: suppliedModel = null, buildDonors = true } = {}) {
   if (!row.enzyme || row.enzyme === "spcas9") throw new Error("Use the standard donor workflow for SpCas9.");
-  const model = row.referenceSource === "raw" ? normalizeRawSequenceToTranscriptModel(rawReference)
-    : normalizeGenBankToTranscriptModel(parseGB(row.gbRaw), { expectedGene: row.gene });
+  const model = suppliedModel || (row.referenceSource === "raw" ? normalizeRawSequenceToTranscriptModel(rawReference)
+    : normalizeGenBankToTranscriptModel(parseGB(row.gbRaw), { expectedGene: row.gene }));
   if (!model || !getCdsFromModel(model)) throw new Error("Fetch a gene or upload a GenBank reference with CDS annotation, or provide raw DNA with CDS coordinates.");
   const blockers = (model.referenceIssues || []).filter(issue => issue.severity === "blocker");
   if (blockers.length) throw new Error(blockers.map(issue => issue.message).join(" "));
@@ -83,8 +83,10 @@ export function planEnzymeModification(row, rawReference = null) {
     requested_arm3: row.homologyArm3 || null, auto_trim: row.autoTrimArms !== false,
     strand: row.enzymeDonorStrand || "sense", synonymous_pam_blocking: row.enzymePamBlocking !== false,
     max_blocking_changes_per_guide: Number(row.maxBlockingChanges || 3), co_delivery: row.coDelivery !== false };
-  run.donor_design = buildEnzymeDonorDesign(model, run, row);
-  run.modification.donor_status = run.donor_design.status;
-  if (run.donor_design.status === "blocked") run.status = "BLOCKED";
+  if (buildDonors) {
+    run.donor_design = buildEnzymeDonorDesign(model, run, row);
+    run.modification.donor_status = run.donor_design.status;
+    if (run.donor_design.status === "blocked") run.status = "BLOCKED";
+  }
   return run;
 }

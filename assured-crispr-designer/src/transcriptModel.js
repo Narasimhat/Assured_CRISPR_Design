@@ -585,7 +585,7 @@ export function extractCodingDonorWindowFromModel(model, donorStart, donorEnd, p
   };
 }
 
-export function findKoDesignTargetFromModel(model, reverseComplement, selectKoGuidePair) {
+export function findKoDesignTargetFromModel(model, reverseComplement, selectKoGuidePair, finder = findSpCas9Guides) {
   const seq = getGenomicSequence(model);
   const segs = getCdsSegments(model);
   const exons = getExonsFromModel(model);
@@ -599,7 +599,7 @@ export function findKoDesignTargetFromModel(model, reverseComplement, selectKoGu
   const candidates = targetSegments.map(({ start, end, index }) => {
     const exonLength = end - start;
     const exon = findExonForSegment(exons, start, end);
-    const guides = findSpCas9Guides(model, reverseComplement, Math.floor((start + end) / 2), Math.floor(exonLength / 2) + 10)
+    const guides = finder(model, reverseComplement, Math.floor((start + end) / 2), Math.floor(exonLength / 2) + 10)
       .filter((guide) => guide.cut >= start - boundaryWindow && guide.cut <= end + boundaryWindow)
       .sort((left, right) => right.gc - left.gc);
     const pair = selectKoGuidePair(guides);

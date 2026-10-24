@@ -1,32 +1,55 @@
-# Enzyme guide discovery
+# Enzyme-aware CRISPR design
 
-In **Workspace**, fetch the gene from Ensembl/NCBI or upload GenBank, select the
-enzyme in Basic details, and choose the modification as usual. SpCas9 retains
-the existing complete workflow. AsCas12a and Mad7 generate modification-aware
-guide and donor designs in **Report**, with CSV, GenBank and JSON downloads. Raw DNA plus
-CDS coordinates is also supported. The **Sequence Scan** tab is an advanced,
-whole-sequence scanner; it is not needed for the normal reference workflow.
+In **Workspace**, fetch a gene or upload GenBank, select SpCas9, AsCas12a or
+Mad7, and choose the modification. All three systems now use the same canonical
+result format and the same on-screen report, HTML report, design figure,
+primer workflow, ordering spreadsheets and Assured QC JSON export. Raw DNA with
+CDS coordinates is also supported. **Sequence Scan** is an optional advanced
+whole-sequence utility; it is not a separate modification-design workflow.
 
-Point mutations search around the requested codon after checking its reference
-amino acid; internal tags search around the insertion boundary; terminal tags
-search around the start/stop boundary. The default search radius is 30 bp from
-either predicted strand cut and is configurable to 1–500 bp. Knockout mode
-shortlists guides cutting in preferred internal coding segments (or the CDS for
-a single-exon gene); it does not select or validate a deletion pair. No nearby
-guides is a valid empty result, not an invitation to substitute distant guides.
-Uploaded/fetched CDS reference blockers are rejected before planning.
+## Shared design principles
 
-Cas12a/Mad7 HDR donors now support point mutations and internal/terminal tags.
-They include protein validation and canonical-PAM/exact-target re-cutting checks,
-with separate donor CSV/FASTA/GenBank downloads. See [ENZYME_DONORS.md](./ENZYME_DONORS.md).
-They do not enter the SpCas9-specific batch ordering or QC schemas. Primer
-design is available separately in Primer Tool. Gene-only KO library lookup is SpCas9-only: other enzymes need
-a sequence-backed reference. The existing genomic SNP tab remains SpCas9-only.
+- **Knockout:** two guides, selected with the existing Cas9 exon/pair policy:
+  non-terminal coding segments, preference for coding segments 2–4, pair spacing
+  up to 140 bp, with 40–140 bp preferred. The same pair ranking and screening
+  primer functions are used. Custom longer-deletion pairs use the existing
+  deletion-screen PCR path. A single guide or duplicate cut cannot masquerade
+  as a knockout pair. References with no usable pair receive an explicit error.
+- **Point mutations:** inspect 10, 20, then 30 bp windows; rank blockability
+  within the nearest available window, then composition and distance. Keep the
+  near lead and add a distinct partner from the wider windows when one exists.
+  Custom guides remain explicit choices. No distant guide silently replaces
+  the closest-window design.
+- **Internal/terminal tags:** use the same insertion anchors and nearest-window
+  selection principles, curated cassette/protein checks, homology planning,
+  screening primer searches and report sections as Cas9.
+- **Composition:** in the normal design workflow, GC is an observation and an
+  extreme-composition tie-break, not a hard 40–60% rejection gate. The native
+  poly-A/poly-T screening and delivery-dependent U6 checks apply consistently.
+- **Genomic SNP:** the existing two-guide/shared-or-independent donor policies,
+  exact nucleotide validation and splice screens now accept all three enzymes.
+  Coordinate/allele and reverse-reference rules are unchanged.
+- **Reporting/export:** guide sequences, donors, opposing strands, codon/protein
+  comparisons, primers, design figures, release verdict, order rows and QC hand-off
+  come from the shared report/export code. Enzyme/config version, PAM side and
+  staggered cuts are recorded. Cas9-only reference libraries are never proposed
+  for another enzyme.
 
-The shared scanner adds guide discovery for SpCas9, AsCas12a
-and Mad7. The original protein-edit engine and genomic SNP calculations retain
-their SpCas9-specific CFD and blocking logic. Cas12a/Mad7 donors use the separate
-enzyme-aware construction and canonical-PAM checks described in ENZYME_DONORS.md.
+Differences belong in enzyme configuration and evidence: PAM/strand geometry,
+spacer length, crRNA repeat, cut offsets, seed and scoring model. Cut-to-edit
+windows for staggered systems use the nearest predicted strand cut; nominal
+knockout deletion sizes use target-strand boundaries and additionally record
+strand-cut combinations. Actual repaired junctions require sequencing.
+
+Cas12a/Mad7 use canonical-PAM removal or target interruption as categorical
+protection findings. **No SpCas9 CFD or fabricated residual-activity values are
+applied.** Their activity and noncanonical-PAM/mismatch behavior require review;
+that limitation does not remove design, report, primer or export functionality.
+See [ENZYME_DONORS.md](./ENZYME_DONORS.md) for donor details.
+
+Gene-only Cas9 reference-library mode remains specific to that library. Fetch or
+upload the sequence to design another enzyme's guides instead of reusing Cas9
+library spacers.
 
 ## Config and coordinates
 
@@ -51,7 +74,7 @@ Incomplete sites and ambiguous spacers are skipped. Input is DNA or one FASTA
 record. Exclusion intervals use the input reference coordinates, not genomic
 assembly coordinates unless the input is that entire contig.
 
-Default discovery filters are GC 40–60%, no homopolymer longer than four,
+Advanced Sequence Scan filters default to GC 40–60%, no homopolymer longer than four,
 and no non-overlapping reverse-complement arms of six bases. TTTT is excluded
 only for Pol III expression. Filters can be changed; zero disables homopolymer
 or complementary-arm screens. Exclusions screen the entire spacer/PAM interval.
@@ -115,7 +138,7 @@ The CLI writes JSON, CSV and annotated GenBank. JSON retains the full reference,
 config snapshot, timestamp, parameters and reference SHA-256. All runs remain
 `REVIEW REQUIRED`.
 
-The browser exports Cas-OFFinder input for passing guides; it does not execute
+The advanced scanner exports Cas-OFFinder input for passing guides; it does not execute
 a genome search. A local CPU/OpenCL Cas-OFFinder installation and genome FASTA
 are required for actual searching:
 
