@@ -4,17 +4,17 @@ const csvCell = value => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 export function enzymeGuideCsv(run) {
-  const fields = ["id", "enzyme", "config_version", "created_at", "status", "coordinate_system", "start", "end", "strand", "pam", "spacer", "cuts", "gc", "filter_pass", "filter_reasons", "score", "scoring_model", "scoring_version", "score_approximate", "full_crrna", "parameters", "off_target"];
+  const fields = ["id", "enzyme", "config_version", "created_at", "status", "coordinate_system", "start", "end", "strand", "pam", "spacer", "cuts", "gc", "filter_pass", "filter_reasons", "score", "scoring_model", "scoring_version", "score_approximate", "full_crrna", "parameters", "off_target", "reference", "modification", "cut_distance"];
   return [fields.join(","), ...run.candidates.map(guide => [guide.id, guide.enzyme, run.enzyme.version, run.created_at,
     run.status, run.coordinate_system, guide.start, guide.end, guide.strand, guide.pam, guide.spacer, guide.cuts, guide.gc,
     guide.qc.passed, guide.qc.reasons, guide.score.value, guide.score.model, guide.score.version, guide.score.approximate,
-    guide.full_crrna, run.parameters, run.off_target].map(csvCell).join(","))].join("\r\n") + "\r\n";
+    guide.full_crrna, run.parameters, run.off_target, run.reference, run.modification, guide.cut_distance].map(csvCell).join(","))].join("\r\n") + "\r\n";
 }
 const safe = value => String(value).replace(/["\r\n]/g, " ");
 export function enzymeGuideGenbank(run) {
   const sequence = run.reference_sequence.toLowerCase();
   const comment = JSON.stringify({ config: run.enzyme, parameters: run.parameters, status: run.status, created_at: run.created_at,
-    off_target: run.off_target, coordinate_system: run.coordinate_system });
+    off_target: run.off_target, coordinate_system: run.coordinate_system, reference: run.reference, modification: run.modification });
   const lines = [`LOCUS       ASSURED_GUIDES ${sequence.length} bp    DNA     linear`,
     "DEFINITION  Enzyme guide candidates; review required.", "ACCESSION   ASSURED_GUIDES", "VERSION     ASSURED_GUIDES.1"];
   // Wrap without dropping characters so the JSON comment can be reconstructed.

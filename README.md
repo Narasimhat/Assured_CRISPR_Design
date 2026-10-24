@@ -1,7 +1,9 @@
 # ASSURED CRISPR Designer
 
-**Enzyme Guides:** versioned SpCas9/AsCas12a/Mad7 guide discovery, configurable
-filters, crRNA assembly and traceable exports are available in a dedicated tab.
+**Enzyme selection:** fetch a gene or upload GenBank in Workspace, select SpCas9,
+AsCas12a or Mad7, and choose the modification. Cas12a/Mad7 produce a guide plan
+around that edit; SpCas9 retains the full donor workflow. An advanced Sequence
+Scan tab also provides configurable whole-sequence discovery.
 See [ENZYME_GUIDES.md](./ENZYME_GUIDES.md) for usage and validation limits.
 Donor design remains SpCas9-specific; no trained Cas12a scoring model is bundled.
 

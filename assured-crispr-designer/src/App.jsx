@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import GenomicSnpTool, { GenomicSnpReport } from "./GenomicSnpTool.jsx";
 import EnzymeGuideTool from "./EnzymeGuideTool.jsx";
+import { ENZYMES, getEnzyme } from "./enzymeConfig.js";
+import { planEnzymeModification } from "./enzymeEditPlan.js";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessChecks,
@@ -988,6 +990,12 @@ function createBatchRow(index) {
     projectFolderName: "",
     notes: "",
     deliveryMethod: "unknown",
+    enzyme: "spcas9",
+    enzymeSpacerLength: 20,
+    guideSearchRadius: 30,
+    enzymeDirectRepeat: "",
+    enzymeRepeatSource: "",
+    enzymeRepeatVerified: false,
     // Lab convention: two guides, and every donor carries blocking changes for both.
     coDelivery: true,
     maxBlockingChanges: "3",
@@ -1073,6 +1081,14 @@ function resolvePrimerToolReference(primerTool, selectedEntry) {
 
 function applyBatchRowChange(row, key, value, folderLibrary) {
   const nextRow = { ...row, [key]: value };
+  if (key === "enzyme") {
+    const config = getEnzyme(value);
+    nextRow.enzymeSpacerLength = config.spacer_len.default;
+    nextRow.enzymeDirectRepeat = config.direct_repeat || "";
+    nextRow.enzymeRepeatSource = "";
+    nextRow.enzymeRepeatVerified = false;
+  }
+  if (key === "enzymeDirectRepeat" || key === "enzymeRepeatSource") nextRow.enzymeRepeatVerified = false;
   if (key === "projectType") {
     if (value === "it") {
       nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
@@ -1368,7 +1384,9 @@ function getRowSectionIssues(row) {
     reference.push("Upload a GenBank file, fetch the gene, or switch to raw DNA input.");
   }
 
-  if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
+  if (row?.enzyme && row.enzyme !== "spcas9" && !hasSequenceBackedReference(row)) {
+    reference.push("Fetch a gene or upload a GenBank reference for Cas12a/Mad7 modification planning. Gene-only Cas9 libraries cannot be used for this enzyme.");
+  } else if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
     reference.push("Gene-only KO mode will suggest reference guides only. Upload a reference to generate recommended primers automatically.");
   }
   if (row?.projectType === "ko" && parseCustomGuideInput(row?.customGuides).length && !hasSequenceBackedReference(row)) {
@@ -2580,6 +2598,7 @@ export default function App() {
   const internalTagOptions = useMemo(() => Object.keys(INTERNAL_TAGS), []);
   const supportsWorkspaceAccess = typeof window !== "undefined" && typeof window.showDirectoryPicker === "function";
   const batchSuccessfulResults = useMemo(() => batchResults.filter((entry) => entry.status === "success"), [batchResults]);
+  const batchEnzymeResults = useMemo(() => batchResults.filter((entry) => entry.status === "enzyme-guides"), [batchResults]);
   const selectedEntry = useMemo(
     () => batchSuccessfulResults.find((entry) => entry.rowId === selectedProjectId) || batchSuccessfulResults[0] || null,
     [batchSuccessfulResults, selectedProjectId],
@@ -3226,6 +3245,14 @@ export default function App() {
       const slot = index + 1;
       if (!hasSequenceBackedReference(row) && !(row.projectType === "ko" && row.gene && !parseCustomGuideInput(row.customGuides).length)) return { slot, rowId: row.id, row, status: "empty" };
       try {
+        if (row.enzyme && row.enzyme !== "spcas9") {
+          if (!hasSequenceBackedReference(row)) throw new Error("Fetch a gene or upload GenBank before generating Cas12a/Mad7 guides. Gene-only reference libraries support SpCas9 only.");
+          const rawReference = row.referenceSource === "raw" ? {
+            gene: row.gene, sequence: parseRawSequenceInput(row.rawSequence), cdsStart: row.cdsStart,
+            cdsEnd: row.cdsEnd, exons: parseExonCoordinateInput(row.exonCoordinates),
+          } : null;
+          return { slot, rowId: row.id, row, status: "enzyme-guides", result: planEnzymeModification(row, rawReference) };
+        }
         if (row.projectType === "ko" && !hasSequenceBackedReference(row)) {
           if (parseCustomGuideInput(row.customGuides).length) {
             return {
@@ -3321,7 +3348,7 @@ export default function App() {
       }
     }));
     setBatchResults(nextResults);
-    if (nextResults.some((entry) => entry.status === "success")) {
+    if (nextResults.some((entry) => entry.status === "success" || entry.status === "enzyme-guides")) {
       setShowGenomicReport(false);
       setActiveTab("report");
     } else {
@@ -3657,7 +3684,7 @@ export default function App() {
           <TopLevelTabButton active={activeTab === "genomic-snp"} onClick={() => setActiveTab("genomic-snp")} tone="accent">
             Genomic SNP
           </TopLevelTabButton>
-          <TopLevelTabButton active={activeTab === "enzyme-guides"} onClick={() => setActiveTab("enzyme-guides")} tone="accent">Enzyme Guides</TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "enzyme-guides"} onClick={() => setActiveTab("enzyme-guides")} tone="accent">Sequence Scan</TopLevelTabButton>
           <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
             Exports
           </TopLevelTabButton>
@@ -3782,6 +3809,7 @@ export default function App() {
                       {row.parseIssue && <Badge color={COLORS.accentAlt}>{row.parseIssue}</Badge>}
                       {!row.parseIssue && rowReady && !batchStatus && <Badge color={COLORS.accent}>Ready to generate</Badge>}
                       {batchStatus?.status === "success" && <Badge color={COLORS.success}>{formatBatchDesignLabel({ ...row, slot }, batchStatus.result)}</Badge>}
+                      {batchStatus?.status === "enzyme-guides" && <Badge color={COLORS.accentAlt}>{getEnzyme(row.enzyme).name} guide plan · review required</Badge>}
                       {batchStatus?.status === "error" && <Badge color={COLORS.danger}>Error</Badge>}
                       {batchSuccessfulResults.length > 1 && batchStatus?.status === "success" && (
                         <ActionButton variant="secondary" onClick={() => setSelectedProjectId(row.id)}>
@@ -3873,10 +3901,10 @@ export default function App() {
                         value={row.customGuides}
                         onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
                         style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
-                        placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
+                        placeholder={row.enzyme && row.enzyme !== "spcas9" ? `Paste ${row.enzymeSpacerLength || 23} nt spacers, one per line (no PAM or repeat)` : "Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
                       />
                       <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
-                        If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
+                        {row.enzyme && row.enzyme !== "spcas9" ? "Custom spacers are mapped with the selected enzyme's PAM and restricted to the requested modification region. This produces a guide plan; donor and primer design are not supported for this enzyme." : "If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site."}
                       </div>
                     </label>
                   </FormSection>
@@ -3884,11 +3912,13 @@ export default function App() {
                   <FormSection title="2. Basic details" hint="Set the gene, edit type, and any project identifiers.">
                     {!!rowIssues.project.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.project.join(" ")}</InlineNotice>}
                     <Grid>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Enzyme</div><select aria-label={`Enzyme for design ${slot}`} value={row.enzyme || "spcas9"} onChange={event => updateBatchRow(index, "enzyme", event.target.value)} style={SELECT_STYLE}>{Object.values(ENZYMES).map(config => <option key={config.id} value={config.id}>{config.name}{config.id === "spcas9" ? " — guide + donor design" : " — guide planning"}</option>)}</select></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Team or client</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal program or sponsor" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide delivery</div><select value={row.deliveryMethod || "unknown"} onChange={(event) => updateBatchRow(index, "deliveryMethod", event.target.value)} style={SELECT_STYLE}><option value="unknown">Not decided</option><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression plasmid</option></select></label>
+                      {(!row.enzyme || row.enzyme === "spcas9") && <>
                         <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide-blocking changes per guide</div><select value={row.maxBlockingChanges || "3"} onChange={(event) => updateBatchRow(index, "maxBlockingChanges", event.target.value)} style={SELECT_STYLE}><option value="3">Up to 3 - stop when protection is strong (default)</option><option value="2">Up to 2</option><option value="1">1 only - fewest donor edits</option></select><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>Where a synonymous PAM change is available it is used alone. Otherwise synonymous seed mismatches are stacked from the PAM-proximal end. More changes protect better against re-cutting; fewer keep HDR efficiency higher and the edited allele easier to read.</div></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}><input type="checkbox" checked={!!row.coDelivery} onChange={(event) => updateBatchRow(index, "coDelivery", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Co-transfect both guides and both ssODNs</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>Builds every donor to block every offered guide, and prefers guides whose targets can both be silently destroyed. On by default (two guides, each ssODN blocking both). Turn it off only when you deliver one matched guide/ssODN pair at a time.</div></span></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: row.coDelivery ? 0.5 : 1 }}><input type="checkbox" disabled={!!row.coDelivery} checked={!!row.acceptWeakProtection} onChange={(event) => updateBatchRow(index, "acceptWeakProtection", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Accept weak guide protection and order anyway</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>{row.coDelivery ? "Not available with co-delivery: there a weakly blocked guide re-cuts the allele the other donor just repaired. Order the pairs separately instead." : "Records a reviewed decision to order a pair whose guide is only weakly blocked. The advice stays in the report and the design never reads as ready. It never overrides a donor that fails its protein assertion."}</div></span></label>
@@ -3901,10 +3931,26 @@ export default function App() {
                             )}
                           </div>
                         )}
+                      </>}
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
                   </FormSection>
+
+                  {row.enzyme && row.enzyme !== "spcas9" && <FormSection title={`${getEnzyme(row.enzyme).name} settings`} hint="Uses the reference above and the modification below to find guides near the requested site.">
+                    <InlineNotice tone="warning">Guide planning only: Cas12a/Mad7 donor construction, repaired-allele protection and primer recommendations are not implemented. The report will require review.</InlineNotice>
+                    {getEnzyme(row.enzyme).license_note && <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).license_note}</p>}
+                    <Grid>
+                      <label>Spacer length<input aria-label={`Spacer length for design ${slot}`} type="number" min={getEnzyme(row.enzyme).spacer_len.min} max={getEnzyme(row.enzyme).spacer_len.max} value={row.enzymeSpacerLength || 23} onChange={event => updateBatchRow(index, "enzymeSpacerLength", event.target.value)} style={FIELD_STYLE} /></label>
+                      <label>Search radius around the edit (bp)<input aria-label={`Search radius for design ${slot}`} type="number" min="1" max="500" value={row.guideSearchRadius ?? 30} onChange={event => updateBatchRow(index, "guideSearchRadius", event.target.value)} style={FIELD_STYLE} /><span style={{ fontSize: 12, color: COLORS.muted }}>For knockout, guides are shortlisted within coding segments instead.</span></label>
+                    </Grid>
+                    <details><summary>Full crRNA: direct repeat verification</summary>
+                      <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).repeat_note}</p>
+                      <label>Direct repeat<input aria-label={`Direct repeat for design ${slot}`} value={row.enzymeDirectRepeat || ""} onChange={event => updateBatchRow(index, "enzymeDirectRepeat", event.target.value)} style={FIELD_STYLE} /></label>
+                      <label>Documentation reference and version<input aria-label={`Repeat documentation for design ${slot}`} value={row.enzymeRepeatSource || ""} onChange={event => updateBatchRow(index, "enzymeRepeatSource", event.target.value)} style={FIELD_STYLE} /></label>
+                      <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={!!row.enzymeRepeatVerified} disabled={!row.enzymeDirectRepeat?.trim() || !row.enzymeRepeatSource?.trim()} onChange={event => updateBatchRow(index, "enzymeRepeatVerified", event.target.checked)} />I verified this repeat against my nuclease documentation.</label>
+                    </details>
+                  </FormSection>}
 
                   <FormSection title="What should be designed?" hint={APP_CONFIG.designDetailsHint} tone="warm">
                     {!!rowIssues.design.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.design.join(" ")}</InlineNotice>}
@@ -3948,7 +3994,7 @@ export default function App() {
                           </select>
                         </label>
                       </Grid>
-                      <DonorFormatControls row={row} onChange={(field, value) => updateBatchRow(index, field, value)} />
+                      {(!row.enzyme || row.enzyme === "spcas9") && <DonorFormatControls row={row} onChange={(field, value) => updateBatchRow(index, field, value)} />}
                       <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                         {row.projectType === "nt"
                           ? "N-terminal convention: fusion designs use reporter-linker or tag-linker. Cleavable designs use reporter-T2A or reporter-P2A."
@@ -4069,6 +4115,7 @@ export default function App() {
                       {batchStatus.error}
                     </div>
                   )}
+                  {batchStatus?.status === "enzyme-guides" && <div style={{ marginTop: 10, color: COLORS.muted }}>{batchStatus.result.candidates.length} candidate guides for {batchStatus.result.modification.label}; guide plan available in Report.</div>}
                   {batchStatus?.status === "success" && (
                     <div style={{ marginTop: 10, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                       {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" || batchStatus.result.type === "it" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
@@ -4135,7 +4182,11 @@ export default function App() {
         {activeTab === "report" && showGenomicReport && genomicReport && (
           <GenomicSnpReport result={genomicReport} onEdit={() => setActiveTab("genomic-snp")} onOtherReports={() => setShowGenomicReport(false)} />
         )}
-        {activeTab === "report" && !showGenomicReport && (
+        {activeTab === "report" && !showGenomicReport && batchEnzymeResults.map(entry => <div key={`${entry.rowId}:${entry.result.created_at}`} style={{ marginTop: 18 }}>
+          <h2 style={{ color: COLORS.text }}>Design {entry.slot}: {entry.row.label || entry.row.gene || "Enzyme guide plan"}</h2>
+          <EnzymeGuideTool initialRun={entry.result} reportOnly />
+        </div>)}
+        {activeTab === "report" && !showGenomicReport && (!batchEnzymeResults.length || batchSuccessfulResults.length > 0) && (
         <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(240,228,204,0.12), rgba(16,34,52,0.90))", border: `1px solid ${COLORS.borderSoft}` }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>

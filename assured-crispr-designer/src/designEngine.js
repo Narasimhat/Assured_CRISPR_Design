@@ -107,7 +107,7 @@ export const INTERNAL_TAGS = {
   alphaBtx: { seq: "CGATACTATGAAAGCAGTCTAGAGCCTTACCCAGAC", len: 36, aa: "RYYESSLEPYPD" },
 };
 
-const toAA = (codon) => CODON_TABLE[codon] || "?";
+export const toAA = (codon) => CODON_TABLE[codon] || "?";
 const reverseComplement = (sequence) => sequence.split("").reverse().map((base) => DNA_COMPLEMENT[base] || "N").join("");
 
 function sanitizeLabelPart(value, fallback) {

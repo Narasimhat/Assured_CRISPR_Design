@@ -11,8 +11,8 @@ function download(name, text, type = "text/plain") {
   anchor.href = url; anchor.download = name; anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export default function EnzymeGuideTool() {
-  const [enzyme, setEnzyme] = useState("mad7");
+export default function EnzymeGuideTool({ initialRun = null, reportOnly = false }) {
+  const [enzyme, setEnzyme] = useState(initialRun?.enzyme.id || "mad7");
   const [sequence, setSequence] = useState("");
   const [length, setLength] = useState(23);
   const [delivery, setDelivery] = useState("rnp");
@@ -23,7 +23,7 @@ export default function EnzymeGuideTool() {
   const [exclusions, setExclusions] = useState("");
   const [genomePath, setGenomePath] = useState("");
   const [mismatches, setMismatches] = useState(3);
-  const [run, setRun] = useState(null);
+  const [run, setRun] = useState(initialRun);
   const [error, setError] = useState("");
   const config = getEnzyme(enzyme);
   const invalidate = () => { setRun(null); setError(""); };
@@ -44,9 +44,15 @@ export default function EnzymeGuideTool() {
     catch (failure) { setError(failure.message); }
   }
   return <section className="enzyme-guides">
-    <h2>Enzyme Guides</h2>
-    <p>Discover guides with SpCas9, AsCas12a or Mad7. Donor design and repaired-allele CFD protection in the other tabs support SpCas9 only.</p>
-    <form onSubmit={generate} onChange={invalidate}>
+    <h2>{reportOnly ? `${config.name} · ${run?.modification?.label}` : "Advanced sequence scan"}</h2>
+    {reportOnly ? <>
+      <p>{run.reference.gene} · {run.reference.transcript_id || "Transcript not recorded"} · {run.reference.source}</p>
+      <p className="enzyme-notice">{run.modification.note}</p>
+      <p>{run.modification.target_boundary === null ? "Guides within the selected coding segments." : `Target boundary: ${run.modification.target_boundary}; at least one predicted strand cut within ${run.modification.search_radius} bp.`} Return to Workspace to change the reference, enzyme or modification.</p>
+      {run.reference.reference_issues.map((issue, index) => <p key={index}>{issue.message}</p>)}
+      {config.license_note && <p className="enzyme-notice">{config.license_note}</p>}
+    </> : <p>For gene fetch or GenBank-based modification planning, choose the enzyme in Workspace. This advanced tool scans a complete pasted sequence. Donor design supports SpCas9 only.</p>}
+    {!reportOnly && <form onSubmit={generate} onChange={invalidate}>
       <div className="enzyme-fields">
         <label>Enzyme<select aria-label="Enzyme" value={enzyme} onChange={event => {
           const next = getEnzyme(event.target.value);
@@ -72,12 +78,12 @@ export default function EnzymeGuideTool() {
         <p>TTTT is excluded for Pol III delivery. Composition and complementary-arm filters are screens, not predictions of activity.</p>
       </details>
       <button type="submit">Find guides</button>
-    </form>
+    </form>}
     {error && <p role="alert" className="enzyme-error">{error}</p>}
     {run && <div aria-live="polite">
       <h3>REVIEW REQUIRED · {run.candidates.filter(guide => guide.qc.passed).length} passing / {run.candidates.length} candidates</h3>
       <p>{run.created_at} · {run.coordinate_system}. Genome-wide specificity has not been checked.</p>
-      <p>{enzyme === "mad7" ? "Mad7 model scores are approximate Cas12a proxies when supplied. " : ""}No trained scoring model is bundled; scores are unavailable. Model adapters can be supplied through the module API.</p>
+      <p>{enzyme === "mad7" ? "Mad7 model scores are approximate Cas12a proxies when supplied. " : ""}Scores are unavailable until a validated activity model is configured.</p>
       <div><button onClick={() => download(`${enzyme}-guides.csv`, enzymeGuideCsv(run), "text/csv")}>Export CSV</button>
         <button onClick={() => download(`${enzyme}-guides.gb`, enzymeGuideGenbank(run))}>Export GenBank</button>
         <button onClick={() => download(`${enzyme}-run.json`, JSON.stringify(run, null, 2), "application/json")}>Export run JSON</button></div>

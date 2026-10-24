@@ -1,7 +1,28 @@
 # Enzyme guide discovery
 
-The **Enzyme Guides** tab adds independent guide discovery for SpCas9, AsCas12a
-and Mad7. Existing protein-edit and genomic SNP donor workflows remain SpCas9
+In **Workspace**, fetch the gene from Ensembl/NCBI or upload GenBank, select the
+enzyme in Basic details, and choose the modification as usual. SpCas9 retains
+the existing complete workflow. AsCas12a and Mad7 generate modification-aware
+guide plans in **Report**, with CSV, GenBank and JSON downloads. Raw DNA plus
+CDS coordinates is also supported. The **Sequence Scan** tab is an advanced,
+whole-sequence scanner; it is not needed for the normal reference workflow.
+
+Point mutations search around the requested codon after checking its reference
+amino acid; internal tags search around the insertion boundary; terminal tags
+search around the start/stop boundary. The default search radius is 30 bp from
+either predicted strand cut and is configurable to 1–500 bp. Knockout mode
+shortlists guides cutting in preferred internal coding segments (or the CDS for
+a single-exon gene); it does not select or validate a deletion pair. No nearby
+guides is a valid empty result, not an invitation to substitute distant guides.
+Uploaded/fetched CDS reference blockers are rejected before planning.
+
+Cas12a/Mad7 reports explicitly contain **no donor construction, repaired-allele
+protection or primer recommendations**, and never enter batch ordering or QC
+donor exports. Gene-only KO library lookup is SpCas9-only: other enzymes need
+a sequence-backed reference. The existing genomic SNP tab remains SpCas9-only.
+
+The shared scanner adds guide discovery for SpCas9, AsCas12a
+and Mad7. Existing protein-edit and genomic SNP donor calculations remain SpCas9
 workflows. Do not feed Cas12a/Mad7 guides into their CFD or synonymous-blocking
 calculations: those calculations are specific to SpCas9.
 
