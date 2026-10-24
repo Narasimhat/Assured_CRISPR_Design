@@ -1,0 +1,19 @@
+.enzyme-guides { background: #fff; color: #0f172a; border: 1px solid #d0d5dd; border-radius: 18px; padding: 20px; }
+.enzyme-guides p { line-height: 1.6; max-width: 100ch; }
+.enzyme-guides label { display: grid; gap: 6px; font-size: 14px; margin: 12px 0; }
+.enzyme-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.enzyme-guides input, .enzyme-guides textarea, .enzyme-guides select { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #98a2b3; border-radius: 8px; background: #fff; color: #0f172a; font: inherit; }
+.enzyme-guides textarea { resize: vertical; font-family: monospace; }
+.enzyme-guides .enzyme-check { display: flex; align-items: center; }
+.enzyme-guides input[type=checkbox] { width: auto; }
+.enzyme-guides button { background: #0f766e; color: white; padding: 10px 16px; border: 0; border-radius: 8px; cursor: pointer; margin: 8px 8px 8px 0; font: inherit; }
+.enzyme-guides fieldset { border: 1px solid #d0d5dd; border-radius: 8px; margin: 16px 0; }
+.enzyme-guides summary { cursor: pointer; padding: 12px 0; }
+.enzyme-notice { background: #fff7ed; padding: 12px; border-left: 4px solid #b45309; }
+.enzyme-error { color: #b42318; }
+.enzyme-table { overflow-x: auto; }
+.enzyme-table table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.enzyme-table th, .enzyme-table td { padding: 10px; border-bottom: 1px solid #d0d5dd; text-align: left; vertical-align: top; }
+.enzyme-table code { overflow-wrap: anywhere; }
+.enzyme-table caption { text-align: left; padding: 12px 0; }
+.enzyme-donor { border: 1px solid #d0d5dd; border-radius: 12px; margin: 16px 0; padding: 16px; }

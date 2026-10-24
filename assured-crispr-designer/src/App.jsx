@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import GenomicSnpTool, { GenomicSnpReport } from "./GenomicSnpTool.jsx";
+import EnzymeGuideTool from "./EnzymeGuideTool.jsx";
+import { ENZYMES, getEnzyme } from "./enzymeConfig.js";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessChecks,
@@ -468,6 +470,8 @@ function extractParentIdFromFolderName(name) {
   return match ? match[1] : "";
 }
 
+function isSpCas9Result(result) { return !result?.enzyme || result.enzyme.id === "spcas9"; }
+
 function buildGuideRows(result) {
   return (result?.gs || []).map((guide) => [guide.n, `${guide.sp} ${guide.pm}`, `${guide.str} strand`, `${guide.gc}%`, guide.arm || guide.note || ""]);
 }
@@ -901,7 +905,8 @@ function buildKoReferencePairCandidates(result, row, sourceGuides, overrideBuild
 }
 
 // JSX only. The HTML equivalent lives in reportHtml.js, which must stay React-free.
-function renderGuideSequence(spacer, pam) {
+function renderGuideSequence(spacer, pam, enzyme = null) {
+  if (enzyme?.pam_side === "5prime") return <><span style={{ background: "#FEF3C7", color: "#92400E", fontFamily: "Consolas, monospace", fontWeight: 800 }}>{pam}</span>{" "}<span style={{ fontFamily: "Consolas, monospace", fontWeight: 700 }}>{spacer}</span></>;
   return (
     <>
       <span style={{ fontFamily: "Consolas, monospace", fontWeight: 700, color: "#111827" }}>{spacer}</span>{" "}
@@ -987,6 +992,14 @@ function createBatchRow(index) {
     projectFolderName: "",
     notes: "",
     deliveryMethod: "unknown",
+    enzyme: "spcas9",
+    enzymeSpacerLength: 20,
+    guideSearchRadius: 30,
+    enzymeDirectRepeat: "",
+    enzymeRepeatSource: "",
+    enzymeRepeatVerified: false,
+    enzymePamBlocking: true,
+    enzymeDonorStrand: "sense",
     // Lab convention: two guides, and every donor carries blocking changes for both.
     coDelivery: true,
     maxBlockingChanges: "3",
@@ -1072,6 +1085,14 @@ function resolvePrimerToolReference(primerTool, selectedEntry) {
 
 function applyBatchRowChange(row, key, value, folderLibrary) {
   const nextRow = { ...row, [key]: value };
+  if (key === "enzyme") {
+    const config = getEnzyme(value);
+    nextRow.enzymeSpacerLength = config.spacer_len.default;
+    nextRow.enzymeDirectRepeat = config.direct_repeat || "";
+    nextRow.enzymeRepeatSource = "";
+    nextRow.enzymeRepeatVerified = false;
+  }
+  if (key === "enzymeDirectRepeat" || key === "enzymeRepeatSource") nextRow.enzymeRepeatVerified = false;
   if (key === "projectType") {
     if (value === "it") {
       nextRow.tag = INTERNAL_TAGS[row.tag] ? row.tag : "SPOT";
@@ -1367,7 +1388,9 @@ function getRowSectionIssues(row) {
     reference.push("Upload a GenBank file, fetch the gene, or switch to raw DNA input.");
   }
 
-  if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
+  if (row?.enzyme && row.enzyme !== "spcas9" && !hasSequenceBackedReference(row)) {
+    reference.push("Fetch a gene or upload a GenBank reference for Cas12a/Mad7 modification planning. Gene-only Cas9 libraries cannot be used for this enzyme.");
+  } else if (row?.projectType === "ko" && !hasSequenceBackedReference(row) && !parseCustomGuideInput(row?.customGuides).length) {
     reference.push("Gene-only KO mode will suggest reference guides only. Upload a reference to generate recommended primers automatically.");
   }
   if (row?.projectType === "ko" && parseCustomGuideInput(row?.customGuides).length && !hasSequenceBackedReference(row)) {
@@ -2173,7 +2196,8 @@ const ARM_CHOICES = [30, 40, 50, 60, 100, 150, 200, 250, 300, 500, 750, 1000];
 // Donor format and per-side arm controls for terminal-tag rows. "Default" follows the format picked
 // (or the one recommended for the insert size when the format is Auto).
 function DonorFormatControls({ row, onChange }) {
-  const insertBp = getCassetteSequenceLength(row.tag, row.projectType);
+  const insertBp = row.enzyme && row.enzyme !== "spcas9" && row.projectType === "pm" ? 3
+    : row.projectType === "it" ? INTERNAL_TAGS[row.tag]?.seq.length || 0 : getCassetteSequenceLength(row.tag, row.projectType);
   const recommended = recommendDonorFormat(insertBp);
   const chosen = !row.donorFormat || row.donorFormat === "auto" ? recommended.format : row.donorFormat;
   const defaults = defaultArms(chosen, insertBp);
@@ -2672,7 +2696,7 @@ export default function App() {
     : true;
 
   const replaceSelectedKoGuide = useCallback((slotIndex, replacementGuide) => {
-    if (!selectedEntry?.result || selectedEntry.result.type !== "ko") return;
+    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !isSpCas9Result(selectedEntry.result)) return;
     setBatchResults((current) => current.map((entry) => {
       if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
       const nextResult = updateKoResultWithMappedGuides(entry.result, entry.row, slotIndex, replacementGuide);
@@ -2694,7 +2718,7 @@ export default function App() {
   }, [replaceSelectedKoGuide]);
 
   const applyKoGuidePairToSelected = useCallback((pairCandidate) => {
-    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !pairCandidate?.guides?.length) return;
+    if (!selectedEntry?.result || selectedEntry.result.type !== "ko" || !isSpCas9Result(selectedEntry.result) || !pairCandidate?.guides?.length) return;
     setBatchResults((current) => current.map((entry) => {
       if (entry.rowId !== selectedEntry.rowId || entry.status !== "success" || entry.result?.type !== "ko") return entry;
       const nextResult = finalizeKoResultWithGuides(entry.result, entry.row, pairCandidate.guides);
@@ -2747,7 +2771,7 @@ export default function App() {
   }, [fpbaseRowId, fpbaseLookup.status, loadFpbaseReporters]);
 
   useEffect(() => {
-    if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
+    if (selectedEntry?.result?.type !== "ko" || !isSpCas9Result(selectedEntry.result) || !selectedEntry.result.gene) {
       setBrunelloLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
       return;
     }
@@ -2779,7 +2803,7 @@ export default function App() {
   }, [selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
-    if (selectedEntry?.result?.type !== "ko" || !selectedEntry.result.gene) {
+    if (selectedEntry?.result?.type !== "ko" || !isSpCas9Result(selectedEntry.result) || !selectedEntry.result.gene) {
       setCasDbLookup({ status: "idle", gene: selectedEntry?.result?.gene || "", data: null, error: "" });
       return;
     }
@@ -2813,7 +2837,7 @@ export default function App() {
   }, [casDbOrganismId, selectedEntry?.rowId, selectedEntry?.result]);
 
   useEffect(() => {
-    const koEntries = batchSuccessfulResults.filter((entry) => entry.result?.type === "ko" && entry.result?.gene);
+    const koEntries = batchSuccessfulResults.filter((entry) => entry.result?.type === "ko" && isSpCas9Result(entry.result) && entry.result?.gene);
     const activeIds = new Set(koEntries.map((entry) => entry.rowId));
     setBatchKoReferenceMap((current) => {
       const next = Object.fromEntries(Object.entries(current).filter(([rowId]) => activeIds.has(rowId)));
@@ -3225,6 +3249,7 @@ export default function App() {
       const slot = index + 1;
       if (!hasSequenceBackedReference(row) && !(row.projectType === "ko" && row.gene && !parseCustomGuideInput(row.customGuides).length)) return { slot, rowId: row.id, row, status: "empty" };
       try {
+        if (row.enzyme && row.enzyme !== "spcas9" && !hasSequenceBackedReference(row)) throw new Error("Fetch a gene or upload GenBank first; Cas9 reference-guide libraries cannot supply guides for another enzyme.");
         if (row.projectType === "ko" && !hasSequenceBackedReference(row)) {
           if (parseCustomGuideInput(row.customGuides).length) {
             return {
@@ -3284,6 +3309,14 @@ export default function App() {
           return { slot, rowId: row.id, row, status: "success", result: referenceOnlyDesign, debug: "" };
         }
         const design = runDesign(row.projectType, row.gbRaw, row.mutation, row.tag, row.homologyArm, {
+          enzyme: row.enzyme || "spcas9",
+          spacerLength: Number(row.enzymeSpacerLength || getEnzyme(row.enzyme || "spcas9").spacer_len.default),
+          directRepeat: row.enzymeDirectRepeat,
+          repeatSource: row.enzymeRepeatSource,
+          repeatVerified: row.enzymeRepeatVerified,
+          donorStrand: row.enzymeDonorStrand || "sense",
+          pamBlocking: row.enzymePamBlocking !== false,
+          expectedGene: row.gene,
           customGuides: parseCustomGuideInput(row.customGuides),
           // Terminal-tag donors: format (auto picks by insert size), per-side arms and trimming of
           // an arm that runs into a hard-to-synthesize stretch. See donorFormat.js.
@@ -3656,12 +3689,15 @@ export default function App() {
           <TopLevelTabButton active={activeTab === "genomic-snp"} onClick={() => setActiveTab("genomic-snp")} tone="accent">
             Genomic SNP
           </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "enzyme-guides"} onClick={() => setActiveTab("enzyme-guides")} tone="accent">Sequence Scan</TopLevelTabButton>
           <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
             Exports
           </TopLevelTabButton>
         </div>
 
         <div hidden={activeTab !== "genomic-snp"}><GenomicSnpTool onInvalidate={() => {setGenomicReport(null);setShowGenomicReport(false);}} onGenerate={result => {setGenomicReport(result);setShowGenomicReport(true);setActiveTab("report");}} /></div>
+
+        <div hidden={activeTab !== "enzyme-guides"}><EnzymeGuideTool /></div>
 
         {activeTab === "workspace" && (
         <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
@@ -3869,10 +3905,10 @@ export default function App() {
                         value={row.customGuides}
                         onChange={(event) => updateBatchRow(index, "customGuides", event.target.value)}
                         style={{ ...FIELD_STYLE, minHeight: 72, resize: "vertical", fontFamily: "Consolas, monospace" }}
-                        placeholder={"Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
+                        placeholder={row.enzyme && row.enzyme !== "spcas9" ? `Paste ${row.enzymeSpacerLength || 23} nt spacers, one per line (no PAM or repeat)` : "Paste one or two 20 nt spacers, one per line\nGGACTGTTGCTGTTCTGCCC\nATGGCAGATCCACTGTGGGT"}
                       />
                       <div style={{ marginTop: 6, color: COLORS.dim, fontSize: 13, lineHeight: 1.55 }}>
-                        If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site.
+                        {row.enzyme && row.enzyme !== "spcas9" ? "Custom spacers are mapped with the selected enzyme's PAM near the modification. Passing guides can be matched to protein-checked donors. Primer design is available separately in Primer Tool." : "If you paste guides here, the app will map them onto the uploaded sequence and use them for donor and primer design. For knockout, paste two guides. For SNP and knock-ins, paste one or two guides near the edit site."}
                       </div>
                     </label>
                   </FormSection>
@@ -3880,11 +3916,13 @@ export default function App() {
                   <FormSection title="2. Basic details" hint="Set the gene, edit type, and any project identifiers.">
                     {!!rowIssues.project.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.project.join(" ")}</InlineNotice>}
                     <Grid>
+                      <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Enzyme</div><select aria-label={`Enzyme for design ${slot}`} value={row.enzyme || "spcas9"} onChange={event => updateBatchRow(index, "enzyme", event.target.value)} style={SELECT_STYLE}>{Object.values(ENZYMES).map(config => <option key={config.id} value={config.id}>{config.name}</option>)}</select></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Internal ID</div><input value={row.irisId} onChange={(event) => updateBatchRow(index, "irisId", event.target.value)} style={FIELD_STYLE} placeholder="72860" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Team or client</div><input value={row.clientName} onChange={(event) => updateBatchRow(index, "clientName", event.target.value)} style={FIELD_STYLE} placeholder="Internal program or sponsor" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Gene</div><input value={row.gene} onChange={(event) => updateBatchRow(index, "gene", event.target.value)} style={FIELD_STYLE} placeholder="APOE" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Cell line</div><input value={row.cellLine} onChange={(event) => updateBatchRow(index, "cellLine", event.target.value)} style={FIELD_STYLE} placeholder="Optional, for example BIHi005-A" /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide delivery</div><select value={row.deliveryMethod || "unknown"} onChange={(event) => updateBatchRow(index, "deliveryMethod", event.target.value)} style={SELECT_STYLE}><option value="unknown">Not decided</option><option value="rnp">Synthetic guide + Cas RNP</option><option value="u6">U6 / Pol III expression plasmid</option></select></label>
+                      {(!row.enzyme || row.enzyme === "spcas9") && <>
                         <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Guide-blocking changes per guide</div><select value={row.maxBlockingChanges || "3"} onChange={(event) => updateBatchRow(index, "maxBlockingChanges", event.target.value)} style={SELECT_STYLE}><option value="3">Up to 3 - stop when protection is strong (default)</option><option value="2">Up to 2</option><option value="1">1 only - fewest donor edits</option></select><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45, marginTop: 6 }}>Where a synonymous PAM change is available it is used alone. Otherwise synonymous seed mismatches are stacked from the PAM-proximal end. More changes protect better against re-cutting; fewer keep HDR efficiency higher and the edited allele easier to read.</div></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}><input type="checkbox" checked={!!row.coDelivery} onChange={(event) => updateBatchRow(index, "coDelivery", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Co-transfect both guides and both ssODNs</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>Builds every donor to block every offered guide, and prefers guides whose targets can both be silently destroyed. On by default (two guides, each ssODN blocking both). Turn it off only when you deliver one matched guide/ssODN pair at a time.</div></span></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: row.coDelivery ? 0.5 : 1 }}><input type="checkbox" disabled={!!row.coDelivery} checked={!!row.acceptWeakProtection} onChange={(event) => updateBatchRow(index, "acceptWeakProtection", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Accept weak guide protection and order anyway</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>{row.coDelivery ? "Not available with co-delivery: there a weakly blocked guide re-cuts the allele the other donor just repaired. Order the pairs separately instead." : "Records a reviewed decision to order a pair whose guide is only weakly blocked. The advice stays in the report and the design never reads as ready. It never overrides a donor that fails its protein assertion."}</div></span></label>
@@ -3897,10 +3935,36 @@ export default function App() {
                             )}
                           </div>
                         )}
+                      </>}
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>Project name</div><input value={row.label} onChange={(event) => updateBatchRow(index, "label", event.target.value)} style={FIELD_STYLE} placeholder={`Design ${slot}`} /></label>
                       <label><div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 6 }}>What do you want to design?</div><select value={row.projectType} onChange={(event) => updateBatchRow(index, "projectType", event.target.value)} style={SELECT_STYLE}>{PROJECT_TYPES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
                     </Grid>
                   </FormSection>
+
+                  {row.enzyme && row.enzyme !== "spcas9" && <FormSection title={`${getEnzyme(row.enzyme).name} settings`} hint="Uses the reference above and the modification below to find guides near the requested site.">
+                    <InlineNotice tone="warning">Cas12a/Mad7 donors are checked for the intended protein change. Re-cutting checks use this enzyme's canonical PAM and exact target sequence; a calibrated activity score is unavailable. Designs require review before ordering.</InlineNotice>
+                    {getEnzyme(row.enzyme).license_note && <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).license_note}</p>}
+                    <Grid>
+                      <label>Spacer length<input aria-label={`Spacer length for design ${slot}`} type="number" min={getEnzyme(row.enzyme).spacer_len.min} max={getEnzyme(row.enzyme).spacer_len.max} value={row.enzymeSpacerLength || 23} onChange={event => updateBatchRow(index, "enzymeSpacerLength", event.target.value)} style={FIELD_STYLE} /></label>
+                      <div style={{ color: COLORS.muted, fontSize: 13 }}>Guide selection uses the same 10 → 20 → 30 bp windows as Cas9, with protection ranked within a window. Knockout uses the same two-guide exon and spacing rules.</div>
+                    </Grid>
+                    <details><summary>Full crRNA: direct repeat verification</summary>
+                      <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).repeat_note}</p>
+                      <label>Direct repeat<input aria-label={`Direct repeat for design ${slot}`} value={row.enzymeDirectRepeat || ""} onChange={event => updateBatchRow(index, "enzymeDirectRepeat", event.target.value)} style={FIELD_STYLE} /></label>
+                      <label>Documentation reference and version<input aria-label={`Repeat documentation for design ${slot}`} value={row.enzymeRepeatSource || ""} onChange={event => updateBatchRow(index, "enzymeRepeatSource", event.target.value)} style={FIELD_STYLE} /></label>
+                      <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={!!row.enzymeRepeatVerified} disabled={!row.enzymeDirectRepeat?.trim() || !row.enzymeRepeatSource?.trim()} onChange={event => updateBatchRow(index, "enzymeRepeatVerified", event.target.checked)} />I verified this repeat against my nuclease documentation.</label>
+                    </details>
+                  </FormSection>}
+
+                  {row.enzyme && row.enzyme !== "spcas9" && row.projectType !== "ko" && <FormSection title="Donor design" hint="Choose homology arms and donor format for the requested edit.">
+                    <DonorFormatControls row={row} onChange={(field, value) => updateBatchRow(index, field, value)} />
+                    <Grid>
+                      <label>ssODN strand (relative to input reference)<select aria-label={`Donor strand for design ${slot}`} value={row.enzymeDonorStrand || "sense"} onChange={event => updateBatchRow(index, "enzymeDonorStrand", event.target.value)} style={SELECT_STYLE}><option value="sense">Input-sense DNA</option><option value="antisense">Reverse-complement DNA</option></select><span style={{ color: COLORS.muted, fontSize: 12 }}>Applies only to ssODNs. Strand choice is not an activity prediction.</span></label>
+                      <label>PAM-blocking substitutions per guide<select aria-label={`PAM blocking limit for design ${slot}`} value={row.maxBlockingChanges || "3"} onChange={event => updateBatchRow(index, "maxBlockingChanges", event.target.value)} style={SELECT_STYLE}><option value="1">Up to 1</option><option value="2">Up to 2</option><option value="3">Up to 3</option></select></label>
+                    </Grid>
+                    <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={row.enzymePamBlocking !== false} onChange={event => updateBatchRow(index, "enzymePamBlocking", event.target.checked)} />Try synonymous changes that remove the canonical enzyme PAM, avoiding annotated splice windows.</label>
+                    <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={row.coDelivery !== false} onChange={event => updateBatchRow(index, "coDelivery", event.target.checked)} />Co-transfect the selected guides and matched donors, with shared blocking changes on every donor. Turn off to deliver one matched pair at a time.</label>
+                  </FormSection>}
 
                   <FormSection title="What should be designed?" hint={APP_CONFIG.designDetailsHint} tone="warm">
                     {!!rowIssues.design.length && <InlineNotice tone="warning" style={{ marginBottom: 12 }}>{rowIssues.design.join(" ")}</InlineNotice>}
@@ -3944,7 +4008,7 @@ export default function App() {
                           </select>
                         </label>
                       </Grid>
-                      <DonorFormatControls row={row} onChange={(field, value) => updateBatchRow(index, field, value)} />
+                      {(!row.enzyme || row.enzyme === "spcas9") && <DonorFormatControls row={row} onChange={(field, value) => updateBatchRow(index, field, value)} />}
                       <div style={{ marginTop: 8, color: COLORS.muted, fontSize: 13, lineHeight: 1.55 }}>
                         {row.projectType === "nt"
                           ? "N-terminal convention: fusion designs use reporter-linker or tag-linker. Cleavable designs use reporter-T2A or reporter-P2A."
@@ -4070,7 +4134,7 @@ export default function App() {
                       {batchStatus.result.gs?.length || 0} gRNAs | {(batchStatus.result.type === "pm" || batchStatus.result.type === "it" ? batchStatus.result.os?.length : batchStatus.result.donor ? 1 : 0) || 0} donor entries | {batchStatus.result.ps?.length || 0} primers
                     </div>
                   )}
-                  {batchStatus?.status === "success" && batchStatus.result?.type === "ko" && (
+                  {batchStatus?.status === "success" && batchStatus.result?.type === "ko" && isSpCas9Result(batchStatus.result) && (
                     <div style={{ marginTop: 12, padding: 12, borderRadius: 12, background: "#F8FAFC", border: "1px solid #D7DEE7" }}>
                       <div style={{ color: "#111827", fontSize: 13, fontWeight: 700, marginBottom: 6 }}>High-throughput KO pair suggestions</div>
                       <div style={{ color: "#667085", fontSize: 13, lineHeight: 1.55, marginBottom: 10 }}>
@@ -4288,7 +4352,7 @@ export default function App() {
                     {(selectedEntry.result?.gs || []).map((guide, rowIndex) => (
                       <tr key={rowIndex}>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.n}</td>
-                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm)}</td>
+                        <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{renderGuideSequence(guide.sp, guide.pm, selectedEntry.result.enzyme)}</td>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.str} strand</td>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.gc}%</td>
                         <td style={{ padding: "8px 10px", border: "1px solid #cfc5b4", background: "#ffffff" }}>{guide.arm || guide.note || ""}</td>
@@ -4336,6 +4400,7 @@ export default function App() {
                         ? "No donor is required for knockout design. This report is in gene-list KO mode, so the paired gRNAs above are reference guides and exact spacing/primer geometry still need a GenBank-backed follow-up."
                         : "No donor is required for knockout design. Use the paired gRNAs above for deletion/NHEJ-based disruption."}
                     </div>
+                    {isSpCas9Result(selectedEntry.result) && <>
                     <InlineNotice style={{ marginBottom: 12 }}>
                       The primary recommended knockout pair is already summarized above. The reference-library sections below are optional if you want backup guides or alternative local pairs.
                     </InlineNotice>
@@ -4728,6 +4793,7 @@ export default function App() {
                         </>
                       )}
                     </CollapsiblePanel>
+                    </>}
                   </>
                 )}
                 {selectedEntry.result.type === "it" && (

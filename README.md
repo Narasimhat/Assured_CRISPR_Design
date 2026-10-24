@@ -1,5 +1,15 @@
 # ASSURED CRISPR Designer
 
+**Enzyme selection:** fetch a gene or upload GenBank in Workspace, select SpCas9,
+AsCas12a, LbCas12a or Mad7, and choose the modification. Cas12a/Mad7 now construct
+two-guide knockout and HDR designs through the same reports, primers, ordering
+and QC exports as Cas9, using enzyme-specific geometry and canonical-PAM
+blocking checks. See [ENZYME_DONORS.md](./ENZYME_DONORS.md) for review requirements.
+SpCas9 retains its existing workflow. An advanced Sequence
+Scan tab also provides configurable whole-sequence discovery.
+See [ENZYME_GUIDES.md](./ENZYME_GUIDES.md) for usage and validation limits.
+SpCas9 CFD remains SpCas9-specific; no trained Cas12a scoring model is bundled.
+
 Hosted browser app for CRISPR design review and ordering-ready exports.
 
 Version 1.0.0. See [RELEASE_NOTES.md](./RELEASE_NOTES.md) for what changed and, more
@@ -104,6 +114,19 @@ Both the design-request rows (protein workspace) and the Genomic SNP tab can fet
 - **Reverse-strand genes.** Coordinates and alleles stay on the forward genomic strand (as ClinVar and VCF give them), but the reference record is written along the transcript. The designer maps the position from the `Location` annotation (index *i* is coordinate `referenceEnd − i`), complements the alleles, and then designs in the record's own space, so a reverse design equals the design of the same record read as a forward one (tested on a synthetic locus and on MYD88 read as a mirror gene). Positions, blocking-change alleles, guide spans, the splice-check request and the sequence export are mapped back to forward coordinates and say so; guide and donor strands (+/−), primers and cut offsets stay relative to the transcript, which the design warns about. A reverse record without a `Location` annotation is refused (coordinates cannot be mapped), as is any record whose Location, assembly, chromosome or start disagrees with the form.
 - **Where it runs.** Requests go from the browser to Ensembl REST, NCBI Datasets and NCBI E-utilities, which all allow cross-origin reads, so it works on Vercel and GitHub Pages alike and nothing but the identifier you type is sent. The Vercel deployment's Content-Security-Policy (`vercel.json`) lists exactly these three origins in `connect-src` besides `'self'`; a browser blocks any other origin and reports only "Failed to fetch", so a new host must be added there (a test compares the header with the origins the module requests). Public Ensembl and NCBI services rate-limit and occasionally return errors; the module retries transient failures and otherwise says which service failed. Benchling's own API is not used: it needs a per-user key and does not allow browser requests.
 - **Tests.** `test/genomic-reverse.test.js` checks the mirror equivalence, the HBB sickle-cell design (c.20A>T installs T on the transcript strand and turns E7 into V, silent blockers map to the right forward bases) and the forward-coordinate outputs. `test/gene-fetch.test.js` replays recorded Ensembl, NCBI and ClinVar responses (`test/fixtures/gene-fetch/responses.json`: MYD88 on the forward strand, HBB on the reverse strand, three ClinVar records). It checks that Ensembl and NCBI give identical exons, coding sequence and bases, that reverse-strand records translate correctly, and that a fetched ClinVar reference is accepted by the Genomic SNP designer. Against a Benchling import of PTPRO-201 the fetched record (gene span, no flank) had identical sequence, 27 exons and CDS, and the F942E design output was byte-identical.
+
+### Gene-fetch service outages
+
+For a gene symbol such as **TP53**, the source selector is the preferred provider.
+The app retries transient failures and automatically tries NCBI if Ensembl is
+unavailable (or Ensembl if NCBI is unavailable). The summary warns about the
+switch and records the actual transcript/assembly; the GenBank COMMENT records
+the recovery source and reason. Review the selected transcript before designing.
+Requests time out after 15 seconds per attempt.
+
+Exact Ensembl IDs/transcript names and RefSeq accessions retain their provider;
+they are never silently replaced by a transcript from the other service. If
+both services fail, the error reports both failures and offers GenBank upload.
 
 ## Local development
 
