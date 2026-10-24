@@ -3055,6 +3055,7 @@ function buildKnockinProteinPreview(model, orientation, preset) {
  * protein together, which the donor check refuses. When that happens to a pair whose second guide was added by completeGuidePair, the lone guide is offered instead of no design.
  */
 export function designPM(gb, mutationString, options = {}) {
+  if (options.enzyme && options.enzyme !== "spcas9") return { err: "Donor design and CFD protection support SpCas9 only." };
   const result = designPMCore(gb, mutationString, options);
   if (result?.err && /No donor preserved the intended/.test(result.err) && options.ensureGuidePair !== false && !options.customGuides?.length) {
     const single = designPMCore(gb, mutationString, { ...options, ensureGuidePair: false });
@@ -3234,6 +3235,7 @@ function designPMCore(gb, mutationString, options = {}) {
 }
 
 export function designIT(gb, siteString, tag, options = {}) {
+  if (options.enzyme && options.enzyme !== "spcas9") return { err: "Donor design and CFD protection support SpCas9 only." };
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
   const site = parseInternalSiteInput(siteString);
@@ -3400,6 +3402,7 @@ export function designIT(gb, siteString, tag, options = {}) {
 }
 
 export function designCT(gb, tag, homologyArmLength, options = {}) {
+  if (options.enzyme && options.enzyme !== "spcas9") return { err: "Donor design and CFD protection support SpCas9 only." };
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found in GenBank file." };
   const seq = getGenomicSequence(gb);
@@ -3544,6 +3547,7 @@ export function designCT(gb, tag, homologyArmLength, options = {}) {
 }
 
 export function designKO(gb, options = {}) {
+  if (options.enzyme && options.enzyme !== "spcas9") return { err: "Donor design and CFD protection support SpCas9 only." };
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found." };
   if (gb.cdsSegments.length < 2) return { err: "Not enough coding exons available for KO design." };
@@ -3642,6 +3646,7 @@ export function designKO(gb, options = {}) {
 }
 
 export function designNT(gb, tag, homologyArmLength, options = {}) {
+  if (options.enzyme && options.enzyme !== "spcas9") return { err: "Donor design and CFD protection support SpCas9 only." };
   const cds = getCdsFromModel(gb);
   if (!cds) return { err: "No CDS annotation found." };
   const seq = getGenomicSequence(gb);
@@ -3795,6 +3800,7 @@ function buildTerminalGuideAlternatives(model, result) {
 }
 
 export function runDesignFromTranscriptModel(projectType, model, mutation, tag, homologyArmLength, options = {}) {
+  if (options.enzyme && options.enzyme !== "spcas9") return { err: "Donor design and CFD protection support SpCas9 only. Use the Enzyme Guides tab for Cas12a/Mad7 guide discovery." };
   if (!model?.genomicSequence) return { err: "Transcript model is missing genomic sequence." };
   if (!projectType) return { err: "Select a project type first." };
   const cds = getCdsFromModel(model);

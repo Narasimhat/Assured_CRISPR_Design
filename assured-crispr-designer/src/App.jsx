@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import GenomicSnpTool, { GenomicSnpReport } from "./GenomicSnpTool.jsx";
+import EnzymeGuideTool from "./EnzymeGuideTool.jsx";
 import { CASSETTES, INTERNAL_TAGS, REPORTERS, buildPrimerRecord, designCenteredPrimerPairs, designDeletionScreenPrimerPairs, designPrimerTool, getCassetteSequenceLength, parseGB, runDesign, collectProcurementReviewNotes, summarizeGuideBlocking, summarizePrimerPairQuality, summarizePrimerReadiness, summarizeProcurementReadiness } from "./designEngine";
 import { getDonorStrandBadge, getDonorStrandBadgeColor, getOrderRecommendationLabels } from "./reportModel";
 import { DNA_COMPLEMENT, PM_EDIT_COLORS, PM_GUIDE_COLORS, buildDesignReadinessChecks,
@@ -3656,12 +3657,15 @@ export default function App() {
           <TopLevelTabButton active={activeTab === "genomic-snp"} onClick={() => setActiveTab("genomic-snp")} tone="accent">
             Genomic SNP
           </TopLevelTabButton>
+          <TopLevelTabButton active={activeTab === "enzyme-guides"} onClick={() => setActiveTab("enzyme-guides")} tone="accent">Enzyme Guides</TopLevelTabButton>
           <TopLevelTabButton active={activeTab === "exports"} onClick={() => setActiveTab("exports")}>
             Exports
           </TopLevelTabButton>
         </div>
 
         <div hidden={activeTab !== "genomic-snp"}><GenomicSnpTool onInvalidate={() => {setGenomicReport(null);setShowGenomicReport(false);}} onGenerate={result => {setGenomicReport(result);setShowGenomicReport(true);setActiveTab("report");}} /></div>
+
+        <div hidden={activeTab !== "enzyme-guides"}><EnzymeGuideTool /></div>
 
         {activeTab === "workspace" && (
         <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>

@@ -1,5 +1,10 @@
 # ASSURED CRISPR Designer
 
+**Enzyme Guides:** versioned SpCas9/AsCas12a/Mad7 guide discovery, configurable
+filters, crRNA assembly and traceable exports are available in a dedicated tab.
+See [ENZYME_GUIDES.md](./ENZYME_GUIDES.md) for usage and validation limits.
+Donor design remains SpCas9-specific; no trained Cas12a scoring model is bundled.
+
 Hosted browser app for CRISPR design review and ordering-ready exports.
 
 Version 1.0.0. See [RELEASE_NOTES.md](./RELEASE_NOTES.md) for what changed and, more

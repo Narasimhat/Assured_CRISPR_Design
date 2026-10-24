@@ -15,6 +15,7 @@ export function readGenomicReferenceMetadata(raw) {
 /** Exact single-nucleotide substitution; no extra blocking edits, codon conversion or inferred assembly. */
 export function designGenomicSnp(raw, input) {
   try {
+    if (input.enzyme && input.enzyme !== 'spcas9') throw Error('Donor design and CFD protection support SpCas9 only. Use Enzyme Guides for Cas12a/Mad7 discovery.');
     const policy=input.blockingPolicy || 'none';
     if(!BLOCKING_POLICIES[policy])throw Error('Unknown blocking-change policy.');
     const maxChanges=Number(input.maxBlockingChanges ?? (isTwoGuidePolicy(policy) ? 3 : 2));
