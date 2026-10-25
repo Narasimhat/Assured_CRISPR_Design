@@ -128,3 +128,19 @@ test("legacy Cas9 adapter preserves exhaustive ordering, fields, windows and hom
 test("Enzyme design validates its reference before entering the shared workflow", () => {
   assert.match(runDesignFromTranscriptModel("pm", null, "A1G", null, 100, { enzyme: "mad7" }).err, /missing genomic sequence/);
 });
+
+for (const [enzyme, pam, length] of [["spcas9ng", "AG", 20], ["sacas9", "AAGAAT", 21], ["spry", "ACT", 20]]) {
+  test(enzyme + ": 3-prime PAM, both strands, blunt cuts and no inherited CFD", () => {
+    const spacer = "ACGTCAGTCAGTACGATCGATC".slice(0, length);
+    const site = spacer + pam;
+    for (const [sequence, strand, cut] of [[site, "+", length - 3], [rc(site), "-", pam.length + 3]]) {
+      const guide = findEnzymeGuides(sequence, { enzyme }).find(g => g.start === 0 && g.strand === strand);
+      assert.ok(guide);
+      assert.equal(guide.spacer, spacer);
+      assert.equal(guide.pam, pam);
+      assert.deepEqual(guide.cuts, { target: cut, non_target: cut });
+    }
+    assert.equal(designEnzymeGuides(site, { enzyme, filters: permissive }).candidates[0].score.value, null);
+    assert.equal(getEnzyme(enzyme).direct_repeat, null);
+  });
+}
