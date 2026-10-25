@@ -235,3 +235,9 @@ splice-site predictor; a pass does not validate splicing. For a prediction, down
 wild type, the edit and the edit with each ssODN's blocking changes and writes a result file; attach that file in the app to update the recommendation. The largest score
 change caused by the blocking changes on the edited allele (the worst ssODN allele) is judged: <= 0.05 supports them, up to 0.2 asks for review, above 0.2 advises against
 them (the tool's own thresholds). Limits: forward-strand references only; genome-wide specificity is not checked; RNA outcomes still need validation in the edited clones.
+
+SNP donor policy 2 places the 91 nt flank toward the PAM and the 36 nt flank
+on the opposite side of the nominal target-strand cut. This mirrors the reference
+layout for 5′-PAM Cas12a/Mad7 while retaining Cas9's 3′-PAM behavior. The policy is
+a computational design heuristic; enzyme-specific HDR and strand preferences
+still require experimental validation.
