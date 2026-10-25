@@ -17,24 +17,27 @@ validation rules. SpCas9 keeps its calibrated CFD behavior.
   splice-aware design.
 - Terminal donors use the same curated cassette presets as the existing app,
   replacing the native start/stop codon under the preset's N-/C-terminal convention.
-- Automatic or explicit ssODN, synthesized dsDNA block and cloned/AAV cassette
-  formats use the shared homology-arm planner and length bounds. These are general
+- Tag donors use automatic or explicit ssODN, synthesized dsDNA block and cloned/AAV
+  cassette formats with the shared homology-arm planner and length bounds. These are general
   HDR/synthesis heuristics, not enzyme- or cell-type-specific efficiency claims.
 - Both predicted strand cuts must lie within the donor-covered reference interval.
   Arms below the chosen format's minimum, insufficient flanking reference,
   impossible synthesis lengths and uncovered edits refuse donor emission.
-- The ssODN strand is an explicit user choice relative to the input record.
-  No SpCas9 strand preference is applied to Cas12a/Mad7. A cloned/AAV output
+- SNP ssODNs use the same opposite-guide ordering heuristic as Cas9: antisense
+  for a plus-strand guide, sense for a minus-strand guide. This is a shared design
+  principle, not evidence of enzyme-specific HDR efficiency. Tag donors retain
+  explicit strand selection. A cloned/AAV output
   contains only the homology cassette, not a ready-to-use vector or backbone.
 
-The shared nearest-window policy chooses the guides. For point mutations and
-internal tags, the default is the same complete 127-base reference window as
-Cas9 (36/91 bases around the cut according to guide strand), plus the inserted
-tag for an internal knock-in. Each selected guide has an explicitly matched
+The shared nearest-window policy chooses the guides. For SNPs, the donor is always the same complete 127-base reference window as
+Cas9 (36/91 bases around the cut according to guide strand), including the same
+end-of-reference adjustment. Saved tag format/arm/strand settings cannot override
+this policy. Internal tags retain the default 127-base reference window plus
+the inserted tag. Each selected guide has an explicitly matched
 donor. Co-delivery carries shared blocking changes on both donors and checks
 each repaired allele against both guides; independent delivery keeps per-guide
 changes. Terminal knock-ins use the shared homology-arm planner and cassette.
-Explicit format/arm overrides remain available. With co-delivery off, each
+Explicit format/arm overrides remain available for tag donors. With co-delivery off, each
 alternative is labeled
 **one guide/donor pair at a time; do not pool alternatives**. When no guide passes
 the filters, donors are blocked rather than attached to an unsuitable guide.
@@ -57,7 +60,10 @@ enzyme's PAM. It uses the configured IUPAC motif and guide orientation on both
 strands, caps substitutions per guide at 1–3, preserves the requested protein,
 avoids annotated splice windows, and never adds changes outside the donor.
 It avoids independent changes in an already-edited codon. Where no valid
-synonymous PAM destruction exists, it does not invent seed-mismatch protection.
+synonymous PAM destruction exists, SNP design proposes synonymous changes in the
+configured PAM-proximal seed, within the same substitution cap and protein/splice
+checks. These are review-required candidates: seed-only protection is unscored,
+never assigned a fabricated CFD or a strong protection grade.
 
 Each donor is checked against every selected guide. Exact spacer matches with a
 canonical enzyme PAM are searched on both strands near the repaired locus
@@ -89,8 +95,8 @@ the same order-row/spreadsheet pipeline and Assured QC JSON hand-off, including
 enzyme, PAM geometry, both strand cuts and configuration provenance.
 
 For ssODNs, both DNA strands are displayed, with the selected strand explicitly
-labeled in input-reference coordinates. Cas9 strand-bias claims are not silently
-applied to Cas12a/Mad7. Terminal donors keep the chosen format, cassette and arm
+labeled in input-reference coordinates. SNPs explicitly adopt the shared
+opposite-guide ordering heuristic; enzyme-specific strand bias remains unvalidated. Terminal donors keep the chosen format, cassette and arm
 annotations. Sequence exports retain review status; export does not constitute
 ordering approval.
 
