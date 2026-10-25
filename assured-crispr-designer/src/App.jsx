@@ -3942,18 +3942,19 @@ export default function App() {
                   </FormSection>
 
                   {row.enzyme && row.enzyme !== "spcas9" && <FormSection title={`${getEnzyme(row.enzyme).name} settings`} hint="Uses the reference above and the modification below to find guides near the requested site.">
-                    <InlineNotice tone="warning">Cas12a/Mad7 donors are checked for the intended protein change. Re-cutting checks use this enzyme's canonical PAM and exact target sequence; a calibrated activity score is unavailable. Designs require review before ordering.</InlineNotice>
+                    <InlineNotice tone="warning">Donors are checked for the intended protein change. Re-cutting checks use this enzyme's canonical PAM and exact target sequence; a calibrated activity score is unavailable. Designs require review before ordering.</InlineNotice>
+                    {getEnzyme(row.enzyme).design_note && <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).design_note}</p>}
                     {getEnzyme(row.enzyme).license_note && <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).license_note}</p>}
                     <Grid>
-                      <label>Spacer length<input aria-label={`Spacer length for design ${slot}`} type="number" min={getEnzyme(row.enzyme).spacer_len.min} max={getEnzyme(row.enzyme).spacer_len.max} value={row.enzymeSpacerLength || 23} onChange={event => updateBatchRow(index, "enzymeSpacerLength", event.target.value)} style={FIELD_STYLE} /></label>
+                      <label>Spacer length<input aria-label={`Spacer length for design ${slot}`} type="number" min={getEnzyme(row.enzyme).spacer_len.min} max={getEnzyme(row.enzyme).spacer_len.max} value={row.enzymeSpacerLength || getEnzyme(row.enzyme).spacer_len.default} onChange={event => updateBatchRow(index, "enzymeSpacerLength", event.target.value)} style={FIELD_STYLE} /></label>
                       <div style={{ color: COLORS.muted, fontSize: 13 }}>Guide selection uses the same 10 → 20 → 30 bp windows as Cas9, with protection ranked within a window. Knockout uses the same two-guide exon and spacing rules.</div>
                     </Grid>
-                    <details><summary>Full crRNA: direct repeat verification</summary>
+                    {getEnzyme(row.enzyme).pam_side === "5prime" ? <details><summary>Full crRNA: direct repeat verification</summary>
                       <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).repeat_note}</p>
                       <label>Direct repeat<input aria-label={`Direct repeat for design ${slot}`} value={row.enzymeDirectRepeat || ""} onChange={event => updateBatchRow(index, "enzymeDirectRepeat", event.target.value)} style={FIELD_STYLE} /></label>
                       <label>Documentation reference and version<input aria-label={`Repeat documentation for design ${slot}`} value={row.enzymeRepeatSource || ""} onChange={event => updateBatchRow(index, "enzymeRepeatSource", event.target.value)} style={FIELD_STYLE} /></label>
                       <label style={{ display: "flex", gap: 8, marginTop: 12 }}><input type="checkbox" checked={!!row.enzymeRepeatVerified} disabled={!row.enzymeDirectRepeat?.trim() || !row.enzymeRepeatSource?.trim()} onChange={event => updateBatchRow(index, "enzymeRepeatVerified", event.target.checked)} />I verified this repeat against my nuclease documentation.</label>
-                    </details>
+                    </details> : <p style={{ color: COLORS.muted }}>{getEnzyme(row.enzyme).repeat_note}</p>}
                   </FormSection>}
 
                   {row.enzyme && row.enzyme !== "spcas9" && row.projectType !== "ko" && <FormSection title="Donor design" hint={row.projectType === "pm" ? "Uses the same SNP donor policy as Cas9." : "Choose homology arms and donor format for the requested edit."}>
