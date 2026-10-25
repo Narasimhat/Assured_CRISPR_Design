@@ -26,6 +26,11 @@
 - Not modelled: exon skipping and intron retention after an edit at a splice site (such edits are reported as unmodelled), non-AUG initiation, and
   isoforms that are not in the reference record (records fetched as a single MANE transcript contain one).
 - New tests: `test/ko-outcomes.test.js`, a DIPK2A case in `test/regression-fixtures.test.js`, fixture `test/fixtures/dipk2a-region.gb`.
+- Optional offline pipeline `tools/ko-rank/` ranks guides by the predicted fraction of loss-of-function alleles: Lindel's repair-outcome distribution
+  (templated +1 insertions, microhomology deletions) classified with the same NMD rules. Guides with T or A at position 17 favour +1 insertions
+  (Lindel, 1,889 DIPK2A guides: +1 insertion T 26%, A 20%, C 12%, G 5%). At the DIPK2A g2 site it predicts a frameshift fraction of 84.4% against 84.2% observed in 23
+  clones, and 36% loss-of-function alleles against 42% observed. See `tools/ko-rank/README.md` for what was checked and what is not modelled (on-target efficiency
+  above all). New tests: `test/ko-rank.test.js`.
 
 ### QC design file for the Assured QC app
 

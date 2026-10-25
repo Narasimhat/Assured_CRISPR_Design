@@ -81,3 +81,8 @@ unreferenced by any case will fail the suite.
 - **Source:** GRCh38 `NC_000003.12:143971198..143992967` (NCBI efetch, retrieved 2026-10-25), plus strand. Public reference sequence only.
 - **Annotation:** the three RefSeq CDS of DIPK2A, written as `join()` locations from the RefSeq mRNA exon features: MANE Select `NM_173552.5` (430 aa), `NM_001134470.2` (221 aa) and `NM_001363944.1` (192 aa). Each joined CDS translates to its RefSeq protein.
 - **Why it is here:** a knockout pair chosen on geometry alone put one guide 63 nt before the last exon junction. Its frameshifts escape NMD and leave a stable protein of about 70% of full length, so a Western blot shows protein although the ICE knockout score reads 100%. The expected values in `ko-outcomes.test.js` were produced by the Assured QC engine's coding module (`coding.js`) on this record.
+
+### `ko-rank-dipk2a-edits.json`
+
+- **What it is:** the output of `tools/ko-rank/lindel_outcomes.py` (Lindel, Chen et al. 2019, MIT licence) for three DIPK2A guides on `dipk2a-region.gb`: the two guides of a knockout pair whose clones showed protein, and one guide the ranking puts first in exon 2. Each guide carries its 65-nt Lindel input and every predicted outcome class with its frequency.
+- **Why it is here:** `ko-rank.test.js` classifies these outcomes with `koOutcomes.js` without needing Python or the Lindel weights, so the pipeline's second half and the class-to-genome mapping on both strands are checked in CI.
