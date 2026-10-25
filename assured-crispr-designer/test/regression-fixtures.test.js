@@ -247,6 +247,20 @@ const CASES = [
     },
     expect: { designError: /does not map within \d+ bp of the target site/ },
   },
+  {
+    name: "DIPK2A knockout: guides are chosen by what their frameshifts do to the protein, not by geometry alone",
+    audit: "knockout confidence - a pair chosen on exon size, spacing and GC put one guide 63 nt before the last exon junction; its frameshifts escape NMD, the cells keep ~70% of the protein, and a Western blot shows it while ICE reads a 100% knockout score",
+    reference: "dipk2a-region.gb",
+    design: { type: "ko", options: { deliveryMethod: "rnp", expectedGene: "DIPK2A" } },
+    expect: {
+      gene: "DIPK2A",
+      procurementNot: "blocked",
+      koTier: "robust",
+      koGuidesNot: ["TGTCAAAGCTGACGTCCAGG", "AGTTGGTCCTAGAGATGGGA"],
+      // the two shorter annotated isoforms start in exon 2 and cannot be fully disrupted from it: said, not hidden
+      warnings: [/Isoform coverage/],
+    },
+  },
 ];
 
 function runCase(entry) {
@@ -356,6 +370,9 @@ for (const entry of CASES) {
     (e.blockersNotMatching || []).forEach((pattern) => {
       assert.doesNotMatch(readiness.blockers.join(" "), pattern, `${label}: unexpected blocker ${pattern}`);
     });
+
+    if (e.koTier) assert.equal(result.koAssessment && result.koAssessment.tier, e.koTier, `${label}: knockout confidence tier`);
+    (e.koGuidesNot || []).forEach((spacer) => assert.ok(!(result.gs || []).some((guide) => guide.sp === spacer), `${label}: guide ${spacer} must not be selected`));
 
     if (e.donorCount !== undefined) assert.equal((result.os || []).length, e.donorCount);
 

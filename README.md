@@ -79,6 +79,19 @@ error, not a risk - and it is unavailable under co-delivery.
 - The design engine returns a terse internal result shape with no schema. Reports, exports and the CLI consume it by convention, so a change to that shape is not caught by validation.
 - The 26 archived 2026_GE designs have not been re-derived against the current engine. The audit's claims *about this application* are executable; its per-project findings are not.
 
+## Knockout designs: guides chosen by predicted protein loss
+
+A frameshift is not a knockout if the cell makes the protein anyway. For a knockout the engine therefore simulates a panel of
+frameshift indels at each candidate guide's cut, finds the premature stop, and applies the same exon-junction rules as the Assured QC engine:
+no nonsense-mediated decay for a stop in the last coding exon, within 55 nt of the last exon junction, within 150 nt of the start codon, or in a coding
+exon longer than 407 nt. A pair is offered only if each guide qualifies on its own (either can cut alone) and the deletion between the cuts does too.
+
+- `koAssessment` on the result: tier (robust, marginal, truncation, escape), per-guide shares of outcomes, nearest stop to the last junction,
+  and the isoforms of the record that some edit leaves undisrupted. The report prints it and the release verdict raises a review warning
+  below robust.
+- It is a prediction from sequence: roughly a third of premature stops that the 55-nt rule calls NMD-triggering still escape. Confirm loss of protein.
+- `koAware: false` in the design options restores the geometry-only choice.
+
 ## Point-mutation designs: two guides and intronic blockers
 
 The point-mutation designer offers two guides whenever two exist within 30 bp of the edit.

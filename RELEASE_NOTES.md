@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Knockout guides are chosen by what their frameshifts do to the protein
+
+- A knockout design used to be judged by geometry: a non-terminal coding exon (2 to 4 preferred), two guides 40-140 bp apart on opposite
+  strands, GC, and whether the nominal deletion between the cuts is a frameshift. It said nothing about whether the cell still makes the protein.
+  For DIPK2A that choice put one guide 63 nt before the last exon junction. Every frameshift it makes stops inside the window where
+  nonsense-mediated decay is not expected, the clones keep about 70% of the protein as a stable truncation, and a Western blot shows it while
+  the ICE knockout score reads 100%.
+- New `src/koOutcomes.js`: a panel of frameshift indels (1, 2, 4, 5, 7, 8 and 10 bp deletions at every placement across the cut, and all 1- and
+  2-base insertions) is spliced into the coding sequence at each guide's cut, the premature stop is found, and the Assured QC engine's rules are
+  applied with the same thresholds (no decay for a stop in the last coding exon, within 55 nt of the last junction, within 150 nt of the start
+  codon or in a coding exon over 407 nt; stops 56 to 75 nt upstream are "borderline"; a downstream in-frame ATG that keeps 60% of the protein
+  is a reinitiation risk; a truncation keeping under 50% is called loss of function). Each guide, and each pair including the deletion between
+  its cuts, gets a tier: robust, marginal, truncation or escape. On DIPK2A the module reproduces the QC engine's call for the same alleles.
+- Selection: pairs are ranked by tier first (both guides must qualify, since either can cut alone), then by how many annotated isoforms of the gene in
+  the record they leave undisrupted, then by the previous geometry. Exons 2-4 stay the first choice; the other non-terminal exons are searched
+  only when none of them yields a robust pair. `koAware: false` restores the previous choice.
+- The result carries `koAssessment` and a `ko` summary on each guide; the HTML report prints a "Knockout confidence" block; the release verdict
+  raises a review warning for any tier below robust and names the cause. No design is blocked by this: a protein assay decides.
+- Where no robust pair exists the design is still returned, with the warning. In the repository's own records the previous choice scored
+  "escape" for APOE (a penultimate-exon frameshift runs on into the last exon) and NR2F2 (a 528-nt coding exon), and the new chooser cannot
+  improve on it; it says so instead of staying silent.
+- Not modelled: exon skipping and intron retention after an edit at a splice site (such edits are reported as unmodelled), non-AUG initiation, and
+  isoforms that are not in the reference record (records fetched as a single MANE transcript contain one).
+- New tests: `test/ko-outcomes.test.js`, a DIPK2A case in `test/regression-fixtures.test.js`, fixture `test/fixtures/dipk2a-region.gb`.
+
 ### QC design file for the Assured QC app
 
 - New "Download QC design file (JSON) for trace analysis" button next to the HTML report download. It writes the

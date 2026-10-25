@@ -75,3 +75,9 @@ unreferenced by any case will fail the suite.
 - **Regions:** the genomic sequence is recorded for the gene fetch (gene span ± 1 kb) and for Genomic SNP references (± 6 kb) of the MYD88 and HBB variants.
 - **`hbb-splice-check-result.json`:** the output of `scripts/splice_check.py` (SpliceAI 1.3.1) for the reverse-strand HBB sickle-cell design with its 6 kb reference, run on 2026-10-16. Largest change from the blocking changes 0.124 (acceptor loss), the edit alone 0.011.
 - **What it pins:** the GenBank record built from each source, `cdnaCoordinate`, ClinVar parsing and the Genomic SNP designer accepting a fetched reference. Public data only; tests replay it and never touch the network.
+
+### `dipk2a-region.gb`
+
+- **Source:** GRCh38 `NC_000003.12:143971198..143992967` (NCBI efetch, retrieved 2026-10-25), plus strand. Public reference sequence only.
+- **Annotation:** the three RefSeq CDS of DIPK2A, written as `join()` locations from the RefSeq mRNA exon features: MANE Select `NM_173552.5` (430 aa), `NM_001134470.2` (221 aa) and `NM_001363944.1` (192 aa). Each joined CDS translates to its RefSeq protein.
+- **Why it is here:** a knockout pair chosen on geometry alone put one guide 63 nt before the last exon junction. Its frameshifts escape NMD and leave a stable protein of about 70% of full length, so a Western blot shows protein although the ICE knockout score reads 100%. The expected values in `ko-outcomes.test.js` were produced by the Assured QC engine's coding module (`coding.js`) on this record.
