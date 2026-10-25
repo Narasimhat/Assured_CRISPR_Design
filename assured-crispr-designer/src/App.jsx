@@ -942,13 +942,13 @@ function PrimerQualityCard({ result }) {
           {tone.badge}
         </span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10 }}>
+      <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8, marginBottom: 10 }}>
         <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>Pair penalty: {summary.penalty}</div>
         <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>Tm delta: {summary.tmDelta} C</div>
         <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>Hetero-dimer run: {summary.heteroDimerRun} bp</div>
         <div style={{ padding: "8px 10px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>3' hetero-dimer run: {summary.heteroThreePrimeRun} bp</div>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+      <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
         <div style={{ padding: "10px 12px", borderRadius: 10, background: "#ffffff", border: "1px solid #E5E7EB" }}>
           <div style={{ fontWeight: 700, fontSize: 12, color: "#111827", marginBottom: 4 }}>Forward primer</div>
           <div style={{ fontSize: 12, color: "#475467" }}>Penalty {summary.forward.penalty} | self-dimer {summary.forward.selfDimerRun} | hairpin {summary.forward.hairpinRun}</div>
@@ -1657,13 +1657,14 @@ function SectionTitle({ children }) {
 }
 
 function Grid({ children, style = {} }) {
-  return <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, ...style }}>{children}</div>;
+  return <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, ...style }}>{children}</div>;
 }
 
 function QuickMetric({ label, value, tone = "default" }) {
   const toneColor = tone === "accent" ? COLORS.accent : tone === "warm" ? COLORS.accentAlt : tone === "success" ? COLORS.success : COLORS.text;
   return (
     <div
+      className="quick-metric"
       style={{
         minWidth: 120,
         padding: "12px 14px",
@@ -2437,7 +2438,7 @@ function LocusMapCard({ result }) {
           />
         ))}
       </div>
-      <div style={{ display: "grid", gap: 8 }}>
+      <div className="responsive-grid" style={{ display: "grid", gap: 8 }}>
         {items.map((item, index) => (
           <div key={`${item.label}-legend-${index}`} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, color: "#344054" }}>
             <span style={{ display: "inline-flex", width: 10, height: 10, borderRadius: 999, background: item.color, marginTop: 3, flex: "0 0 auto" }} />
@@ -3502,10 +3503,10 @@ export default function App() {
   const reviewRowCount = Math.max(0, batchRows.length - readyRowCount);
 
   return (
-    <div style={{ minHeight: "100vh", background: `radial-gradient(circle at top left, rgba(15,118,110,0.08), transparent 24%), radial-gradient(circle at top right, rgba(180,83,9,0.08), transparent 22%), linear-gradient(180deg, #FDFEFE 0%, ${COLORS.bg} 38%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
-      <div style={{ width: "min(1560px, calc(100vw - 32px))", margin: "0 auto", padding: "20px 16px 40px" }}>
-        <div style={{ ...CARD_STYLE, marginBottom: 14, background: "linear-gradient(180deg, #F8FBFD, #EEF4F8)", border: "1px solid #D7DEE7", padding: 20, boxShadow: "0 24px 48px rgba(2, 8, 23, 0.12)" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, alignItems: "stretch" }}>
+    <div className="designer-shell" style={{ minHeight: "100vh", background: `radial-gradient(circle at top left, rgba(15,118,110,0.08), transparent 24%), radial-gradient(circle at top right, rgba(180,83,9,0.08), transparent 22%), linear-gradient(180deg, #FDFEFE 0%, ${COLORS.bg} 38%)`, color: COLORS.text, fontFamily: '"Segoe UI", "Helvetica Neue", sans-serif' }}>
+      <div className="designer-container" style={{ width: "min(1560px, calc(100vw - 32px))", margin: "0 auto", padding: "20px 16px 40px" }}>
+        <div className="designer-card" style={{ ...CARD_STYLE, marginBottom: 14, background: "linear-gradient(180deg, #F8FBFD, #EEF4F8)", border: "1px solid #D7DEE7", padding: 20, boxShadow: "0 24px 48px rgba(2, 8, 23, 0.12)" }}>
+          <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18, alignItems: "stretch" }}>
             <div>
               <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
                 <div style={{ width: 38, height: 38, borderRadius: 12, background: "linear-gradient(135deg, #2dd4bf, #f59e0b)", color: "#07111c", display: "grid", placeItems: "center", fontWeight: 900, boxShadow: "0 10px 22px rgba(0,0,0,0.18)" }}>AC</div>
@@ -3524,7 +3525,7 @@ export default function App() {
               <div style={{ color: "#475467", fontSize: 14, lineHeight: 1.6, maxWidth: 920, marginBottom: 14 }}>
                 {APP_CONFIG.heroDescription}
               </div>
-              <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+              <div className="responsive-grid" style={{ display: "grid", gap: 8, marginBottom: 16 }}>
                 {[
                   "1. Start with one request or open a demo.",
                   "2. Add a gene and optional reference sequence.",
@@ -3555,7 +3556,7 @@ export default function App() {
                 </ActionButton>
               </div>
             </div>
-            <div style={{ display: "grid", gap: 10, alignContent: "start" }}>
+            <div className="responsive-grid" style={{ display: "grid", gap: 10, alignContent: "start" }}>
               <div style={{ padding: 16, borderRadius: 16, background: "#ffffff", border: "1px solid #D7DEE7" }}>
                 <div style={{ color: "#111827", fontSize: 14, fontWeight: 800, lineHeight: 1.4, marginBottom: 6 }}>
                   What this tool is best at
@@ -3563,7 +3564,7 @@ export default function App() {
                 <div style={{ color: "#475467", fontSize: 13, lineHeight: 1.6, marginBottom: 12 }}>
                   {APP_CONFIG.valueBlurb}
                 </div>
-                <div style={{ display: "grid", gap: 8 }}>
+                <div className="responsive-grid" style={{ display: "grid", gap: 8 }}>
                   {[
                     "Use one row per edit request.",
                     "Upload a reference only when you want sequence-backed design and primers.",
@@ -3585,7 +3586,7 @@ export default function App() {
                   </a>
                 </div>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
                 <QuickMetric label="Design rows" value={batchRows.length} tone="accent" />
                 <QuickMetric label="Ready now" value={readyRowCount} tone="success" />
                 <QuickMetric label="GenBank files" value={batchFolderEntries.length} tone="warm" />
@@ -3594,7 +3595,7 @@ export default function App() {
           </div>
         </div>
         {showWorkspaceIntegration && (
-        <div style={{ ...CARD_STYLE, marginTop: 8, marginBottom: 14, padding: 12, background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)", border: `1px solid ${COLORS.borderSoft}` }}>
+        <div className="designer-card" style={{ ...CARD_STYLE, marginTop: 8, marginBottom: 14, padding: 12, background: "linear-gradient(180deg, #FFFFFF, #F8FAFC)", border: `1px solid ${COLORS.borderSoft}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Advanced: workspace integration</div>
@@ -3644,7 +3645,7 @@ export default function App() {
                         Clear selection
                       </button>
                     </div>
-                    <div style={{ display: "grid", gap: 8 }}>
+                    <div className="responsive-grid" style={{ display: "grid", gap: 8 }}>
                       {workspaceFolders.map((entry) => (
                         <label key={entry.name} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer" }}>
                           <input
@@ -3700,7 +3701,7 @@ export default function App() {
         <div hidden={activeTab !== "enzyme-guides"}><EnzymeGuideTool /></div>
 
         {activeTab === "workspace" && (
-        <div id="design-requests" style={{ ...CARD_STYLE, marginTop: 18 }}>
+        <div id="design-requests" className="designer-card" style={{ ...CARD_STYLE, marginTop: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
             <div>
               <SectionTitle>1. Design Requests</SectionTitle>
@@ -3726,7 +3727,7 @@ export default function App() {
               <summary style={{ cursor: "pointer", fontWeight: 700, color: COLORS.accent }}>
                 Batch text &amp; GenBank folder import (optional)
               </summary>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 12, padding: 12, borderRadius: 12, border: `1px solid ${COLORS.borderSoft}`, background: "#FFFFFF" }}>
+              <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginTop: 12, padding: 12, borderRadius: 12, border: `1px solid ${COLORS.borderSoft}`, background: "#FFFFFF" }}>
                 <div>
                   <div style={{ color: COLORS.text, fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Batch input</div>
                   <div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.5, marginBottom: 8 }}>
@@ -3765,7 +3766,7 @@ export default function App() {
             </details>
           </div>
 
-          <div style={{ display: "grid", gap: 12 }}>
+          <div className="responsive-grid" style={{ display: "grid", gap: 12 }}>
             {batchRows.map((row, index) => {
               const slot = index + 1;
               const batchStatus = batchResults.find((entry) => entry.rowId === row.id);
@@ -3927,7 +3928,7 @@ export default function App() {
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8 }}><input type="checkbox" checked={!!row.coDelivery} onChange={(event) => updateBatchRow(index, "coDelivery", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Co-transfect both guides and both ssODNs</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>Builds every donor to block every offered guide, and prefers guides whose targets can both be silently destroyed. On by default (two guides, each ssODN blocking both). Turn it off only when you deliver one matched guide/ssODN pair at a time.</div></span></label>
                         <label style={{ display: "flex", alignItems: "flex-start", gap: 8, opacity: row.coDelivery ? 0.5 : 1 }}><input type="checkbox" disabled={!!row.coDelivery} checked={!!row.acceptWeakProtection} onChange={(event) => updateBatchRow(index, "acceptWeakProtection", event.target.checked)} style={{ marginTop: 3 }} /><span><div style={{ color: COLORS.text, fontSize: 13, fontWeight: 600 }}>Accept weak guide protection and order anyway</div><div style={{ color: COLORS.muted, fontSize: 12, lineHeight: 1.45 }}>{row.coDelivery ? "Not available with co-delivery: there a weakly blocked guide re-cuts the allele the other donor just repaired. Order the pairs separately instead." : "Records a reviewed decision to order a pair whose guide is only weakly blocked. The advice stays in the report and the design never reads as ready. It never overrides a donor that fails its protein assertion."}</div></span></label>
                         {!!row.acceptWeakProtection && !row.coDelivery && (
-                          <div style={{ display: "grid", gap: 8, padding: "10px 12px", borderRadius: 10, background: "#FFFAEB", border: "1px solid #F7900955" }}>
+                          <div className="responsive-grid" style={{ display: "grid", gap: 8, padding: "10px 12px", borderRadius: 10, background: "#FFFAEB", border: "1px solid #F7900955" }}>
                             <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 4 }}>Why is this acceptable? (required)</div><input value={row.weakProtectionReason || ""} onChange={(event) => updateBatchRow(index, "weakProtectionReason", event.target.value)} style={FIELD_STYLE} placeholder="RNP, short exposure; screening 48 clones with full-amplicon sequencing" /></label>
                             <label style={{ display: "block" }}><div style={{ color: COLORS.muted, fontSize: 12, marginBottom: 4 }}>Accepted by (optional)</div><input value={row.acceptedBy || ""} onChange={(event) => updateBatchRow(index, "acceptedBy", event.target.value)} style={FIELD_STYLE} placeholder="Name" /></label>
                             {!String(row.weakProtectionReason || "").trim() && (
@@ -4060,7 +4061,7 @@ export default function App() {
                               <div style={{ padding: 10, borderRadius: 10, background: "#FEE4E2", color: "#B42318", fontSize: 13 }}>{fpbaseLookup.error}</div>
                             )}
                             {fpbaseLookup.status === "success" && (
-                              <div style={{ display: "grid", gap: 10 }}>
+                              <div className="responsive-grid" style={{ display: "grid", gap: 10 }}>
                                 <div style={{ color: "#667085", fontSize: 13 }}>
                                   {fpbaseLookup.data?.count || fpbaseLookup.data?.reporters?.length || 0} FPbase reporters found.
                                   {fpbaseLookup.data?.sourceUrl ? <> Source: <a href={fpbaseLookup.data.sourceUrl} target="_blank" rel="noreferrer" style={{ color: "#2E75B6", textDecoration: "none" }}>{fpbaseLookup.data.sourceUrl}</a></> : null}
@@ -4197,7 +4198,7 @@ export default function App() {
           <GenomicSnpReport result={genomicReport} onEdit={() => setActiveTab("genomic-snp")} onOtherReports={() => setShowGenomicReport(false)} />
         )}
         {activeTab === "report" && !showGenomicReport && (
-        <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(240,228,204,0.12), rgba(16,34,52,0.90))", border: `1px solid ${COLORS.borderSoft}` }}>
+        <div className="designer-card" style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(240,228,204,0.12), rgba(16,34,52,0.90))", border: `1px solid ${COLORS.borderSoft}` }}>
           <SectionTitle>2. Final Report</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Review the selected design, then either save it into the linked project folder or download the HTML/browser export fallback.
@@ -4862,7 +4863,7 @@ export default function App() {
         )}
 
         {activeTab === "primers" && (
-        <div style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(14,42,46,0.96), rgba(12,23,38,0.96))" }}>
+        <div className="designer-card" style={{ ...CARD_STYLE, marginTop: 18, background: "linear-gradient(180deg, rgba(14,42,46,0.96), rgba(12,23,38,0.96))" }}>
           <SectionTitle>3. Primer Tool</SectionTitle>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
             <div>
@@ -4883,7 +4884,7 @@ export default function App() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
+          <div className="responsive-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 14 }}>
             <div style={{ padding: 14, borderRadius: 14, border: `1px solid ${COLORS.borderSoft}`, background: "rgba(8,18,32,0.30)" }}>
               <div style={{ color: COLORS.text, fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Reference source</div>
               <Grid>
@@ -5054,7 +5055,7 @@ export default function App() {
         )}
 
         {activeTab === "exports" && (
-        <div style={{ ...CARD_STYLE, marginTop: 18 }}>
+        <div className="designer-card" style={{ ...CARD_STYLE, marginTop: 18 }}>
           <SectionTitle>4. Order Exports</SectionTitle>
           <div style={{ color: COLORS.muted, fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
             Successful designs are flattened into procurement-draft spreadsheets for gRNAs, primers, and donors. A successful computation is not the same as an order-ready design; resolve the review status shown below before uploading a template to a vendor.
@@ -5075,7 +5076,7 @@ export default function App() {
                 These downloads match the headers in your current upload templates:
                 `template-paste-entry-crispr.xlsx`, `template-paste-entry.xlsx`, and `template-paste-entry-hdr.xlsx`. Designs with blocked procurement status are excluded. The vendor-format sheets cannot carry the full safety review, so retain the combined preview or saved `order_preview.csv` with them.
               </div>
-              <div style={{ display: "grid", gap: 10, marginBottom: 14 }}>
+              <div className="responsive-grid" style={{ display: "grid", gap: 10, marginBottom: 14 }}>
                 <Grid>
                   <label>
                     <div style={{ color: "#667085", fontSize: 13, marginBottom: 6 }}>CRISPR scale</div>
