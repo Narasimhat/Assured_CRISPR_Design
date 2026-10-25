@@ -100,3 +100,20 @@ body {
   padding: 16px;
   overflow: auto;
 }
+
+/* Keep forms readable at phone widths; wide scientific data scrolls locally. */
+.designer-shell, .designer-shell * { box-sizing: border-box; }
+.designer-shell .responsive-grid > * { min-width: 0; }
+@media (max-width: 700px) {
+  .designer-shell .designer-container { width: 100% !important; padding: 12px 10px 28px !important; }
+  .designer-shell .designer-card { padding: 14px !important; border-radius: 12px !important; }
+  .designer-shell .responsive-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .designer-shell .quick-metric { min-width: 0 !important; }
+  .designer-shell :is(p, label, summary, h1, h2, h3) { overflow-wrap: anywhere; }
+  .designer-shell :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { min-width: 0; max-width: 100%; font-size: 16px !important; }
+  .designer-shell :is(button, select, input:not([type=checkbox]):not([type=radio])) { min-height: 44px; }
+  .designer-shell button { max-width: 100%; white-space: normal; }
+  .designer-shell :is(pre, table) { display: block; max-width: 100%; overflow-x: auto; }
+  .designer-shell svg { max-width: 100%; }
+  .designer-shell .errorFallback__actions { flex-wrap: wrap; }
+}
