@@ -30,7 +30,8 @@ validation rules. SpCas9 keeps its calibrated CFD behavior.
   contains only the homology cassette, not a ready-to-use vector or backbone.
 
 The shared nearest-window policy chooses the guides. For SNPs, the donor is always the same complete 127-base reference window as
-Cas9 (36/91 bases around the cut according to guide strand), including the same
+Cas9 in total length, with 91 nt toward the PAM and 36 nt on the opposite side
+of the nominal target-strand cut, including the same
 end-of-reference adjustment. Saved tag format/arm/strand settings cannot override
 this policy. Internal tags retain the default 127-base reference window plus
 the inserted tag. Each selected guide has an explicitly matched
@@ -104,3 +105,12 @@ The module-level donor CSV/FASTA/GenBank helpers remain available for programmat
 use. The normal website uses the shared report/order/QC interfaces. Synthesis
 flags are heuristics, not vendor approval. Model and licensed-repeat validation
 requirements in ENZYME_GUIDES.md still apply.
+
+### PAM-oriented asymmetry (donor policy 2)
+
+The 91 nt flank faces the PAM and the opposite flank is 36 nt. For a plus-strand
+Cas12a/Mad7 guide (5′ PAM), the reference window is `[cut - 91, cut + 36)`; for
+a minus-strand guide it is `[cut - 36, cut + 91)`. Cas9's 3′ PAM uses the reverse
+layout and is unchanged. The total stays 127 nt. Reference-end adjustments are
+flagged when full nominal asymmetry cannot be achieved. This is a design heuristic,
+not evidence of optimal Cas12a/Mad7 HDR efficiency or donor-strand preference.
