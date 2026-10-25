@@ -3,8 +3,9 @@
 **Enzyme selection:** fetch a gene or upload GenBank in Workspace, select SpCas9,
 AsCas12a, LbCas12a or Mad7, and choose the modification. Cas12a/Mad7 now construct
 two-guide knockout and HDR designs through the same reports, primers, ordering
-and QC exports as Cas9, using enzyme-specific geometry and canonical-PAM
-blocking checks. See [ENZYME_DONORS.md](./ENZYME_DONORS.md) for review requirements.
+and QC exports as Cas9. SNP donors use the same 127-nt asymmetric window and
+opposite-guide ordering, with enzyme-aware synonymous PAM blocking and an unscored
+synonymous seed fallback. See [ENZYME_DONORS.md](./ENZYME_DONORS.md) for review requirements.
 SpCas9 retains its existing workflow. An advanced Sequence
 Scan tab also provides configurable whole-sequence discovery.
 See [ENZYME_GUIDES.md](./ENZYME_GUIDES.md) for usage and validation limits.
