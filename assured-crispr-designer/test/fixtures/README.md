@@ -86,3 +86,13 @@ unreferenced by any case will fail the suite.
 
 - **What it is:** the output of `tools/ko-rank/lindel_outcomes.py` (Lindel, Chen et al. 2019, MIT licence) for three DIPK2A guides on `dipk2a-region.gb`: the two guides of a knockout pair whose clones showed protein, and one guide the ranking puts first in exon 2. Each guide carries its 65-nt Lindel input and every predicted outcome class with its frequency.
 - **Why it is here:** `ko-rank.test.js` classifies these outcomes with `koOutcomes.js` without needing Python or the Lindel weights, so the pipeline's second half and the class-to-genome mapping on both strands are checked in CI.
+
+### `lindel-parity.json`
+
+- **What it is:** Lindel's own output (`Lindel.Predictor.gen_prediction`, github.com/shendurelab/Lindel commit `fdcad580ba76bcfb7a98f58c3769b76f31693d63`, MIT licence) for 10 65-nt windows: the three DIPK2A guides of `ko-rank-dipk2a-edits.json` and seven others chosen from a larger set of random windows to cover plain sequence, microhomology repeats, a homopolymer and sequence at the window ends. All 557 class frequencies and the frame-shift ratio, to 12 significant digits. The windows are random or from the public DIPK2A reference; nothing here is lab data.
+- **Why it is here:** `lindel.test.js` requires the JavaScript port in `src/lindel/` to match these to within 1e-10 (it matches to 1e-16 on 5,200 windows when run against Python directly).
+
+### `ko-rank-dipk2a-ranking.csv`
+
+- **What it is:** the ranking of all 145 NGG guides that cut non-terminal coding exons of `dipk2a-region.gb`, written by the Python pipeline `tools/ko-rank/run.sh` (Lindel from Python, outcomes classified by `koOutcomes.js`).
+- **Why it is here:** `lindel.test.js` checks that the JavaScript pipeline reproduces it exactly, column for column and in the same order.

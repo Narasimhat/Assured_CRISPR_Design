@@ -91,6 +91,10 @@ exon longer than 407 nt. A pair is offered only if each guide qualifies on its o
   below robust.
 - It is a prediction from sequence: roughly a third of premature stops that the 55-nt rule calls NMD-triggering still escape. Confirm loss of protein.
 - `koAware: false` in the design options restores the geometry-only choice.
+- **Repair-outcome ranking (SpCas9).** The browser app also loads a JavaScript port of Lindel (`src/lindel/`, MIT, 6.5 MB asset fetched on first use) and chooses, among pairs of the
+  same tier, the pair whose weaker guide is predicted to give the larger share of loss-of-function alleles. A guide with T or A at spacer position 17 (the base just 5' of the cut)
+  tends to make +1 insertions, and microhomology deletions are part of the same model. The report shows the predicted shares; a guide predicted under 60% raises a review warning.
+  On-target cutting efficiency and off-targets are not part of the estimate. Details and checks: `assured-crispr-designer/tools/ko-rank/README.md`.
 
 ## Point-mutation designs: two guides and intronic blockers
 

@@ -3246,6 +3246,12 @@ export default function App() {
       setBatchError("Add at least one usable reference sequence, or provide at least one knockout row with a gene name for gene-list KO mode.");
       return;
     }
+    // Outcome-based knockout ranking (Lindel, SpCas9 only). The 6.5 MB weights are a separate asset, fetched once and only when a knockout row with a sequence is designed.
+    let koLindel = null; let koOutcomesUnavailable = "";
+    if (batchRows.some((row) => row.projectType === "ko" && (!row.enzyme || row.enzyme === "spcas9") && hasSequenceBackedReference(row))) {
+      try { koLindel = await (await import("./lindel/loadLindel.js")).loadLindel(); }
+      catch (error) { koOutcomesUnavailable = `the Lindel weights could not be loaded (${error?.message || error}).`; }
+    }
     const nextResults = await Promise.all(batchRows.map(async (row, index) => {
       const slot = index + 1;
       if (!hasSequenceBackedReference(row) && !(row.projectType === "ko" && row.gene && !parseCustomGuideInput(row.customGuides).length)) return { slot, rowId: row.id, row, status: "empty" };
@@ -3318,6 +3324,8 @@ export default function App() {
           donorStrand: row.enzymeDonorStrand || "sense",
           pamBlocking: row.enzymePamBlocking !== false,
           expectedGene: row.gene,
+          koLindel: row.projectType === "ko" ? koLindel : undefined,
+          koOutcomesUnavailable: row.projectType === "ko" && !koLindel && (!row.enzyme || row.enzyme === "spcas9") ? koOutcomesUnavailable : undefined,
           customGuides: parseCustomGuideInput(row.customGuides),
           // Terminal-tag donors: format (auto picks by insert size), per-side arms and trimming of
           // an arm that runs into a hard-to-synthesize stretch. See donorFormat.js.

@@ -31,6 +31,12 @@
   (Lindel, 1,889 DIPK2A guides: +1 insertion T 26%, A 20%, C 12%, G 5%). At the DIPK2A g2 site it predicts a frameshift fraction of 84.4% against 84.2% observed in 23
   clones, and 36% loss-of-function alleles against 42% observed. See `tools/ko-rank/README.md` for what was checked and what is not modelled (on-target efficiency
   above all). New tests: `test/ko-rank.test.js`.
+- Lindel now runs in the app. `src/lindel/` ports it to JavaScript (weights exported from Lindel's pickles into one 6.5 MB asset, `src/lindel/lindel-weights.bin`, loaded only when a SpCas9
+  knockout with a sequence is designed; MIT notice in `src/lindel/LICENSE-Lindel.txt`). Against Python Lindel on 5,200 windows the largest difference in any class frequency is 1.7e-16.
+  `designKO` takes the loaded model as `koLindel` (the app passes it), ranks pairs of equal tier by the predicted share of loss-of-function alleles of the weaker guide (5-point bins), adds
+  `koAssessment.outcomes` and `ko.outcomes` on each guide, a report block, and a review warning when a guide is predicted under 60%. Custom guides are scored too: the pair used for the
+  DIPK2A clones scores 73% and 36%. If the weights cannot be loaded the design falls back to the tier-only choice and says so. Other enzymes are unchanged. `tools/ko-rank/rank.mjs` ranks a record
+  without Python. New tests: `test/lindel.test.js`, `test/ko-outcome-ranking.test.js`.
 
 ### QC design file for the Assured QC app
 
