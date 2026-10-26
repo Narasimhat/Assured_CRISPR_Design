@@ -258,3 +258,5 @@ on the opposite side of the nominal target-strand cut. This mirrors the referenc
 layout for 5′-PAM Cas12a/Mad7 while retaining Cas9's 3′-PAM behavior. The policy is
 a computational design heuristic; enzyme-specific HDR and strand preferences
 still require experimental validation.
+
+Functional knockout selection now ranks individual guides before coordinated pairs with strict 40–60% spacer GC. See [selection policy and limitations](assured-crispr-designer/docs/functional-knockout-selection.md).
