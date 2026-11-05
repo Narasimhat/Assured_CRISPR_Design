@@ -1,0 +1,13 @@
+const assert = require('node:assert/strict');
+const { buildTargetReport, TARGETS } = require('./target-explorer.cjs');
+const lpa = buildTargetReport({ gene: 'LPA', genomeBuild: 'GRCh38' });
+assert.equal(lpa.role, 'primary');
+assert.equal(lpa.annotations.length, 0);
+assert.ok(lpa.cautions.some(x => x.includes('KIV-2')));
+const pcsk9 = buildTargetReport({ gene: 'PCSK9', genomeBuild: 'GRCh38', annotations: [{ chromosome: 'chr1', start: 100, end: 200, genomeBuild: 'GRCh38', source: 'fixture' }] });
+assert.equal(pcsk9.role, 'positive_control');
+assert.equal(pcsk9.annotations[0].source, 'fixture');
+assert.throws(() => buildTargetReport({ gene: 'LPA', genomeBuild: 'hg38' }), /reference build/);
+assert.throws(() => buildTargetReport({ gene: 'LPA', genomeBuild: 'GRCh38', annotations: [{ chromosome: 'chr6', start: 20, end: 10, genomeBuild: 'GRCh38' }] }), /Invalid annotation/);
+assert.deepEqual(Object.keys(TARGETS).sort(), ['LPA', 'PCSK9']);
+console.log('Epigenome target explorer tests passed');
